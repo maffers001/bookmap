@@ -1,0 +1,29 @@
+name: EXP-0027
+hypothesis: H21
+title: Flush into resting liquidity + hold (sweep reverse)
+description: >
+  Fast flush (≥min_flush_ticks in flush_window) tags a large resting level
+  that holds (limited penetration) then price reclaims through it → continuation
+  bounce (BID hold→long, ASK hold→short). Optional LVN-in-path stratum.
+  Compare dual ES+NQ vs NQ-only vs null vs EXP-0008 lag<250. One dig on
+  min_flush_ticks (40/80/120).
+
+detector: flush_into_hold
+min_flush_ticks: 80
+flush_window_ms: 2000
+nq_absolute_size: 40
+es_absolute_size: 80
+z_score: 99.0
+tick_radius: 12
+min_execute_into: 20
+min_consume_ratio: 0.3
+max_penetration_ticks: 6
+hold_ms: 500
+reclaim_ticks: 2
+cooldown_ms: 5000
+sync_ms: 2000
+require_lvn_in_path: false
+tick_size: 1.0
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

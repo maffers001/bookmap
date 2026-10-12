@@ -1,0 +1,15 @@
+name: EXP-0009
+hypothesis: H6
+title: CD with-the-flow gate (22-tick range CD, SMA100, pullback to MA)
+description: >
+  Filter existing orderflow events to those aligned with CD MA trend, and
+  optionally timed at CD pullback to the MA (discretionary rule from
+  projectdetails). Implemented via research.run_cd_filter on prior event sets.
+
+detector: cd_filter
+range_ticks: 22
+# trade.price is integer ticks in extracts → tick_size 1.0 (not 0.25 points)
+price_tick_unit: 1.0
+sma_len: 100
+slope_lookback: 5
+pullback_frac_of_bb: 0.35

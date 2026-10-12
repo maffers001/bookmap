@@ -1,0 +1,27 @@
+name: EXP-0033
+hypothesis: H27
+title: Simultaneous ES+NQ aggressor flow (same clock bar)
+description: >
+  Both ES and NQ show same-side aggressor imbalance in the same wall-clock tape
+  bar (zero lag). Distinct from EXP-0008 ±sync bursts and EXP-0029 price co-move.
+  Also test dual range-imbalance closes within tight sync. Vs null / EXP-0008.
+
+detector: simultaneous_flow
+bar_ms_list: [100, 250, 500]
+primary_bar_ms: 100
+min_imbalance: 0.55
+min_vol_nq: 25.0
+min_vol_es: 15.0
+min_trades_nq: 6
+min_trades_es: 4
+min_progress_ticks: 0.0
+cooldown_bars: 3
+# dual range confirm strata
+range_ticks_list: [10, 22]
+range_sync_ms: 250
+range_mode: imb_opp_low
+range_min_imbalance: 0.30
+tick_size: 1.0
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

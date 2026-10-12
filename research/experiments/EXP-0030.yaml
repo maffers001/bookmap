@@ -1,0 +1,30 @@
+name: EXP-0030
+hypothesis: H24
+title: Rotation-length filter on momentum vs reversal
+description: >
+  Causal avg rotation = mean of last N swing-to-swing lengths. Current leg
+  extension / avg. Momentum (EXP-0008 lag<250): keep only when fresh
+  (ratio < mult) and with the open leg. Reversal (absorption): keep only when
+  extended (ratio >= mult) and fading the open leg. Dig: avg_n / mult / swing lb.
+
+detector: rotation_filter
+bar_ms: 100
+min_trades: 6
+min_vol: 25
+min_imbalance: 0.55
+min_progress_ticks: 1.0
+sync_ms: 1500
+max_es_lag_ms: 250
+swing_lookback_ms: 180000
+swing_confirm_ms: 20000
+rot_avg_n: 8
+rot_extend_mult: 1.0
+rot_min_rotations: 3
+absolute_size: 50
+z_score: 99.0
+tick_radius: 8
+min_consume_ratio: 1.0
+tick_size: 1.0
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

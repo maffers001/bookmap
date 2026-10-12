@@ -1,0 +1,21 @@
+name: EXP-0024
+hypothesis: H18
+title: ES-leads-NQ filter on lag<250 momentum
+description: >
+  Split EXP-0008 lag<250 bursts by signed ES lag: ES burst before NQ (ES leads)
+  vs NQ first vs simultaneous. Hypothesis: ES-leads continues better. Success:
+  material lift vs all lag<250 on hit+10 or path, n>=~40, stable on 4/5 days.
+
+detector: es_leads_momentum
+bar_ms: 100
+min_trades: 6
+min_vol: 25
+min_imbalance: 0.55
+min_progress_ticks: 1.0
+sync_ms: 1500
+max_es_lag_ms: 250
+simultaneous_ms: 10
+tick_size: 1.0
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

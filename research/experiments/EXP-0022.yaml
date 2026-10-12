@@ -1,0 +1,28 @@
+name: EXP-0022
+hypothesis: H17
+title: Dual ES+NQ CD trend / BB correlation filter on momentum
+description: >
+  On EXP-0008 lag<250 ES+NQ tape bursts, annotate causal 22-tick CD on both
+  NQ and ES. Primary hypothesized filter: both CD MA trends align with trade
+  side (dual_trend). Also stratify dual wide BB, dual same regime, and
+  dual_trend∩dual_wide. Success: material lift vs unfiltered 0008 on hit+10
+  / path. NQ-only BB already falsified (EXP-0015).
+
+detector: dual_cd_filter_momentum
+bar_ms: 100
+min_trades: 6
+min_vol: 25
+min_imbalance: 0.55
+min_progress_ticks: 1.0
+sync_ms: 1500
+max_es_lag_ms: 250
+range_ticks: 22
+tick_size: 1.0
+sma_len: 100
+slope_lookback: 5
+regime_pct_lookback: 100
+wide_pct: 0.70
+narrow_pct: 0.30
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

@@ -1,0 +1,13 @@
+name: EXP-0002
+hypothesis: H1
+title: Failure-to-progress / effort-result exhaustion vs forward NQ returns
+description: >
+  When exhaustion flag fires (trend-side volume up, progress down), measure
+  NQ forward returns, MFE/MAE, and P(reach +10/+20 pts) in the reversal direction.
+
+detector: effort_exhaustion
+min_effort: 50.0
+role: NQ
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

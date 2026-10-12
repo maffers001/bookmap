@@ -1,0 +1,28 @@
+name: EXP-0008c
+hypothesis: H4
+title: Hybrid momentum — ES+NQ tape + NQ and ES large-level hits
+description: >
+  Strictest hybrid: ES+NQ fast-tape confirm AND large resting levels being
+  traded into on both NQ (abs≥50) and ES (abs≥100) within ±500ms.
+
+detector: es_nq_depth_momentum
+require_es_burst: true
+require_nq_level_hit: true
+require_es_level_hit: true
+nq_absolute_size: 50
+es_absolute_size: 100
+z_score: 99.0
+tick_radius: 8
+level_window_ms: 500
+min_level_executed: 10
+bar_ms: 100
+min_trades: 6
+min_vol: 25
+min_imbalance: 0.55
+min_progress_ticks: 1.0
+tick_size: 1.0
+sync_ms: 1500
+cooldown_bars: 3
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

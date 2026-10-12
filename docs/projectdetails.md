@@ -1,0 +1,14 @@
+This file gives general info on the project:
+- This is a project to develop research indicators and trading signals for Bookmap.
+- I am a futures trader and I trade NQ using Bookmap for orderflow with Rithmic data.
+- I have many days recorded NQ and ES futures data in C:\Bookmap\Feeds
+- My recorded data starts at different times of day but nearly always includes the important period 1430-1700 (UK time) which is regular trading hours in Chicago including the open
+- I execute my trades on NQ but keeping the correlation of behaviour with ES in mind.
+- I am a scalper, looking for 10-20 pts of the NQ movement.
+- My trades are based on correlated orderflow, for example:
+    - I am looking for NQ lifting large resting orders in the order book *as well* as the ES also trading into large orders without hesitation.
+    - I watch the effect of the appearance of large orders in the order book - do they repell or attract price and do they trade? E.g. for long trades, I am looking for large sell orders to attract price and price to trade into them and for large buy orders to repel price and to not really trade much at all if at all (in both ES and NQ at the same time - e.g. I want both markets to be exhibiting similar behaviour). I think large orders are placed by big players to determine whether the market is in a micro bullish or bearish phase ("micro" meaning, in that instant).
+    - I pay attention to how long price spends near a large order without trading it - the longer time goes by without trading it, the more likely that order will support price as it will often then move away from it in order to see liquidity in the other direction.
+    - I have reversal trades where I look for both the NQ and ES to reach an LVN where there is a large order placed just beyond it; e.g. for a short reversal trade, volume can trade as price moves up into the LVN zone but I like to see the large orders just beyond the zone not really trade and then, to confirm the reversal, I want to see large resting orders that might appear just below price start to trade (rather than support price as they had done as the price was moving up) when price starts going down.
+    - I have momentum trades when there are large orders near a swing high or low and price aggressively without hesitation moves into those orders with the time and sales showing lots of fast activity. I use the above orderflow signals to confirm my entries.
+    - I have one indicator - this is Cumulative Delta (CD) from a 22 Tick Range chart with a 100 Simple MA and Bollinger Bands around the CD. I use it to "trade with the flow", trying only to take long trades when the MA is moving up or shorts when it is moving down, timing my entries when the CD moves back to the MA (e.g. CD MA trending down, then CD moves up to the MA line, this is when I would look for a short)

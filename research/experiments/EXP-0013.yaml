@@ -1,0 +1,19 @@
+name: EXP-0013
+hypothesis: H9
+title: Dual ES+NQ dwell / withdraw liquidity events
+description: >
+  Large near-BBO size that dwells without trading then leaves (dwell_repel)
+  → fade away from the level. Size that withdraws without trade → continuation.
+  Compare NQ-only vs ES+NQ same-type same-side sync confirm.
+
+detector: dual_dwell_withdraw
+nq_absolute_size: 50
+es_absolute_size: 100
+z_score: 99.0
+tick_radius: 8
+dwell_alert_sec: 3.0
+min_dwell_sec: 3.0
+sync_ms: 2000
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

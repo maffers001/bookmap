@@ -1,0 +1,29 @@
+name: EXP-0031
+hypothesis: H25
+title: Trapped peak — above-avg vol @ 50-price LVN band + quiet 20pt pullback ≤30s
+description: >
+  (1) Local extreme with 250ms cluster vol ≥2× rolling avg; (2) 50-price band
+  around peak is moderate LVN vs shoulder bands; (3) within 5–30s pullback ≥20pts
+  with no cluster ≥45% of peak vol and no reclaim → fade. Vs null / EXP-0008.
+
+detector: trapped_peak
+peak_window_ms: 250
+vol_avg_lookback_ms: 60000
+min_vol_mult: 2.0
+local_extreme_ms: 20000
+max_ticks_from_extreme: 1
+lvn_band_ticks: 50
+lvn_lookback_ms: 1800000
+lvn_frac_of_shoulder: 0.55
+profile_refresh_ms: 15000
+min_profile_volume: 200
+min_pullback_pts: 20
+pullback_min_ms: 5000
+pullback_max_ms: 30000
+reclaim_ticks: 1
+max_pullback_vs_peak: 0.45
+cooldown_ms: 60000
+tick_size: 1.0
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

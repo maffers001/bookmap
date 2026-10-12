@@ -1,0 +1,29 @@
+name: EXP-0023
+hypothesis: H7b
+title: Tightened dual LVN — HVN sandwich + min volume + no profile edge
+description: >
+  Retest H7 with a stricter causal LVN: (1) min traded volume in lookback,
+  (2) HVN peak both above and below the valley (sandwich), (3) reject zones
+  within edge_margin_ticks of profile high/low. Dual ES+NQ same-approach
+  touch fade vs NQ-only, null, and EXP-0008 lag<250. One dig varies
+  lookback (20/30/45m) and lvn_frac (0.25/0.35/0.40).
+
+detector: dual_lvn_touch
+lookback_ms: 1800000
+refresh_ms: 30000
+lvn_frac_of_peak: 0.35
+min_lvn_width_ticks: 2
+max_lvn_width_ticks: 12
+min_sep_from_poc_ticks: 4
+min_profile_volume: 500
+require_hvn_sandwich: true
+hvn_frac_of_poc: 0.50
+hvn_search_ticks: 20
+edge_margin_ticks: 6
+sync_ms: 2000
+touch_cooldown_ms: 5000
+compare_momentum: true
+role_primary: NQ
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

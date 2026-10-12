@@ -1,0 +1,6 @@
+pyyaml>=6.0
+pyarrow>=14.0
+numpy>=1.26
+duckdb>=0.10
+# pandas intentionally omitted: some Windows Application Control policies block pandas DLLs.
+# Research code uses PyArrow + NumPy (+ DuckDB where helpful).

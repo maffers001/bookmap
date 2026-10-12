@@ -1,0 +1,209 @@
+# Bookmap Orderflow Indicators
+
+Custom Bookmap Layer 1 add-ons for NQ scalping with ES confirmation:
+
+| Add-on name in Bookmap | Purpose |
+|---|---|
+| **Orderflow Hello** | Load-test only — confirm the JAR installs |
+| **Session Extractor** | Replay → NDJSON trades/full depth/MBO for research |
+| **Aggressive Flow** | Buy/sell volume & orders per window, avg size, delta |
+| **Effort vs Result** | Aggression vs price progress (absorption / exhaustion) |
+| **Liquidity Reaction** | Large-order attract / repel / absorb / dwell / withdraw |
+| **ES/NQ Flow Confirm** | Normalized ES vs NQ flow agreement (attach on NQ; keep ES open) |
+| **Momentum AutoTrade (ES+NQ)** | EXP-0008 tape momentum signals (+ optional CD pullback); optional bracket orders |
+| **Pitch and Catch** | High-vol peak/trough (“pitch”) then low-vol move away (“catch”); chart markers |
+| **HV Extreme Move** | Simple: HV peak/trough → mark when price is N ticks away |
+
+## Prerequisites
+
+- Bookmap installed (default `C:\Program Files\Bookmap`)
+- JDK 17+ on `PATH` (JDK 21 works; Bookmap itself ships a JRE)
+- Gradle 8+ **or** use the included Gradle wrapper (`gradlew`)
+
+Optional: set `BOOKMAP_HOME` if Bookmap is not in the default path.
+
+## Build
+
+```powershell
+cd c:\Work\Mat\bookmap\bookmap-addon
+.\gradlew.bat jar
+```
+
+If the wrapper cannot download Gradle (network/SSL), install Gradle locally or use a previously unpacked distribution, then:
+
+```powershell
+gradle jar
+```
+
+Example with a local Gradle 8.10.2 unpack:
+
+```powershell
+& "$env:TEMP\gradle-8.10.2\bin\gradle.bat" jar
+```
+
+Output JAR:
+
+```text
+bookmap-addon\build\libs\bookmap-orderflow.jar
+```
+
+The build compiles against your installed Bookmap API jars (`%BOOKMAP_HOME%\lib\bm-l1api.jar` and `bm-simplified-api-wrapper.jar`, default `C:\Program Files\Bookmap`) so the add-on matches your Bookmap runtime.
+
+## Install in Bookmap
+
+1. Launch Bookmap (**Replay** recommended for first tests). Use an NQ recording from `C:\Bookmap\Feeds` that covers 14:30–17:00 UK if possible. For **ES/NQ Flow Confirm**, open both NQ and ES.
+2. Open **Settings → Api plugins configuration** (or the Configure API plugins toolbar button).
+3. Click **Add…** and select:
+   `c:\Work\Mat\bookmap\bookmap-addon\build\libs\bookmap-orderflow.jar`
+4. In the popup, pick an add-on (e.g. `Aggressive Flow`). Repeat **Add…** for each add-on you want from the same JAR.
+5. Enable each module with the **checkbox** on the left.
+6. Open the settings panel via the button next to the checkbox to tune windows / thresholds (`@Parameter` fields).
+7. After rebuilding: `.\gradlew.bat jar`, then remove/re-add the JAR (or restart Bookmap) so classes reload.
+
+Logs (including Liquidity Reaction event lines and Hello load messages) appear under **File → Show log file** / `C:\Bookmap\Logs`.
+
+Official references:
+
+- [Bookmap Simplified API tutorial](https://bookmap.com/knowledgebase/docs/API-Tutorial)
+- [BookmapAPI/DemoStrategies](https://github.com/BookmapAPI/DemoStrategies)
+
+## What each panel shows
+
+### Aggressive Flow
+- **AF Buy** / **AF Sell**: volume (or order counts) per window  
+- **AF Delta**: buy − sell  
+- **AF Avg Buy/Sell Size**: average aggressive order size  
+- Parameters: window ms (maps to 100/250/500/1000 ms), EMA on/off, show orders vs volume  
+- **Plot AF Buy / Sell / Delta / Avg Buy Size / Avg Sell Size**: toggle which series appear in the bottom pane (avg sizes off by default)  
+- **AF Sell as positive**: when on, AF Sell plots above zero instead of as a negative mirror of buy  
+
+
+### Effort vs Result
+- **ER Buy/Sell Effort**: aggressive volume ÷ price progress (ticks)  
+- **ER … Accel**: change in effort vs prior window  
+- **ER Exhaustion**: `1` when trend-side volume rises while progress collapses  
+- Parameters: window, lookback, epsilon ticks, trend lookback  
+
+### Liquidity Reaction
+- **LR Absorb Score**: executed-into-level / displayed size (capped)  
+- **LR Dwell Sec**: max dwell near a large level without finishing it  
+- **LR Event Code**: `1` Attract, `2` Repel, `3` Absorb, `4` Withdraw, `5` Dwell support  
+- **LR Bid/Ask Level**: primary-chart markers at tracked large prices  
+- Parameters: large size threshold, z-score, tick radius, dwell alert seconds  
+
+### ES/NQ Flow Confirm
+- **XN NQ/ES Delta Z**: z-scored volume delta per market  
+- **XN Confirm**: `+1` AGREE_BULL, `-1` AGREE_BEAR, `2` DIVERGE, `0` NEUTRAL  
+- **XN Lead**: `+1` ES flipped first, `-1` NQ first (within ~2s)  
+- Requires **MultiInstrument** data: enable on NQ with ES subscribed in the same Bookmap session  
+
+### Momentum AutoTrade (ES+NQ)
+Research lead from **EXP-0008** (tape momentum + ES sync). Optional **CD pullback** gate (EXP-0009b).
+
+| Panel | Meaning |
+|---|---|
+| **MAT Signal** | `+1` long / `-1` short / `0` flat |
+| **MAT Long / Short** | Primary-chart markers at signal price |
+| **MAT ES lag ms** | Lag to matching ES burst (`-1` if none) |
+| **MAT CD trend** | `+1` / `-1` / `0` from 22-tick CD SMA |
+
+**Replay test (recommended first):**
+1. Rebuild JAR, remove/re-add the plugin in Bookmap if already loaded.
+2. Open **Replay**, load a feed with **both NQ and ES**.
+3. Add **Momentum AutoTrade (ES+NQ)** on the **NQ** chart; leave **Enable trading = false**.
+4. Defaults match the study: 100ms bars, min 6 trades, vol≥25, |imb|≥0.55, ES sync 1500ms.
+5. Optional: set **Max ES lag ms = 250** (stronger subset from research) or **Require CD pullback to MA = true**.
+6. Run replay; watch markers + `MAT Signal`. Logs: `MAT SIGNAL LONG/SHORT ...` in Bookmap log.
+7. Only after signals look right: use a **simulation / paper** connection, set **Enable trading = true**, size/TP/SL. Brackets are absolute TP/SL in **price points**.
+
+**Safety:** trading defaults **OFF**. Do not enable on a live account until you have validated on replay/sim.
+
+### Pitch and Catch
+Warns when a **high-volume** rotation peak/trough is followed by a **low-volume** move of **Catch pts** (default 20) without reclaiming the extreme.
+
+| Panel | Meaning |
+|---|---|
+| **PC Pitch Long / Short** | Pitch price **while armed** (setup in play) |
+| **PC Target Long / Short** | Catch level (pitch ± Catch pts) while armed |
+| **PC Fire Long / Short** | Marker when the catch **completes** |
+| **PC Armed** | `+1` / `−1` / `0` while a setup is in play |
+| **PC Signal** | Brief `+1` / `−1` when catch fires |
+| **PC Peak ratio** | Pitch-band volume ÷ (avg vol/tick × band); ≥ **High vol mult** to arm |
+| **PC Path ratio** | Catch-leg volume ÷ (avg × catch pts); ≤ **Low vol frac** to fire |
+
+**Volume definition:** rolling profile over **Profile lookback min**.  
+`avg vol/tick = total volume / (profile high − low + 1)`.  
+Peak uses volume in **Peak band pts** around the extreme; catch uses the **Catch pts** price span away from it.
+
+**Suggested start (NQ):** Catch pts `20`, Peak band `2`, Confirm `5`, High vol mult `1.5`, Low vol frac `0.70`. Tighten Low vol frac (e.g. `0.50`) for quieter catches only. Toggle **Show in-play lines** off if the pitch/target lines clutter the chart.
+
+### HV Extreme Move
+Minimal building block: find a **high-volume** local peak or trough, then mark when price has moved **Move ticks** (default 20) away.
+
+| Panel | Meaning |
+|---|---|
+| **HV Ext Peak / Trough** | Extreme price while watching |
+| **HV Ext Target** | Extreme ± Move ticks while watching |
+| **HV Ext Fire Long / Short** | Marker when the move completes |
+| **HV Ext Armed** | `+1` trough / `−1` peak / `0` idle |
+| **HV Ext Vol ratio** | Extreme-band vol ÷ (avg × band width) |
+
+**Logic:** reverse **Confirm ticks** from a running high/low → candidate extreme. Keep if band volume ≥ **High vol mult** × average. Fire when distance ≥ **Move ticks** (or cancel if a new extreme forms first).
+
+**Suggested start:** Move `20`, Confirm `4`, Band `1`, High vol mult `2.0`, Lookback `15` min. Watch Bookmap log for `HV EXT WATCH` / `HV EXT FIRE`.
+
+## Project layout
+
+```text
+bookmap-addon/
+  build.gradle
+  src/main/java/com/bookmap/orderflow/
+    core/         shared flow / stats / tape burst / CD / large-level / pitch / hv-move
+    hello/        load test
+    extract/      Session Extractor (Replay → NDJSON)
+    flow/         Aggressive Flow
+    effort/       Effort vs Result
+    liquidity/    Liquidity Reaction
+    crossmarket/  ES/NQ Flow Confirm
+    trade/        Momentum AutoTrade (ES+NQ)
+    pitch/        Pitch and Catch
+    hvmove/       HV Extreme Move
+```
+
+Order submission is only in **Momentum AutoTrade**, and only when **Enable trading** is checked.
+
+## Session Extractor playbook (research corpus)
+
+Use this to dump **full** ES+NQ trades and depth from a `.bmf` into the research pipeline.
+
+1. Build/install the JAR (see above). In API plugins, **Add** `Session Extractor` and enable it.
+2. Open Bookmap **Replay**, load a feed from `C:\Bookmap\Feeds` that includes RTH (UK 14:30–17:00).
+3. Ensure **both NQ and ES** instruments from the recording are open/subscribed.
+4. Open Session Extractor settings **before enabling**:
+   - **Output root directory:** `C:/Work/Mat/bookmap/data/raw`
+   - **Session id override:** set once (e.g. `210926`) — do **not** change it mid-replay (that reloads into a new folder)
+   - **Skip MNQ / micros:** leave **true** (default) so only full-size NQ + ES are written
+5. Enable the extractor, set replay to **maximum speed**, let it run to the end (or through RTH).
+6. **Disable** the extractor when done (forces flush + `finished: true` in `meta.json`).
+7. Confirm sizes in Explorer (**F5**) or PowerShell — while replay is running, Explorer often shows **0 KB** for open files even though data is writing. After disable, sizes should be hundreds of MB / GB.
+8. Confirm folder: `data/raw/<session_id>/trades.ndjson`, `depth.ndjson`, `meta.json` (and `mbo.ndjson` if MBO was present).
+9. Repeat for 5–10 **RTH** days (UK 14:30–17:00), then:
+
+```powershell
+cd c:\Work\Mat\bookmap
+.\.venv\Scripts\Activate.ps1
+python -m research.extract.to_parquet
+python -m research.run_experiment EXP-0002 --sessions all
+```
+
+**Note:** Full depth extracts are large (multi-GB per day with MBO). Prefer a drive with free space.
+
+**Note:** Do not enable the extractor twice / change session id mid-run — you can get a partial folder plus a second folder.
+
+## Sanity checks on replay
+
+1. Aggressive Flow spikes line up with Bookmap trade / volume activity.  
+2. Effort/Result exhaustion flags when heavy selling (or buying) fails to move price.  
+3. Liquidity Reaction fires when a large resting order appears near price.  
+4. ES/NQ Confirm goes `AGREE_*` only when both books push the same way.  
+5. Momentum AutoTrade fires `MAT SIGNAL` in the log with Long/Short markers when ES confirms a fast NQ burst.

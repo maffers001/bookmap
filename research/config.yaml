@@ -1,0 +1,21 @@
+feeds_dir: "C:/Bookmap/Feeds"
+data_dir: "C:/Work/Mat/bookmap/data"
+raw_dir: "C:/Work/Mat/bookmap/data/raw"
+parquet_dir: "C:/Work/Mat/bookmap/data/parquet"
+results_dir: "C:/Work/Mat/bookmap/results"
+
+# Primary analysis window (UK local wall clock on the session calendar day)
+rth_uk:
+  start: "14:30"
+  end: "17:00"
+
+# NQ contract point size: 1 point = 4 ticks of 0.25
+nq_point_ticks: 4
+nq_tick_size: 0.25
+
+outcome_horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+nq_point_targets: [10, 20]
+
+feature_bar_ms: 250
+
+smoke_sessions: ["smoke_synthetic"]

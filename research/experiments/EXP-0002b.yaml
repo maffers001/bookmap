@@ -1,0 +1,19 @@
+name: EXP-0002b
+hypothesis: H1
+title: Gated effort exhaustion — counter-ticks, no flat bars, long-only absorption
+description: >
+  Same H1 exhaustion detector as EXP-0002, but drop flat ε-spikes and require
+  counter-ticks on the trigger bar. Long-only (fade sell-into-upticks) — the
+  absorption-like subset that dig showed had positive early path.
+
+parent: EXP-0002
+detector: effort_exhaustion
+min_effort: 50.0
+forbid_flat_bar: true
+require_counter_ticks: true
+min_counter_ticks: 1.0
+trade_sides: long
+role: NQ
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

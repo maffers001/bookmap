@@ -1,0 +1,36 @@
+plugins {
+    id 'java'
+}
+
+group = 'com.bookmap.orderflow'
+version = '1.0.0'
+
+sourceCompatibility = JavaVersion.VERSION_17
+targetCompatibility = JavaVersion.VERSION_17
+
+repositories {
+    mavenCentral()
+}
+
+// Prefer installed Bookmap API jars so the add-on matches the runtime.
+def bookmapHome = System.getenv('BOOKMAP_HOME') ?: 'C:/Program Files/Bookmap'
+def bookmapCoreJar = file("${bookmapHome}/lib/bm-l1api.jar")
+def bookmapSimplifiedJar = file("${bookmapHome}/lib/bm-simplified-api-wrapper.jar")
+
+dependencies {
+    if (bookmapCoreJar.exists() && bookmapSimplifiedJar.exists()) {
+        compileOnly files(bookmapCoreJar, bookmapSimplifiedJar)
+    } else {
+        throw new GradleException(
+            "Bookmap API jars not found under ${bookmapHome}/lib. " +
+            "Install Bookmap or set BOOKMAP_HOME to your Bookmap directory.")
+    }
+}
+
+jar {
+    archiveFileName = 'bookmap-orderflow.jar'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}

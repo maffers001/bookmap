@@ -1,0 +1,29 @@
+name: EXP-0032
+hypothesis: H26
+title: Range-bar aggressor imbalance vs prior-range averages
+description: >
+  As price completes a tick-range bar, measure buy/sell/total volume and duration.
+  Compare to a rolling average of prior completed ranges. Continuation events when
+  aggressor imbalance is strong and opposite-side volume is below average; optional
+  speed/volume gates. Sweep range sizes 5/10/22/50 ticks. Vs null / EXP-0008.
+
+detector: range_imbalance
+range_ticks_list: [5, 10, 22, 50]
+primary_range_ticks: 22
+primary_mode: imb_opp_low
+modes:
+  - imb_only
+  - imb_opp_low
+  - imb_opp_low_fast
+  - imb_opp_low_slow
+  - imb_opp_low_hivol
+  - imb_opp_low_lovol
+  - imb_opp_low_fast_hivol
+  - with_bar
+avg_n: 20
+min_imbalance: 0.30
+min_bars_warmup: 10
+tick_size: 1.0
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

@@ -1,0 +1,22 @@
+bookmap-addon/.gradle/
+bookmap-addon/build/
+bookmap-addon/lib/
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# Research data (large)
+data/raw/
+data/parquet/
+results/
+!results/.gitkeep
+!data/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/

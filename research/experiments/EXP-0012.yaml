@@ -1,0 +1,33 @@
+name: EXP-0012
+hypothesis: H8
+title: Liquidity flip at LVN — beyond-untraded + opposing size starts trading
+description: >
+  Same dual LVN touches as EXP-0011, gated/stratified by (1) large resting
+  size beyond the LVN with low execute-into at touch, and (2) opposing large
+  level begins trading within flip_window_ms after touch.
+
+detector: dual_lvn_flip
+lookback_ms: 1800000
+refresh_ms: 30000
+lvn_frac_of_peak: 0.40
+min_lvn_width_ticks: 2
+max_lvn_width_ticks: 12
+min_sep_from_poc_ticks: 4
+require_hvn_sandwich: false
+min_profile_volume: 0
+edge_margin_ticks: 0
+sync_ms: 2000
+touch_cooldown_ms: 5000
+nq_absolute_size: 50
+es_absolute_size: 100
+z_score: 99.0
+tick_radius: 8
+beyond_ticks: 8
+max_beyond_consume: 0.25
+flip_window_ms: 2000
+min_flip_executed: 10
+require_beyond: true
+require_flip: true
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

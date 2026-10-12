@@ -1,0 +1,26 @@
+name: EXP-0014
+hypothesis: H6
+title: CD pullback primary events ± ES+NQ momentum confirm
+description: >
+  Emit CD pullback-to-MA as primary timing events (discretionary rule), then
+  measure continuation outcomes alone vs when an ES+NQ fast-tape momentum
+  burst of the same side occurs within sync_ms. Also report lag-tight
+  momentum-only baseline from EXP-0008 logic for contrast.
+
+detector: cd_pullback_momentum
+range_ticks: 22
+tick_size: 1.0
+sma_len: 100
+slope_lookback: 5
+pullback_frac_of_bb: 0.35
+cd_cooldown_bars: 3
+bar_ms: 100
+min_trades: 6
+min_vol: 25
+min_imbalance: 0.55
+min_progress_ticks: 1.0
+sync_ms: 1500
+confirm_window_ms: 2000
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

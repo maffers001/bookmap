@@ -1,0 +1,25 @@
+name: EXP-0011
+hypothesis: H7
+title: Dual-market LVN rejection — ES+NQ same-side LVN touch vs fade
+description: >
+  Causal rolling volume-profile LVNs on NQ and ES. Event when both touch a
+  same-approach-direction LVN within sync_ms. Fade the zone. Compare to
+  NQ-only touches and random active-bar null.
+
+detector: dual_lvn_touch
+lookback_ms: 1800000
+refresh_ms: 30000
+lvn_frac_of_peak: 0.40
+min_lvn_width_ticks: 2
+max_lvn_width_ticks: 12
+min_sep_from_poc_ticks: 4
+# Original EXP-0011 did not use sandwich / min-vol / edge gates
+require_hvn_sandwich: false
+min_profile_volume: 0
+edge_margin_ticks: 0
+sync_ms: 2000
+touch_cooldown_ms: 5000
+role_primary: NQ
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

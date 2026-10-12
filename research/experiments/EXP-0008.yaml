@@ -1,0 +1,23 @@
+name: EXP-0008
+hypothesis: H4
+title: ES+NQ momentum — fast-tape aggression bursts confirmed across markets
+description: >
+  Detect one-sided fast tape bursts (many prints + volume + price progress) on
+  NQ and require a same-direction ES burst within ±sync_ms. Outcome = continuation
+  in burst direction (not fade). Tape-based proxy for "large orders taken on
+  both ES and NQ with fast time & sales."
+
+detector: es_nq_momentum
+bar_ms: 100
+min_trades: 6
+min_vol: 25
+min_imbalance: 0.55
+min_progress_ticks: 1.0
+# price column is tick units in extracts
+tick_size: 1.0
+sync_ms: 1500
+cooldown_bars: 3
+role_primary: NQ
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

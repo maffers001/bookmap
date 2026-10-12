@@ -1,0 +1,19 @@
+name: EXP-0026
+hypothesis: H20
+title: Dual failed swing-break fade
+description: >
+  Pierce beyond causal swing by pierce_ticks then reclaim inside within
+  reclaim_ms. Fade the stop-run. Dual ES+NQ same-side within sync_ms. Compare
+  dual vs NQ-only vs null vs EXP-0008 lag<250. If dual n<15, log empty and stop.
+
+detector: dual_failed_swing_break
+swing_lookback_ms: 180000
+swing_confirm_ms: 20000
+pierce_ticks: 4
+reclaim_ms: 2000
+sync_ms: 2000
+cooldown_ms: 5000
+tick_size: 1.0
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

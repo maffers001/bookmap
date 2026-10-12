@@ -1,0 +1,25 @@
+name: EXP-0019
+hypothesis: H14
+title: VPOC departure / HVN break-hold (port from trade-processor S20/S4)
+description: >
+  Port of trade-processor 22-tick edges: S20 leave developing VPOC with CD
+  impulse, and S4 HVN1 break-and-hold with CD impulse. Causal rolling volume
+  POC from Bookmap trades. Continuation outcomes vs null and EXP-0008 lag<250.
+
+detector: value_depart
+kinds: [s20, s4]
+range_ticks: 22
+tick_size: 1.0
+lookback_ms: 1800000
+near_bars_ago: 5
+min_clearance: 4.0
+near_band: 8.0
+impulse_pct: 0.80
+require_cd_regime: true
+require_price_confirm: true
+sync_ms: 1500
+max_es_lag_ms: 250
+annotate_es_momentum: true
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

@@ -1,0 +1,18 @@
+name: EXP-0002c
+hypothesis: H1
+title: Gated effort exhaustion — both sides, counter-ticks, no flat bars
+description: >
+  EXP-0002 with flat-bar ε-spikes removed and counter-tick requirement.
+  Keeps both long and short reversal sides for comparison to 0002b.
+
+parent: EXP-0002
+detector: effort_exhaustion
+min_effort: 50.0
+forbid_flat_bar: true
+require_counter_ticks: true
+min_counter_ticks: 1.0
+trade_sides: both
+role: NQ
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]

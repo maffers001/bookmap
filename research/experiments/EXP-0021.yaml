@@ -1,0 +1,27 @@
+name: EXP-0021
+hypothesis: H16
+title: Dual micro-regime — attract→take + opposite-side hold
+description: >
+  On each market, pair (1) large level taken through after attract
+  (ASK take → long / BID take → short) with (2) opposite-side large size
+  dwelling near BBO with little trade within pair_ms. Require same-side
+  ES+NQ composite within sync_ms. Success: lift vs null and vs EXP-0008
+  lag<250 on hit+10 / path. No endless retune.
+
+detector: dual_micro_regime
+nq_absolute_size: 40
+es_absolute_size: 80
+z_score: 99.0
+tick_radius: 10
+dwell_alert_sec: 2.0
+min_dwell_sec: 2.0
+max_hold_consume: 0.15
+min_take_consume: 0.5
+min_penetration_ticks: 1
+require_attracted: true
+pair_ms: 3000
+sync_ms: 2500
+max_es_lag_ms: 2500
+rth_uk_only: true
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
+point_targets: [10, 20]
