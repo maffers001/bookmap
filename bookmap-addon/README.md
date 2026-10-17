@@ -109,6 +109,18 @@ Research lead from **EXP-0008** (tape momentum + ES sync). Optional **CD pullbac
 | **MAT ES lag ms** | Lag to matching ES burst (`-1` if none) |
 | **MAT CD trend** | `+1` / `-1` / `0` from 22-tick CD SMA |
 
+**Optional trade management** (all default **OFF** — unchanged behavior until enabled):
+
+| Param | Meaning |
+|---|---|
+| **Reverse on stop** | After SL fill, enter the opposite side (new brackets) |
+| **Reverse only if entry OK** | With reverse on: only reverse if opposite-side ES/CD/side-filter entry passes |
+| **Extend TP if still favourable** | Near TP, if same-side entry still passes, push TP by **Take profit pts** (SL unchanged) |
+| **TP extend proximity (pts)** | Distance to TP that arms an extend (default `2`) |
+| **Max TP extends (0=unlimited)** | Cap per trade (default `3`; `0` = no cap) |
+
+Reverse always respects **Allow longs/shorts**. Logs: `MAT REVERSE …`, `MAT TP EXTEND …`.
+
 **Hotkeys (long/short on/off):** with MAT attached and **Enable Ctrl+Shift side hotkeys = true** (default):
 
 | Shortcut | Effect |

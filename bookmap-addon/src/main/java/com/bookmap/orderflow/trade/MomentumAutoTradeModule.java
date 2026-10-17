@@ -30,7 +30,11 @@ import velox.api.layer1.common.helper.AccountListManager;
 import velox.api.layer1.data.AccountInfo;
 import velox.api.layer1.data.InstrumentInfo;
 import velox.api.layer1.data.OrderDuration;
+import velox.api.layer1.data.OrderEntryType;
 import velox.api.layer1.data.OrderInfoUpdate;
+import velox.api.layer1.data.OrderMoveParameters;
+import velox.api.layer1.data.OrderStatus;
+import velox.api.layer1.data.OrderType;
 import velox.api.layer1.data.SimpleOrderSendParameters;
 import velox.api.layer1.data.SimpleOrderSendParametersBuilder;
 import velox.api.layer1.data.StatusInfo;
@@ -177,6 +181,25 @@ public class MomentumAutoTradeModule implements
     @Parameter(name = "Flat-only (no pyramid)")
     Boolean flatOnly = true;
 
+    /** When stop fills, enter opposite side (respects Allow longs/shorts). */
+    @Parameter(name = "Reverse on stop")
+    Boolean reverseOnStop = false;
+
+    /** If Reverse on stop: only reverse when opposite entry conditions pass. */
+    @Parameter(name = "Reverse only if entry OK")
+    Boolean reverseOnlyIfEntryOk = false;
+
+    /** Near TP, push TP further by Take profit pts if same-side entry still OK. */
+    @Parameter(name = "Extend TP if still favourable")
+    Boolean extendTpIfFavourable = false;
+
+    @Parameter(name = "TP extend proximity (pts)", step = 0.25)
+    Double tpExtendProximityPts = 2.0;
+
+    /** 0 = unlimited extends per trade. */
+    @Parameter(name = "Max TP extends (0=unlimited)", step = 1.0)
+    Double maxTpExtends = 3.0;
+
     private Api api;
     private Layer1ApiProvider provider;
     private Layer1ApiAdminAdapter adminListener;
@@ -210,6 +233,19 @@ public class MomentumAutoTradeModule implements
     /** False during catchup/history; true after {@link #onRealtimeStart()}. */
     private volatile boolean realtimeStarted;
 
+    /** Open trade: 0 flat, +1 long, −1 short. */
+    private int openSide;
+    private double entryFillPx;
+    private String tpOrderId;
+    private String slOrderId;
+    private double currentTpPx;
+    private int tpExtendCount;
+    /** False after an extend until price backs out of the proximity band. */
+    private boolean tpExtendArmed = true;
+    /** One-shot reverse after SL fill (processed when flat). */
+    private boolean pendingReverse;
+    private int pendingReverseSide;
+
     private long lastSeenTsNs = -1;
     private long nqTradeCount;
     private long esTradeCount;
@@ -241,6 +277,7 @@ public class MomentumAutoTradeModule implements
         this.flatLocked = false;
         this.filledByOrderId.clear();
         this.tradingAccountId = null;
+        clearTradeContext("init");
 
         InstrumentState primary = newState(InstrumentClassifier.classify(info));
         byAlias.put(alias, primary);
@@ -490,6 +527,11 @@ public class MomentumAutoTradeModule implements
             nqTradeCount++;
         }
 
+        if (isPrimaryNq(state)) {
+            maybeExtendTp(state);
+            tryPendingReverse();
+        }
+
         // Only evaluate entries when the primary (NQ) chart closes a burst bar
         if (burst == null || !isPrimaryNq(state)) {
             return;
@@ -508,61 +550,26 @@ public class MomentumAutoTradeModule implements
     }
 
     private void maybeSignal(Burst nqBurst, InstrumentState nqState) {
-        InstrumentState es = findByRole("ES");
-        long syncNs = (long) ((syncMs == null ? 1500.0 : syncMs) * 1_000_000.0);
-        long lagMs = es == null ? Long.MAX_VALUE : es.burst.lagMsTo(nqBurst.side, nqBurst.tsNs);
-        boolean esPresent = es != null;
-        boolean esRecent = esPresent && es.burst.hasRecentBurst(nqBurst.side, nqBurst.tsNs, syncNs);
-
-        double maxLag = maxEsLagMs == null ? 0.0 : maxEsLagMs;
-        boolean lagOk = maxLag <= 0 || lagMs <= maxLag;
-        boolean esOk = esRecent && lagOk;
-
-        boolean cdOk = true;
-        if (Boolean.TRUE.equals(requireCdPullback)) {
-            cdOk = nqBurst.side > 0 ? nqState.cd.isPullbackLong() : nqState.cd.isPullbackShort();
-        }
-
-        long coolNs = (long) ((signalCooldownSec == null ? 5.0 : signalCooldownSec) * 1_000_000_000.0);
-        boolean cooled = nqBurst.tsNs - lastSignalNs >= coolNs;
-        int flatPos = flatCheckPosition();
-        boolean flat = !Boolean.TRUE.equals(flatOnly) || (flatPos == 0 && !flatLocked);
         syncSideFilterFromParams("params");
-        boolean sideOk = MatSideFilter.allowSide(nqBurst.side);
+        EntryEval eval = evaluateEntry(nqBurst.side, nqBurst, nqState, false);
 
-        // Always publish diagnostics
-        esLagIndicator.addPoint(lagMs >= Long.MAX_VALUE / 2 ? -1.0 : lagMs);
+        esLagIndicator.addPoint(eval.lagMs >= Long.MAX_VALUE / 2 ? -1.0 : eval.lagMs);
         cdTrendIndicator.addPoint(nqState.cd.getMaTrend());
 
-        if (!(esOk && cdOk && cooled && flat && sideOk)) {
+        if (!eval.ok) {
             signalIndicator.addPoint(0);
             if (nqBurst.tsNs - rejectLogNs >= REJECT_LOG_INTERVAL_NS) {
                 rejectLogNs = nqBurst.tsNs;
-                String reason;
-                if (!esPresent) {
-                    reason = "no_ES_instrument";
-                } else if (!esRecent) {
-                    reason = "ES_no_same_side_burst_in_sync";
-                } else if (!lagOk) {
-                    reason = "ES_lag_gt_max";
-                } else if (!cdOk) {
-                    reason = "cd_pullback_fail";
-                } else if (!cooled) {
-                    reason = "signal_cooldown";
-                } else if (!sideOk) {
-                    reason = nqBurst.side > 0 ? "longs_disabled" : "shorts_disabled";
-                } else {
-                    reason = "not_flat(pos=" + flatPos + ",locked=" + flatLocked + ")";
-                }
+                double maxLag = maxEsLagMs == null ? 0.0 : maxEsLagMs;
                 Log.info(String.format(
                         "MAT REJECT %s nqBurst#%d side=%d px=%.2f time=%s lagMs=%s maxLag=%.0f syncMs=%.0f "
                                 + "esTrades=%d esBursts=%d nqTrades=%d nqBursts=%d aliases=%d",
-                        reason,
+                        eval.reason,
                         nqBurstCount,
                         nqBurst.side,
                         PriceTicks.toChartPoints(nqBurst.closePrice, pips),
                         formatReplayTime(nqBurst.tsNs),
-                        lagMs >= Long.MAX_VALUE / 2 ? "none" : Long.toString(lagMs),
+                        eval.lagMs >= Long.MAX_VALUE / 2 ? "none" : Long.toString(eval.lagMs),
                         maxLag,
                         syncMs == null ? 1500.0 : syncMs,
                         esTradeCount,
@@ -574,7 +581,110 @@ public class MomentumAutoTradeModule implements
             return;
         }
 
-        fireSignal(nqBurst.side, nqBurst.closePrice, lagMs, nqState);
+        fireSignal(nqBurst.side, nqBurst.closePrice, eval.lagMs, nqState);
+    }
+
+    private static final class EntryEval {
+        final boolean ok;
+        final String reason;
+        final long lagMs;
+
+        EntryEval(boolean ok, String reason, long lagMs) {
+            this.ok = ok;
+            this.reason = reason;
+            this.lagMs = lagMs;
+        }
+    }
+
+    /**
+     * Shared entry gate for signals, reverse-if-OK, and TP-extend.
+     * @param ignoreFlat when true, skip flat-only / flatLocked (in-trade checks)
+     */
+    private EntryEval evaluateEntry(int side, Burst nqBurst, InstrumentState nqState, boolean ignoreFlat) {
+        if (nqBurst == null || nqState == null) {
+            return new EntryEval(false, "no_burst", Long.MAX_VALUE);
+        }
+        if (nqBurst.side != side) {
+            return new EntryEval(false, "burst_wrong_side", Long.MAX_VALUE);
+        }
+
+        InstrumentState es = findByRole("ES");
+        long syncNs = (long) ((syncMs == null ? 1500.0 : syncMs) * 1_000_000.0);
+        long lagMs = es == null ? Long.MAX_VALUE : es.burst.lagMsTo(nqBurst.side, nqBurst.tsNs);
+        boolean esPresent = es != null;
+        boolean esRecent = esPresent && es.burst.hasRecentBurst(nqBurst.side, nqBurst.tsNs, syncNs);
+        double maxLag = maxEsLagMs == null ? 0.0 : maxEsLagMs;
+        boolean lagOk = maxLag <= 0 || lagMs <= maxLag;
+
+        if (!esPresent) {
+            return new EntryEval(false, "no_ES_instrument", lagMs);
+        }
+        if (!esRecent) {
+            return new EntryEval(false, "ES_no_same_side_burst_in_sync", lagMs);
+        }
+        if (!lagOk) {
+            return new EntryEval(false, "ES_lag_gt_max", lagMs);
+        }
+
+        if (Boolean.TRUE.equals(requireCdPullback)) {
+            boolean cdOk = side > 0 ? nqState.cd.isPullbackLong() : nqState.cd.isPullbackShort();
+            if (!cdOk) {
+                return new EntryEval(false, "cd_pullback_fail", lagMs);
+            }
+        }
+
+        long coolNs = (long) ((signalCooldownSec == null ? 5.0 : signalCooldownSec) * 1_000_000_000.0);
+        long refTs = nqBurst.tsNs > 0 ? nqBurst.tsNs : (nowNs > 0 ? nowNs : System.nanoTime());
+        if (refTs - lastSignalNs < coolNs) {
+            return new EntryEval(false, "signal_cooldown", lagMs);
+        }
+
+        syncSideFilterFromParams("params");
+        if (!MatSideFilter.allowSide(side)) {
+            return new EntryEval(false, side > 0 ? "longs_disabled" : "shorts_disabled", lagMs);
+        }
+
+        if (!ignoreFlat) {
+            int flatPos = flatCheckPosition();
+            boolean flat = !Boolean.TRUE.equals(flatOnly) || (flatPos == 0 && !flatLocked);
+            if (!flat) {
+                return new EntryEval(false, "not_flat(pos=" + flatPos + ",locked=" + flatLocked + ")", lagMs);
+            }
+        }
+        return new EntryEval(true, "ok", lagMs);
+    }
+
+    /** Entry check using the latest NQ burst of the requested side (for reverse / extend). */
+    private EntryEval evaluateEntryFromLastBurst(int side, boolean ignoreFlat) {
+        InstrumentState nq = byAlias.get(primaryAlias);
+        if (nq == null || nq.burst == null) {
+            return new EntryEval(false, "no_nq", Long.MAX_VALUE);
+        }
+        Burst last = nq.burst.getLastBurst();
+        if (last == null || last.side != side) {
+            return new EntryEval(false, "no_same_side_burst", Long.MAX_VALUE);
+        }
+        long ageNs = (nowNs > 0 ? nowNs : System.nanoTime()) - last.tsNs;
+        long syncNs = (long) ((syncMs == null ? 1500.0 : syncMs) * 1_000_000.0);
+        if (ageNs > syncNs) {
+            return new EntryEval(false, "burst_stale", Long.MAX_VALUE);
+        }
+        return evaluateEntry(side, last, nq, ignoreFlat);
+    }
+
+    private void clearTradeContext(String via) {
+        openSide = 0;
+        entryFillPx = 0;
+        tpOrderId = null;
+        slOrderId = null;
+        currentTpPx = 0;
+        tpExtendCount = 0;
+        tpExtendArmed = true;
+        if (!"pending_reverse".equals(via)) {
+            pendingReverse = false;
+            pendingReverseSide = 0;
+        }
+        Log.info("MAT trade context cleared (" + via + ")");
     }
 
     /** Position used for flat-only: StatusInfo if set, else net fills. */
@@ -616,7 +726,7 @@ public class MomentumAutoTradeModule implements
                 tradingAccountId == null ? "null" : tradingAccountId));
 
         if (willTrade) {
-            sendBracketOrder(side > 0, chartPrice);
+            sendBracketOrder(side > 0, chartPrice, false);
         } else if (wantTrade && !realtimeStarted) {
             Log.info("MAT ORDER skipped (catchup/history — waiting for realtime)");
         }
@@ -670,7 +780,7 @@ public class MomentumAutoTradeModule implements
         }
     }
 
-    private void sendBracketOrder(boolean isBuy, double entryPricePoints) {
+    private void sendBracketOrder(boolean isBuy, double entryPricePoints, boolean force) {
         int size = Math.max(1, orderSize == null ? 1 : orderSize.intValue());
         double tpPts = takeProfitPts == null ? 10.0 : takeProfitPts;
         double slPts = stopLossPts == null ? 10.0 : stopLossPts;
@@ -686,8 +796,8 @@ public class MomentumAutoTradeModule implements
         double slPx = isBuy ? entryPricePoints - slPts : entryPricePoints + slPts;
 
         // Lock flat-only BEFORE send so same-thread / fast replay cannot pyramid
-        // while PositionListener still reports 0.
-        if (Boolean.TRUE.equals(flatOnly) && (flatCheckPosition() != 0 || flatLocked)) {
+        // while PositionListener still reports 0. force=true for stop-reverse.
+        if (!force && Boolean.TRUE.equals(flatOnly) && (flatCheckPosition() != 0 || flatLocked)) {
             Log.info("MAT ORDER blocked flat-only pos=" + position
                     + " netFills=" + netFills + " locked=" + flatLocked);
             return;
@@ -715,9 +825,17 @@ public class MomentumAutoTradeModule implements
             }
             SimpleOrderSendParameters order = builder.build();
             api.sendOrder(order);
+            // Expected TP for extend tracking until working LMT arrives
+            openSide = isBuy ? 1 : -1;
+            entryFillPx = entryPricePoints;
+            currentTpPx = tpPx;
+            tpOrderId = null;
+            slOrderId = null;
+            tpExtendCount = 0;
+            tpExtendArmed = true;
             Log.info(String.format(
                     "MAT ORDER sent %s size=%d entry~%.2f brackets=%s tp=%d ticks (~%.2f pts @%.2f) "
-                            + "sl=%d ticks (~%.2f pts @%.2f) account=%s locked=%s netFills=%d time=%s",
+                            + "sl=%d ticks (~%.2f pts @%.2f) account=%s locked=%s netFills=%d force=%s time=%s",
                     isBuy ? "BUY" : "SELL",
                     size,
                     entryPricePoints,
@@ -731,6 +849,7 @@ public class MomentumAutoTradeModule implements
                     tradingAccountId == null ? "null(primary)" : tradingAccountId,
                     flatLocked,
                     netFills,
+                    force,
                     formatReplayTime(nowNs)));
         } catch (Throwable t) {
             flatLocked = false;
@@ -790,6 +909,10 @@ public class MomentumAutoTradeModule implements
                 && statusInfo.workingSells == 0) {
             flatLocked = false;
             netFills = 0;
+            if (openSide != 0 && !pendingReverse) {
+                clearTradeContext("flat");
+            }
+            tryPendingReverse();
         } else if (statusInfo.position != 0
                 || statusInfo.workingBuys > 0
                 || statusInfo.workingSells > 0) {
@@ -799,13 +922,14 @@ public class MomentumAutoTradeModule implements
             }
         }
         Log.info(String.format(
-                "MAT POS update pos=%d avg=%.2f wb=%d ws=%d unreal=%.2f locked=%s account=%s",
+                "MAT POS update pos=%d avg=%.2f wb=%d ws=%d unreal=%.2f locked=%s openSide=%d account=%s",
                 statusInfo.position,
                 statusInfo.averagePrice,
                 statusInfo.workingBuys,
                 statusInfo.workingSells,
                 statusInfo.unrealizedPnl,
                 flatLocked,
+                openSide,
                 statusInfo.accountId));
     }
 
@@ -824,6 +948,9 @@ public class MomentumAutoTradeModule implements
                 && !tradingAccountId.equals(order.accountId)) {
             return;
         }
+
+        trackBracketLeg(order);
+
         int prevFilled = filledByOrderId.getOrDefault(order.orderId, 0);
         int filled = order.filled;
         if (filled <= prevFilled) {
@@ -839,15 +966,219 @@ public class MomentumAutoTradeModule implements
             flatLocked = true;
         }
         Log.info(String.format(
-                "MAT FILL %s order=%s delta=%d filled=%d netFills=%d statusPos=%d locked=%s account=%s",
+                "MAT FILL %s order=%s type=%s delta=%d filled=%d netFills=%d statusPos=%d locked=%s account=%s",
                 order.isBuy ? "BUY" : "SELL",
                 order.orderId,
+                order.type,
                 delta,
                 filled,
                 netFills,
                 position,
                 flatLocked,
                 order.accountId));
+
+        boolean isStopFill = order.type == OrderType.STP || order.type == OrderType.STP_LMT
+                || (slOrderId != null && slOrderId.equals(order.orderId));
+        boolean isTpFill = order.type == OrderType.LMT
+                && tpOrderId != null && tpOrderId.equals(order.orderId);
+
+        if (isStopFill && openSide != 0) {
+            onStopFilled(order);
+        } else if (isTpFill || (netFills == 0 && position == 0 && openSide != 0 && !pendingReverse)) {
+            clearTradeContext(isTpFill ? "tp_fill" : "flat_fill");
+        }
+        tryPendingReverse();
+    }
+
+    private void trackBracketLeg(OrderInfoUpdate order) {
+        if (order.status == OrderStatus.CANCELLED || order.status == OrderStatus.REJECTED) {
+            return;
+        }
+        OrderType type = order.type;
+        if (type == null) {
+            return;
+        }
+
+        // Entry: market (or leading) fill sets open side if still flat context
+        if (openSide == 0 && order.filled > 0 && (type == OrderType.MKT || order.fakeMarketOrder)) {
+            openSide = order.isBuy ? 1 : -1;
+            entryFillPx = PriceTicks.toChartPoints(order.averageFillPrice, pips);
+            double tpPts = takeProfitPts == null ? 10.0 : takeProfitPts;
+            currentTpPx = openSide > 0 ? entryFillPx + tpPts : entryFillPx - tpPts;
+            tpExtendCount = 0;
+            tpExtendArmed = true;
+            Log.info(String.format(
+                    "MAT trade open %s entry~%.2f expectedTp~%.2f",
+                    openSide > 0 ? "LONG" : "SHORT", entryFillPx, currentTpPx));
+            return;
+        }
+
+        if (openSide == 0) {
+            return;
+        }
+
+        // Exit legs are opposite the position
+        boolean exitIsBuy = openSide < 0;
+        if (order.isBuy != exitIsBuy) {
+            return;
+        }
+
+        if (type == OrderType.LMT && (order.status == OrderStatus.WORKING
+                || order.status == OrderStatus.PENDING_SUBMIT
+                || order.status == OrderStatus.PENDING_MODIFY
+                || order.unfilled > 0)) {
+            tpOrderId = order.orderId;
+            if (!Double.isNaN(order.limitPrice) && order.limitPrice != 0) {
+                currentTpPx = PriceTicks.toChartPoints(order.limitPrice, pips);
+            }
+            Log.info("MAT TP leg id=" + tpOrderId + " px~" + currentTpPx);
+        } else if ((type == OrderType.STP || type == OrderType.STP_LMT)
+                && (order.status == OrderStatus.WORKING
+                || order.status == OrderStatus.PENDING_SUBMIT
+                || order.status == OrderStatus.PENDING_MODIFY
+                || order.unfilled > 0)) {
+            slOrderId = order.orderId;
+            Log.info("MAT SL leg id=" + slOrderId
+                    + " stop~" + PriceTicks.toChartPoints(order.stopPrice, pips));
+        }
+    }
+
+    private void onStopFilled(OrderInfoUpdate order) {
+        int closedSide = openSide;
+        Log.info(String.format(
+                "MAT STOP filled order=%s closedSide=%s reverseOn=%s onlyIfOk=%s",
+                order.orderId,
+                closedSide > 0 ? "LONG" : (closedSide < 0 ? "SHORT" : "FLAT"),
+                Boolean.TRUE.equals(reverseOnStop),
+                Boolean.TRUE.equals(reverseOnlyIfEntryOk)));
+
+        if (!Boolean.TRUE.equals(reverseOnStop) || closedSide == 0) {
+            clearTradeContext("stop_fill");
+            return;
+        }
+
+        int reverseSide = -closedSide;
+        syncSideFilterFromParams("params");
+        if (!MatSideFilter.allowSide(reverseSide)) {
+            Log.info("MAT REVERSE skipped side_filter " + MatSideFilter.label());
+            clearTradeContext("stop_no_reverse");
+            return;
+        }
+
+        if (Boolean.TRUE.equals(reverseOnlyIfEntryOk)) {
+            EntryEval eval = evaluateEntryFromLastBurst(reverseSide, true);
+            if (!eval.ok) {
+                Log.info("MAT REVERSE skipped entry_not_ok reason=" + eval.reason);
+                clearTradeContext("stop_no_reverse");
+                return;
+            }
+        }
+
+        pendingReverse = true;
+        pendingReverseSide = reverseSide;
+        clearTradeContext("pending_reverse");
+        Log.info("MAT REVERSE armed side=" + (reverseSide > 0 ? "LONG" : "SHORT"));
+    }
+
+    private void tryPendingReverse() {
+        if (!pendingReverse) {
+            return;
+        }
+        if (!Boolean.TRUE.equals(enableTrading) || !realtimeStarted || api == null) {
+            Log.info("MAT REVERSE deferred trading=" + enableTrading + " realtime=" + realtimeStarted);
+            return;
+        }
+        if (flatCheckPosition() != 0) {
+            return;
+        }
+        int side = pendingReverseSide;
+        pendingReverse = false;
+        pendingReverseSide = 0;
+
+        syncSideFilterFromParams("params");
+        if (!MatSideFilter.allowSide(side)) {
+            Log.info("MAT REVERSE aborted side_filter " + MatSideFilter.label());
+            return;
+        }
+
+        InstrumentState nq = byAlias.get(primaryAlias);
+        double px = nq != null
+                ? PriceTicks.toChartPoints(nq.lastPrice, pips)
+                : entryFillPx;
+        if (px <= 0 && nq != null) {
+            px = PriceTicks.toChartPoints(nq.lastPrice, nq.instrumentPips);
+        }
+        Log.info("MAT REVERSE send " + (side > 0 ? "LONG" : "SHORT") + " @~" + px);
+        lastSignalNs = nowNs > 0 ? nowNs : System.nanoTime();
+        lastSignalSide = side;
+        sendBracketOrder(side > 0, px, true);
+    }
+
+    private void maybeExtendTp(InstrumentState nqState) {
+        if (!Boolean.TRUE.equals(extendTpIfFavourable)
+                || !Boolean.TRUE.equals(useBrackets)
+                || openSide == 0
+                || tpOrderId == null
+                || api == null
+                || !realtimeStarted) {
+            return;
+        }
+
+        double proximity = tpExtendProximityPts == null ? 2.0 : tpExtendProximityPts;
+        if (proximity < 0) {
+            proximity = 0;
+        }
+        int maxExt = maxTpExtends == null ? 3 : maxTpExtends.intValue();
+        if (maxExt > 0 && tpExtendCount >= maxExt) {
+            return;
+        }
+
+        double lastPx = PriceTicks.toChartPoints(nqState.lastPrice, pips);
+        double dist = Math.abs(lastPx - currentTpPx);
+
+        // Clear debounce when price backs away
+        if (dist > proximity * 1.5) {
+            tpExtendArmed = true;
+            return;
+        }
+        if (!tpExtendArmed || dist > proximity) {
+            return;
+        }
+
+        // Must still be approaching TP, not already through it
+        boolean throughTp = openSide > 0 ? lastPx >= currentTpPx : lastPx <= currentTpPx;
+        if (throughTp) {
+            return;
+        }
+
+        EntryEval eval = evaluateEntryFromLastBurst(openSide, true);
+        if (!eval.ok) {
+            return;
+        }
+
+        double tpPts = takeProfitPts == null ? 10.0 : takeProfitPts;
+        double newTp = openSide > 0 ? currentTpPx + tpPts : currentTpPx - tpPts;
+        try {
+            OrderMoveParameters move = new OrderMoveParameters.Builder(tpOrderId)
+                    .setOrderEntryType(OrderEntryType.AUTO)
+                    .setStopPrice(Double.NaN)
+                    .setLimitPrice(newTp)
+                    .build();
+            api.updateOrder(move);
+            tpExtendCount++;
+            currentTpPx = newTp;
+            tpExtendArmed = false;
+            Log.info(String.format(
+                    "MAT TP EXTEND #%d %s oldDist=%.2f newTp=%.2f last=%.2f reason=favourable lagMs=%s",
+                    tpExtendCount,
+                    openSide > 0 ? "LONG" : "SHORT",
+                    dist,
+                    newTp,
+                    lastPx,
+                    eval.lagMs >= Long.MAX_VALUE / 2 ? "n/a" : Long.toString(eval.lagMs)));
+        } catch (Throwable t) {
+            Log.info("MAT TP EXTEND failed: " + t);
+        }
     }
 
     @Override
