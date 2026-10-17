@@ -1,14 +1,13 @@
 package com.bookmap.orderflow.trade;
 
 import java.awt.Color;
-import java.awt.event.KeyEvent;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -20,10 +19,6 @@ import com.bookmap.orderflow.core.TapeBurstTracker.Burst;
 
 import velox.api.layer1.Layer1ApiAdminAdapter;
 import velox.api.layer1.Layer1ApiProvider;
-import velox.api.layer1.actions.Layer1ActionMapper;
-import velox.api.layer1.actions.Layer1ActionsContainer;
-import velox.api.layer1.actions.Layer1ExternalAction;
-import velox.api.layer1.actions.annotations.Layer1ActionMetadata;
 import velox.api.layer1.annotations.Layer1ApiVersion;
 import velox.api.layer1.annotations.Layer1ApiVersionValue;
 import velox.api.layer1.annotations.Layer1MultiAccountTradingSupported;
@@ -74,8 +69,8 @@ import velox.api.layer1.simplified.TradeDataListener;
  * Catchup orders are not meaningful in Replay — Bookmap fills them all at the
  * current cursor time.
  *
- * Hotkeys (Settings → Keyboard Shortcuts → Addons/Momentum AutoTrade):
- * side both / longs / shorts / none. Also mirrored by Allow longs/shorts params.
+ * Side filter: Allow longs/shorts params seed {@link MatSideFilter}. Runtime
+ * toggles: Ctrl+Shift+L/K/B/X via {@link MatSideHotkeys} (works with Simplified).
  *
  * Orders use the account selected in Bookmap's Account dropdown for this alias
  * (Simulator on Replay is fine). Null accountId is used only when none is known.
@@ -95,15 +90,7 @@ public class MomentumAutoTradeModule implements
         MultiInstrumentListener,
         PositionListener,
         OrdersListener,
-        HistoricalModeListener,
-        Layer1ActionMapper {
-
-    static final String ACTION_SIDE_BOTH = "mat.side.both";
-    static final String ACTION_SIDE_LONGS = "mat.side.longs";
-    static final String ACTION_SIDE_SHORTS = "mat.side.shorts";
-    static final String ACTION_SIDE_NONE = "mat.side.none";
-    static final String ACTION_TOGGLE_LONGS = "mat.toggle.longs";
-    static final String ACTION_TOGGLE_SHORTS = "mat.toggle.shorts";
+        HistoricalModeListener {
 
     // --- EXP-0008 tape defaults ---
     @Parameter(name = "Bar ms", step = 50.0)
@@ -145,12 +132,24 @@ public class MomentumAutoTradeModule implements
     @Parameter(name = "Enable trading (OFF for signal-only)")
     Boolean enableTrading = false;
 
-    /** Runtime side filter (also toggled by hotkeys). */
+    /**
+     * Seeds {@link MatSideFilter} on attach / when changed in the panel.
+     * While trading prefer Ctrl+Shift hotkeys (see {@link MatSideHotkeys}).
+     */
     @Parameter(name = "Allow longs")
     Boolean allowLongs = true;
 
     @Parameter(name = "Allow shorts")
     Boolean allowShorts = true;
+
+    /** Ctrl+Shift+L/K toggle, Ctrl+Shift+B both, Ctrl+Shift+X none. */
+    @Parameter(name = "Enable Ctrl+Shift side hotkeys")
+    Boolean enableSideHotkeys = true;
+
+    /** Last panel values pushed into {@link MatSideFilter} (detect UI changes). */
+    private Boolean lastSyncedAllowLongs;
+    private Boolean lastSyncedAllowShorts;
+    private boolean sideHotkeysInstalled;
 
     /**
      * When true, orders use Bookmap's Account dropdown for this instrument
@@ -267,12 +266,19 @@ public class MomentumAutoTradeModule implements
 
         installAccountListener(api);
         refreshTradingAccountId("init");
+        syncSideFilterFromParams("init");
+        sideHotkeysInstalled = false;
+        if (Boolean.TRUE.equals(enableSideHotkeys)) {
+            MatSideHotkeys.install();
+            sideHotkeysInstalled = true;
+        }
 
         Log.info("Momentum AutoTrade init on " + alias
                 + " role=" + primary.role
                 + " trading=" + Boolean.TRUE.equals(enableTrading)
-                + " longs=" + Boolean.TRUE.equals(allowLongs)
-                + " shorts=" + Boolean.TRUE.equals(allowShorts)
+                + " longs=" + MatSideFilter.allowLongs()
+                + " shorts=" + MatSideFilter.allowShorts()
+                + " sideHotkeys=" + sideHotkeysInstalled
                 + " useSelectedAccount=" + Boolean.TRUE.equals(useSelectedAccount)
                 + " accountId=" + (tradingAccountId == null ? "null(primary)" : tradingAccountId)
                 + " cdPullback=" + Boolean.TRUE.equals(requireCdPullback)
@@ -521,9 +527,8 @@ public class MomentumAutoTradeModule implements
         boolean cooled = nqBurst.tsNs - lastSignalNs >= coolNs;
         int flatPos = flatCheckPosition();
         boolean flat = !Boolean.TRUE.equals(flatOnly) || (flatPos == 0 && !flatLocked);
-        boolean sideOk = nqBurst.side > 0
-                ? Boolean.TRUE.equals(allowLongs)
-                : Boolean.TRUE.equals(allowShorts);
+        syncSideFilterFromParams("params");
+        boolean sideOk = MatSideFilter.allowSide(nqBurst.side);
 
         // Always publish diagnostics
         esLagIndicator.addPoint(lagMs >= Long.MAX_VALUE / 2 ? -1.0 : lagMs);
@@ -618,18 +623,22 @@ public class MomentumAutoTradeModule implements
     }
 
     private String sideFilterLabel() {
-        boolean L = Boolean.TRUE.equals(allowLongs);
-        boolean S = Boolean.TRUE.equals(allowShorts);
-        if (L && S) {
-            return "BOTH";
+        return MatSideFilter.label();
+    }
+
+    /**
+     * Push panel Allow longs/shorts into {@link MatSideFilter} when they change.
+     * Hotkeys update the filter directly; unchanged panel values do not overwrite them.
+     */
+    private void syncSideFilterFromParams(String via) {
+        Boolean L = allowLongs;
+        Boolean S = allowShorts;
+        if (Objects.equals(lastSyncedAllowLongs, L) && Objects.equals(lastSyncedAllowShorts, S)) {
+            return;
         }
-        if (L) {
-            return "LONGS";
-        }
-        if (S) {
-            return "SHORTS";
-        }
-        return "NONE";
+        lastSyncedAllowLongs = L;
+        lastSyncedAllowShorts = S;
+        MatSideFilter.set(Boolean.TRUE.equals(L), Boolean.TRUE.equals(S), via);
     }
 
     @Override
@@ -847,77 +856,11 @@ public class MomentumAutoTradeModule implements
     }
 
     @Override
-    public Layer1ActionsContainer getActionsContainer() {
-        Set<Layer1ExternalAction> actions = new HashSet<>();
-        actions.add(new SideModeAction());
-        actions.add(new ToggleLongsAction());
-        actions.add(new ToggleShortsAction());
-        return new Layer1ActionsContainer(actions);
-    }
-
-    private void applySideMode(boolean longs, boolean shorts, String via) {
-        allowLongs = longs;
-        allowShorts = shorts;
-        Log.info("MAT side filter → " + sideFilterLabel() + " (via " + via + ")");
-    }
-
-    @Layer1ActionMetadata(id = ACTION_SIDE_BOTH, name = "Side: Both", groups = {"Side filter"})
-    @Layer1ActionMetadata(id = ACTION_SIDE_LONGS, name = "Side: Longs only", groups = {"Side filter"})
-    @Layer1ActionMetadata(id = ACTION_SIDE_SHORTS, name = "Side: Shorts only", groups = {"Side filter"})
-    @Layer1ActionMetadata(id = ACTION_SIDE_NONE, name = "Side: None (signals off)", groups = {"Side filter"})
-    public class SideModeAction implements Layer1ExternalAction {
-        @Override
-        public boolean performAction(String actionId, KeyEvent e) {
-            if (ACTION_SIDE_BOTH.equals(actionId)) {
-                applySideMode(true, true, actionId);
-            } else if (ACTION_SIDE_LONGS.equals(actionId)) {
-                applySideMode(true, false, actionId);
-            } else if (ACTION_SIDE_SHORTS.equals(actionId)) {
-                applySideMode(false, true, actionId);
-            } else if (ACTION_SIDE_NONE.equals(actionId)) {
-                applySideMode(false, false, actionId);
-            } else {
-                return false;
-            }
-            return true;
-        }
-
-        @Override
-        public void onShortcutChanged(String actionId, Set<String> shortcuts) {
-            Log.info("MAT hotkey bound " + actionId + " → " + shortcuts);
-        }
-    }
-
-    @Layer1ActionMetadata(id = ACTION_TOGGLE_LONGS, name = "Toggle Allow longs", groups = {"Side filter"})
-    public class ToggleLongsAction implements Layer1ExternalAction {
-        @Override
-        public boolean performAction(String actionId, KeyEvent e) {
-            applySideMode(!Boolean.TRUE.equals(allowLongs), Boolean.TRUE.equals(allowShorts), actionId);
-            return true;
-        }
-
-        @Override
-        public void onShortcutChanged(String actionId, Set<String> shortcuts) {
-            Log.info("MAT hotkey bound " + actionId + " → " + shortcuts);
-        }
-    }
-
-    @Layer1ActionMetadata(id = ACTION_TOGGLE_SHORTS, name = "Toggle Allow shorts", groups = {"Side filter"})
-    public class ToggleShortsAction implements Layer1ExternalAction {
-        @Override
-        public boolean performAction(String actionId, KeyEvent e) {
-            applySideMode(Boolean.TRUE.equals(allowLongs), !Boolean.TRUE.equals(allowShorts), actionId);
-            return true;
-        }
-
-        @Override
-        public void onShortcutChanged(String actionId, Set<String> shortcuts) {
-            Log.info("MAT hotkey bound " + actionId + " → " + shortcuts);
-        }
-    }
-
-    @Override
     public void stop() {
+        if (sideHotkeysInstalled) {
+            MatSideHotkeys.uninstall();
+            sideHotkeysInstalled = false;
+        }
         if (provider != null && adminListener != null) {
             try {
                 provider.removeListener(adminListener);

@@ -11,8 +11,10 @@ Custom Bookmap Layer 1 add-ons for NQ scalping with ES confirmation:
 | **Liquidity Reaction** | Large-order attract / repel / absorb / dwell / withdraw |
 | **ES/NQ Flow Confirm** | Normalized ES vs NQ flow agreement (attach on NQ; keep ES open) |
 | **Momentum AutoTrade (ES+NQ)** | EXP-0008 tape momentum signals (+ optional CD pullback); optional bracket orders |
+| **MAT Hotkeys** | Classic companion: keyboard shortcuts for MAT long/short side filter |
 | **Pitch and Catch** | High-vol peak/trough (“pitch”) then low-vol move away (“catch”); chart markers |
 | **HV Extreme Move** | Simple: HV peak/trough → mark when price is N ticks away |
+| **Trapped Retest** | HV peak → weak lower-vol retest → fire on break beyond 2nd swing |
 
 ## Prerequisites
 
@@ -107,8 +109,19 @@ Research lead from **EXP-0008** (tape momentum + ES sync). Optional **CD pullbac
 | **MAT ES lag ms** | Lag to matching ES burst (`-1` if none) |
 | **MAT CD trend** | `+1` / `-1` / `0` from 22-tick CD SMA |
 
+**Hotkeys (long/short on/off):** with MAT attached and **Enable Ctrl+Shift side hotkeys = true** (default):
+
+| Shortcut | Effect |
+|---|---|
+| **Ctrl+Shift+L** | Toggle allow longs |
+| **Ctrl+Shift+K** | Toggle allow shorts |
+| **Ctrl+Shift+B** | Both on |
+| **Ctrl+Shift+X** | Both off (no new signals) |
+
+(Ctrl+Alt clashes with Windows / Evernote / Snipping Tool.) Log example: `MAT side filter: SHORTS only  [longs=false shorts=true]  (toggled longs)`. Panel **Allow longs/shorts** still seed/sync the same filter when changed.
+
 **Replay test (recommended first):**
-1. Rebuild JAR, remove/re-add the plugin in Bookmap if already loaded.
+1. Rebuild JAR, remove/re-add the plugin in Bookmap if already loaded; enable **MAT Hotkeys** and **Momentum AutoTrade (ES+NQ)**.
 2. Open **Replay**, load a feed with **both NQ and ES**.
 3. Add **Momentum AutoTrade (ES+NQ)** on the **NQ** chart; leave **Enable trading = false**.
 4. Defaults match the study: 100ms bars, min 6 trades, vol≥25, |imb|≥0.55, ES sync 1500ms.
@@ -136,6 +149,23 @@ Warns when a **high-volume** rotation peak/trough is followed by a **low-volume*
 Peak uses volume in **Peak band pts** around the extreme; catch uses the **Catch pts** price span away from it.
 
 **Suggested start (NQ):** Catch pts `20`, Peak band `2`, Confirm `5`, High vol mult `1.5`, Low vol frac `0.70`. Tighten Low vol frac (e.g. `0.50`) for quieter catches only. Toggle **Show in-play lines** off if the pitch/target lines clutter the chart.
+
+### Trapped Retest
+Two-swing trapped-size fade: **high-volume** extreme (peak1), then a **lower-volume** failed retest (peak2), then fire when price breaks **Break pts** beyond peak2.
+
+| Panel | Meaning |
+|---|---|
+| **TR Peak1 Long / Short** | First HV extreme while in play |
+| **TR Peak2 Long / Short** | Weak retest extreme while waiting for break |
+| **TR Fire Long / Short** | Marker when break completes |
+| **TR Phase** | `0` idle / `±1` after peak1 / `±2` after peak2 |
+| **TR Peak ratio** | Peak1 band vol ÷ avg; ≥ **High vol mult** to arm |
+| **TR Retest ratio** | Peak2 ÷ peak1 vol (live while seeking); ≤ **Max retest frac** to accept |
+| **TR Signal** | Brief `±1` on fire |
+
+**Logic (short):** confirm HV local high → min pullback → lower high with retest vol ≤ frac × peak1 → fire when price drops **Break pts** from peak2. Long is mirrored. Distinct from Pitch and Catch (one-swing quiet path).
+
+**Suggested start (NQ):** Confirm `5`, Peak band `2`, Min pullback `5`, Break `4`, High vol mult `1.5`, Max retest frac `0.60`. Tighten Max retest frac (e.g. `0.45`) for quieter second peaks only.
 
 ### HV Extreme Move
 Minimal building block: find a **high-volume** local peak or trough, then mark when price has moved **Move ticks** (default 20) away.
@@ -165,9 +195,10 @@ bookmap-addon/
     effort/       Effort vs Result
     liquidity/    Liquidity Reaction
     crossmarket/  ES/NQ Flow Confirm
-    trade/        Momentum AutoTrade (ES+NQ)
+    trade/        Momentum AutoTrade (ES+NQ) + MAT Hotkeys companion
     pitch/        Pitch and Catch
     hvmove/       HV Extreme Move
+    retest/       Trapped Retest
 ```
 
 Order submission is only in **Momentum AutoTrade**, and only when **Enable trading** is checked.
