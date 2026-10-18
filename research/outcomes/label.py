@@ -1,19 +1,30 @@
-"""Forward outcome labeling with numpy/pyarrow only."""
+"""Forward outcome labeling with numpy/pyarrow only.
+
+Parquet trade ``price`` is in tick units (NQ tick = 0.25 chart points).
+``build_price_path`` converts to NQ chart points so ``hit_10pts`` /
+``ret_pts_*`` / MFE/MAE are genuine points, matching ``mat_sim``.
+"""
 from __future__ import annotations
 
 import numpy as np
 import pyarrow as pa
 
+# Default NQ: 1 tick (parquet price unit) = 0.25 chart points.
+DEFAULT_PTS_PER_TICK = 0.25
 
-def build_price_path(trades: pa.Table) -> tuple[np.ndarray, np.ndarray]:
+
+def build_price_path(
+    trades: pa.Table,
+    *,
+    pts_per_tick: float = DEFAULT_PTS_PER_TICK,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return (ts_ns, price_pts) — last trade price per timestamp in chart points."""
     if trades.num_rows == 0:
         return np.array([], dtype=np.int64), np.array([], dtype=np.float64)
     ts = trades.column("ts_ns").to_numpy()
-    price = trades.column("price").to_numpy()
+    price = trades.column("price").to_numpy().astype(np.float64) * float(pts_per_tick)
     order = np.argsort(ts)
     ts, price = ts[order], price[order]
-    # last price per timestamp
-    uniq_ts, idx = np.unique(ts, return_index=True)
     # for duplicates keep last: reverse unique trick
     rev = ts[::-1]
     uniq_rev, idx_rev = np.unique(rev, return_index=True)
@@ -29,6 +40,7 @@ def label_events(
     horizons_ms: list[int],
     point_targets: list[float],
 ) -> pa.Table:
+    """Label forward outcomes. ``path_px`` and ``point_targets`` are chart points."""
     if events.num_rows == 0 or len(path_ts) == 0:
         return pa.table({})
 

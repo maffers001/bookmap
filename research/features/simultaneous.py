@@ -166,7 +166,11 @@ def dual_range_imbalance_events(
     avg_n: int = 20,
     tick_size: float = 1.0,
 ) -> pa.Table:
-    """NQ range-imbalance event with same-side ES range event within ±sync_ms."""
+    """NQ range-imbalance with same-side ES within ±sync_ms.
+
+    Stamp = last input used: ``event_ts_ns = max(nq_close, es_close)`` so
+    NQ-first closes are not labelled mid-impulse before ES confirms.
+    """
     if nq.num_rows == 0 or es.num_rows == 0:
         return pa.table({})
 
@@ -203,11 +207,13 @@ def dual_range_imbalance_events(
 
     keep: list[int] = []
     lags: list[float] = []
+    es_matched: list[int] = []
     for i, (t, s) in enumerate(zip(nq_ts, nq_side)):
         lo = int(np.searchsorted(es_ts, t - window, side="left"))
         hi = int(np.searchsorted(es_ts, t + window, side="right"))
         best_abs = None
         best_signed = None
+        best_es = None
         for j in range(lo, hi):
             if es_side[j] != s:
                 continue
@@ -216,15 +222,22 @@ def dual_range_imbalance_events(
             if best_abs is None or lag < best_abs:
                 best_abs = lag
                 best_signed = signed
-        if best_abs is not None:
+                best_es = int(es_ts[j])
+        if best_abs is not None and best_es is not None:
             keep.append(i)
             lags.append(best_signed / 1e6)
+            es_matched.append(best_es)
 
     if not keep:
         return pa.table({})
     idx = np.asarray(keep, dtype=np.int64)
     sub = nq_ev.take(idx)
-    out = sub
+    confirm_ts = np.maximum(nq_ts[idx], np.asarray(es_matched, dtype=np.int64))
+    out = sub.set_column(
+        sub.schema.get_field_index("event_ts_ns"),
+        "event_ts_ns",
+        pa.array(confirm_ts, type=pa.int64()),
+    )
     if "es_lag_ms" in out.column_names:
         out = out.drop("es_lag_ms")
     out = out.append_column(

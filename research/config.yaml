@@ -13,8 +13,10 @@ rth_uk:
 nq_point_ticks: 4
 nq_tick_size: 0.25
 
-outcome_horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
-nq_point_targets: [10, 20]
+# Horizons and targets are NQ chart points (label.py scales parquet ticks × 0.25).
+# Longer horizons let 10–30 pt races resolve; pre-fix hit_10pts was 10 ticks (=2.5 pts).
+outcome_horizons_ms: [250, 500, 1000, 2000, 5000, 10000, 20000, 30000, 60000]
+nq_point_targets: [5, 10, 20, 30]
 
 feature_bar_ms: 250
 

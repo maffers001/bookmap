@@ -1,43 +1,88 @@
 # Experiment Log
 
+> **2026-10-18 evening — methodology reset.** Pre-fix EXP-0002…0033 event-study
+> numbers used (a) tick units as if they were points, (b) often the look-ahead
+> 85% EXP-0008 comparator, (c) depth only on 5 days. Those rows are marked
+> `needs re-run (units/comparator)`. Corrected shortlist re-runs are appended
+> under “Run notes” below. MAT-sim P&L results (points, causal ES) remain valid.
+
 | ID | Hypothesis | Status | Sessions | Notes |
 |----|------------|--------|----------|-------|
 | EXP-0001 | Extract validation | pending | — | Spot-check after first real `.bmf` extract |
-| EXP-0002 | H1 effort/result | dug (n=16) | 160926–220926 (5 days) | ε-spike defect; absorption LONGs +9pts@2s, noisy SHORTs ~0; fade by 10s |
-| EXP-0002b | H1 gated long-only | ran (n=7) | same 5 days | counter-ticks + no flat; mean +9.3@2s / +0.1@10s; hit+10=57%; too small |
-| EXP-0002c | H1 gated both | ran (n=14) | same 5 days | dropped 2 flats; shorts dilute; mean +4.9@2s / −1.3@10s |
-| EXP-0005 | H2 absorption | ran (n=57) | same 5 days | abs≥50, z off; hit+10=40%; early path ≤0; mean@10s +3.6 (med 0) — no edge yet |
-| EXP-0006 | H2 replenishment | ran (n=50) | same 5 days | replenish≥1 no lift vs 0005; exploratory: no-replenish n=7 / consume≥1.5 n=10 look better |
-| EXP-0009 | H6 CD with-flow gate | ran | same 5 days | 22-tick CD SMA100; with-flow hurts H2 absorbs; against-trend absorbs look better; pullback n tiny |
+| EXP-0002 | H1 effort/result | needs re-run (units/comparator) | 5d | ε-spike defect; absorption LONGs +9pts@2s, noisy SHORTs ~0; fade by 10s |
+| EXP-0002b | H1 gated long-only | needs re-run (units/comparator) | 5d | counter-ticks + no flat; mean +9.3@2s / +0.1@10s; hit+10=57%; too small |
+| EXP-0002c | H1 gated both | needs re-run (units/comparator) | 5d | dropped 2 flats; shorts dilute; mean +4.9@2s / −1.3@10s |
+| EXP-0005 | H2 absorption | re-run 14d (see notes) | 14d | was 5d-only depth; re-run after full depth convert |
+| EXP-0006 | H2 replenishment | re-run 14d (see notes) | 14d | was 5d-only depth |
+| EXP-0009 | H6 CD with-flow gate | needs re-run (units/comparator) | 5d | 22-tick CD SMA100; with-flow hurts H2 absorbs; against-trend absorbs look better; pullback n tiny |
 | EXP-0004 | H3 persistence | pending | — | |
 | EXP-0007 | H3 attract/repel/dwell | pending | — | |
-| EXP-0008 | H4 ES+NQ momentum | ran (n=440) | same 5 days | fast-tape + ES sync; hit+10=82% vs null~49% / NQ-only~67%; lag&lt;250ms best; needs holdout |
+| EXP-0008 | H4 ES+NQ momentum | corrected baseline | 14d | points + confirm stamp + 60s: hit+10≈0.44; see notes |
 | EXP-0010 | H5 composite | pending | — | |
-| EXP-0011 | H7 dual LVN rejection | falsified (n=28) | same 5 days | dual hit+10 39% ≈ NQ-only 40% ≈ null 38%; no ship |
-| EXP-0012 | H8 liquidity flip at LVN | empty gate | same 5 days | flip=0; beyond-only n=3 (one cluster) — not validated |
-| EXP-0013 | H9 correlated dwell/repel | empty (n≈0) | same 5 days | uncontacted dwell/withdraw almost never closes on NQ abs≥50 |
-| EXP-0014 | H6 CD pullback primary | ran (n=270/14) | same 5 days | CD-alone hit+10 46%; ×momentum n=14 hit 64% &lt; mom 82% — CD not primary |
-| EXP-0015 | H10 CD BB regime × momentum | falsified (filter) | same 5 days | wide 87% ≈ narrow 85% ≈ all 85% (lag&lt;250); no material lift |
-| EXP-0016 | H11 dual challenge-wo-trade ± LVN × narrow BB | failed | same 5 days | dual fade hit+10 21%; narrow stratum empty; near-LVN worse |
-| EXP-0017 | H12 aggressor sweep momentum | falsified | same 5 days | dual hit+10 52% vs null 43% vs EXP-0008 lag250 85% — worse than bar bursts |
-| EXP-0018 | H13 near-BBO MBO vacuum | falsified | same 5 days | dual hit+10 40% ≈ null 41%; n=5245 no edge |
-| EXP-0019 | H14 VPOC/HVN departure (S20/S4 port) | falsified | same 5 days | S20 hit+10 40% / S4 36% ≤ null 46% ≪ EXP-0008 85%; scalp horizon ≠ TP 25pt holds |
-| EXP-0020 | H15 near-book depth imbalance | falsified | same 5 days | NQ pressure hit+10 ≈44% ≈ null; dual rare; sensitivity thr/radius no lift |
-| EXP-0021 | H16 dual micro-regime take+hold | empty / falsified | same 5 days | composite dual n=0; dual take≈null; dual hold n=9 hit22% |
-| EXP-0022 | H17 dual ES+NQ CD trend/BB filter | falsified | same 5 days | matched CD: ES flat; adapted ES: small hit bumps, path ≤ unfiltered 0008 |
-| EXP-0023 | H7b tightened dual LVN (HVN sandwich) | falsified / empty dual | same 5 days | dual≈0; NQ-only hit~31–44% ≈ null; dig lookback/frac no lift |
-| EXP-0024 | H18 ES-leads-NQ on lag&lt;250 | falsified | same 5 days | ES-leads hit+10 81% / @10s +7.1 &lt; all 85% / +9.8 |
-| EXP-0025 | H19 swing-break × momentum | promising overlay (no ship) | same 5 days | 3m break 88%/@10s+11; 5m dig 92%/+13; needs holdout |
-| EXP-0026 | H20 dual failed swing-break fade | empty dual | same 5 days | dual n=7 &lt;15 stop; NQ-only ≈ null |
-| EXP-0027 | H21 flush-into-hold sweep reverse | empty / ≈null | same 5 days | chart-size flush empty in RTH; soft n=29 hit41%≈null; dual=0 |
-| EXP-0028 | H22 ES impulse / NQ quiet catch-up | falsified (n small) | same 5 days | n=12 hit+10 42%≈null; path mean noisy |
-| EXP-0029 | H23 ES+NQ same-window co-move | falsified | same 5 days | n=206 hit+10 50%≈null; med@10s −1 ≪ 0008 |
-| EXP-0030 | H24 avg rotation gate (mom fresh / fade ext) | falsified (inverted) | same 5 days | fresh mom worse; extended mom better; abs fade n=7 worse |
-| EXP-0031 | H25 trapped peak (LVN band + quiet 20pt / ≤30s) | falsified | same 5 days | H25b n=26 shorts 27%≪null; dig best ~55% flat |
-| EXP-0032 | H26 range-bar buy/sell imb vs prior avg | falsified | same 5 days | all cells ~44–49%≈null; path ≤0; ≪0008 85% |
-| EXP-0033 | H27 simultaneous ES+NQ aggressor flow | ran (≈0008 w/ px) | same 5 days | flow alone 73%≪0008; flow+px ≈0008; hi-vol overlay in-sample |
+| EXP-0011 | H7 dual LVN rejection | re-run 14d (see notes) | 14d | was falsified on 5d ticks |
+| EXP-0012 | H8 liquidity flip at LVN | needs re-run (units/comparator) | 5d | flip=0; beyond-only n=3 (one cluster) — not validated |
+| EXP-0013 | H9 correlated dwell/repel | needs re-run (units/comparator) | 5d | uncontacted dwell/withdraw almost never closes on NQ abs≥50 |
+| EXP-0014 | H6 CD pullback primary | re-run 14d (see notes) | 14d | causal confirm window |
+| EXP-0015 | H10 CD BB regime × momentum | needs re-run (units/comparator) | 5d→14d ticks | wide≈narrow; non-monotonic in 14d tick re-run |
+| EXP-0016 | H11 dual challenge-wo-trade ± LVN × narrow BB | re-run 14d (see notes) | 14d | |
+| EXP-0017 | H12 aggressor sweep momentum | needs re-run (units/comparator) | 5d | dual hit+10 52% vs null 43% vs EXP-0008 lag250 85% — worse than bar bursts |
+| EXP-0018 | H13 near-BBO MBO vacuum | needs re-run (units/comparator) | 5d | dual hit+10 40% ≈ null 41%; n=5245 no edge |
+| EXP-0019 | H14 VPOC/HVN departure (S20/S4 port) | needs re-run (units/comparator) | 5d | S20 hit+10 40% / S4 36% ≤ null 46% vs old 0008 85%; scalp horizon ≠ TP 25pt holds |
+| EXP-0020 | H15 near-book depth imbalance | re-run 14d (see notes) | 14d | |
+| EXP-0021 | H16 dual micro-regime take+hold | needs re-run (units/comparator) | 5d | composite dual n=0; dual take≈null; dual hold n=9 hit22% |
+| EXP-0022 | H17 dual ES+NQ CD trend/BB filter | needs re-run (units/comparator) | 5d | matched CD: ES flat; adapted ES: small hit bumps, path ≤ unfiltered 0008 |
+| EXP-0023 | H7b tightened dual LVN (HVN sandwich) | needs re-run (units/comparator) | 5d | dual≈0; NQ-only hit~31–44% ≈ null; dig lookback/frac no lift |
+| EXP-0024 | H18 ES-leads-NQ on lag&lt;250 | re-run 14d (see notes) | 14d | inverted → NQ-leads; test via mat_sim es_stamp=confirm |
+| EXP-0025 | H19 swing-break × momentum | re-run 14d (see notes) | 14d | |
+| EXP-0026 | H20 dual failed swing-break fade | needs re-run (units/comparator) | 5d | dual n=7 &lt;15 stop; NQ-only ≈ null |
+| EXP-0027 | H21 flush-into-hold sweep reverse | needs re-run (units/comparator) | 5d | chart-size flush empty in RTH; soft n=29 hit41%≈null; dual=0 |
+| EXP-0028 | H22 ES impulse / NQ quiet catch-up | needs re-run (units/comparator) | 5d | n=12 hit+10 42%≈null; path mean noisy |
+| EXP-0029 | H23 ES+NQ same-window co-move | needs re-run (units/comparator) | 5d | n=206 hit+10 50%≈null; med@10s −1 ≪ 0008 |
+| EXP-0030 | H24 avg rotation gate (mom fresh / fade ext) | needs re-run (units/comparator) | 5d→14d ticks | inverted again on 14d |
+| EXP-0031 | H25 trapped peak (LVN band + quiet 20pt / ≤30s) | needs re-run (units/comparator) | 5d | H25b n=26 shorts 27%≪null; dig best ~55% flat |
+| EXP-0032 | H26 range-bar buy/sell imb vs prior avg | needs re-run (units/comparator) | 5d | all cells ~44–49%≈null; path ≤0; ≪0008 85% |
+| EXP-0033 | H27 simultaneous ES+NQ aggressor flow | needs re-run (units/comparator) | 5d→14d ticks | dual range stratum was look-ahead; stamp fixed |
+| EXP-0034 | H4 MAT gates | ran | 14d US RTH | trend+VWAP lift; see results/EXP-0034 |
 
 ## Run notes
+
+### 2026-10-18 night — OOS + post-fix exploration (base = vol k=1)
+
+- **OOS (9 new sessions):** `results/MAT2_ALL_SESSIONS_VOLK1/` (also mirrored under `MAT2_ALL_SESSIONS_TP12p5_SL30/`).
+  - **vol k=1** causal trend+VWAP UK1430–1700 1-tick: old +432 gross / **new +472** (PF 1.22) — **generalised**. Net after 0.25 pt/RT: old +359 / new +420.
+  - TP12.5/SL30: old +580 / **new +130** — ~75% OOS degradation; keep as comparator only.
+  - fixed ±10: noise.
+- **Decision: frozen base = vol k=1** (`make_vol_bracket(1.0)`, clip 6–30). Live: enable Vol-scaled + **k=1**.
+- **Data hygiene:** `290926` vs `300926` are **not** duplicates (Sep 29 vs 30; different trade counts / P&L). Prior identical rows were a runner bug; corrected per-session table shows 290926 −168 net as the worst new day (drives much of new-cohort DD).
+- **NQ-first (confirm):** Java `ES confirm mode` + `bookmap-orderflow-mat-v2-confirm.jar`; refs `MAT2_REF_*_confirm_vol_k1`. On vol k=1 across 23d, confirm **does not** lift vs causal (net +586 vs +779) — lift previously seen on 12.5/30. Ship param; default remains causal=0.
+- **Exits** (`MAT2_EXITS_VOLK1/`): time/BE/trail variants on vol k=1 — none beat base net on both cohorts; trail0.5 cuts loss-tail to 0 but net collapses. No ship.
+- **Risk gates / CD** (`MAT2_OVERLAYS_VOLK1/`):
+  - Best by DD/days+: `causal_skip_range175` (maxDD 206, days+ 17, new +492) and `confirm_skip_range175` (maxDD 172, days+ 17, new +494). lag100 alone hurts new cohort.
+  - **CD pullback gate:** old +165 / **new −182** (causal) — new-9 disagrees → **do not ship**.
+- **Stop list (do not re-run):**
+  - H2/H7/H11/H15 depth fades (≈ null on 14d depth in points).
+  - Swing-break, rotation, BB-regime filters (no hit lift in points).
+  - Fixed TP/SL grid search — 12.5/30 did not generalise; do not re-tune fixed brackets.
+
+### 2026-10-18 evening — methodology fix + shortlist re-run
+- **Yardstick:** `label.py` path in chart points (`×0.25`); horizons to 60 s; targets 5/10/20/30 pts.
+- **Stamps:** `cross_confirm_bursts` default `stamp=confirm`; CD pullback filter causal; dual range stamp at `max(nq,es)`.
+- **Depth:** all 14 sessions + 161026 (OOS) have depth/mbo parquet matching `meta.json` counts.
+- **EXP-0008 corrected (14d, confirm stamp):** n=2252, `p_hit_5pts`≈0.53, `p_hit_10pts`≈0.44, `p_hit_20pts`≈0.24 @60s; mean@10s ≈ +0.32 pts.
+- **MAT overlays TP12.5/SL30 trend+VWAP UK1430–1700 (1-tick, 14d, 161026 OOS):** see `results/MAT2_OVERLAYS_12p5_30/`.
+  - `base_causal` n=312 net **+580.5** (train +397 / hold +183.5)
+  - `base_confirm` (NQ-first) n=341 net **+723.2** (train +435 / hold +288)
+  - `causal_lag100` net **+608.5**; `causal_skip_range175` net +508.8 (10/14 days+)
+- Shortlist event-study (points, 60 s) — full dump `results/SHORTLIST_RERUN_POINTS.md`:
+  - **0008** n=2252 hit+10 **0.44** / hit+5 0.53 / @10s +0.32 / @60s −0.61
+  - **0025** swing-break n=470 hit+10 0.42 ≤ all_lag250 0.44 — **no hit lift** in points (path @10s slightly better)
+  - **0024** es_leads/nq_leads/simult hit+10 ≈0.45/0.45/0.43 — tick-unit “NQ-leads 78%” **gone** in points; MAT `es_stamp=confirm` still lifts P&L (+723 vs +580)
+  - **0014** CD×mom confirmed n=49 hit+10 **0.55** / @60s **+7.8** — thin but best path; causal stamp
+  - **0005** absorb n=276 hit+10 0.37 ≈ null — still no edge on 14d depth
+  - **0006** replenish n=218 hit+10 0.34 — no lift
+  - **0011** dual LVN n=165 hit+10 0.39 ≈ null 0.37 — still no
+  - **0016** dual challenge narrow n=2 — empty
+  - **0020** NQ pressure n=2057 hit+10 0.43 ≈ null; dual_magnet n=20 hit+10 0.70 / @10s +6.2 — **tiny**, dig only
 
 ### 2026-10-09 — H27 simultaneous ES+NQ aggressor flow (same clock)
 - Detector: both markets same-side aggressor imbalance in the **same** wall-clock tape bar (`research/features/simultaneous.py`). Also dual H26 range sync; compare to EXP-0008 |lag|&lt;50ms.

@@ -177,14 +177,17 @@ JAR: `bookmap-addon/build/libs/bookmap-orderflow-mat-v2.jar` (contains both v1 a
 | **Trend mode (0=off 1=with 2=against)** | **1** (with) | Require burst with rolling net |
 | **Require VWAP side** | **true** | Long only ≥ session VWAP; short only ≤ |
 | **Vol-scaled brackets** | false | TP=SL = k × median 1-min range (floor/cap) |
-| **Vol multiple k** / **Vol window min** / **Bracket min/max pts** | 3 / 30 / 6–30 | Scaling controls |
+| **Vol multiple k** / **Vol window min** / **Bracket min/max pts** | **1** / 30 / 6–30 | **Recommended k=1** (OOS 2026-10-18); clip 6–30 |
+| **ES confirm mode (0=causal 1=confirm)** | 0 | 1 = NQ-first: pending NQ burst fires when ES confirms within Max ES lag |
 | **VWAP session open UK min-of-day** | 870 | UK 14:30 |
 
-Logs: `MAT2 SIGNAL …`, `MAT2 REJECT regime_hot_skip|trend_mode_fail|vwap_side_fail …`.
+Logs: `MAT2 SIGNAL …`, `MAT2 SIGNAL(confirm) nqTs=… esTs=… lagMs=…`, `MAT2 REJECT regime_hot_skip|trend_mode_fail|vwap_side_fail …`.
 
-Defaults are **with-trend + VWAP** (range gate off). Trend uses **completed 1-minute bars only** (no intra-minute hindsight). VWAP is a running trade VWAP.
+Defaults are **with-trend + VWAP** (range gate off). Trend uses **completed 1-minute bars only** (no intra-minute hindsight). VWAP is a running trade VWAP. Frozen research base = **vol k=1** symmetric brackets (enable Vol-scaled + k=1).
 
-**Replay check vs offline reference (session 021026):** see `results/MAT2_REF_021026.md`. Install `bookmap-orderflow-mat-v2-diag.jar`, leave **Verbose candidate log = true**, grep `MAT2 CANDIDATE` / `MAT2 SIGNAL` and match `tsNs=` to the table.
+**Replay check vs offline reference:**  
+`python -m research.export_mat2_ref --session 021026 --stamp confirm --bracket vol_k1`  
+Install `bookmap-orderflow-mat-v2-confirm.jar`, set **ES confirm mode=1**, **Vol-scaled=true**, **k=1**, Verbose=true; grep `MAT2 SIGNAL` / `MAT2 SIGNAL(confirm)` and match with `python -m research.compare_replay_ref`.
 
 ### Pitch and Catch
 Warns when a **high-volume** rotation peak/trough is followed by a **low-volume** move of **Catch pts** (default 20) without reclaiming the extreme.

@@ -28,7 +28,8 @@ dependencies {
 }
 
 jar {
-    archiveFileName = 'bookmap-orderflow.jar'
+    // Default locked when Bookmap has the main jar open; confirm build uses sibling name.
+    archiveFileName = System.getenv('ORDERFLOW_JAR_NAME') ?: 'bookmap-orderflow.jar'
 }
 
 tasks.withType(JavaCompile).configureEach {

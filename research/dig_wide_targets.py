@@ -24,6 +24,7 @@ from research.run_experiment import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+# Chart points (label.py scales parquet ticks × 0.25). Pre-fix TARGETS were ticks.
 TARGETS = [10, 15, 20, 25, 30, 40]
 HORIZONS = [250, 500, 1000, 2000, 5000, 10000, 20000, 30000, 60000]
 

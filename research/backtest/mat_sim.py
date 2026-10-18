@@ -44,6 +44,18 @@ class MatSimConfig:
     slip_ticks: float = 0.0  # per side
     flat_only: bool = True
     pts_per_tick: float = TICK_PTS
+    # "causal" = ES at/before NQ (live MAT v2); "confirm" = ±sync, enter at max(nq,es)
+    es_stamp: str = "causal"
+    # Round-trip commission in chart points (subtracted once per trade in summary)
+    commission_pts_rt: float = 0.0
+    # Optional exit management (defaults off)
+    time_stop_sec: float = 0.0
+    be_trigger_pts: float = 0.0  # move stop to entry after this MFE
+    trail_pts: float = 0.0  # trail stop by this many pts from best
+    be_frac: float = 0.0  # if >0 and bracket known: be_trigger = frac * bracket
+    trail_frac: float = 0.0  # if >0: trail = frac * bracket
+    # Optional CD pullback gate (mirrors live Require CD pullback)
+    cd_gate: bool = False
 
 
 @dataclass
@@ -70,10 +82,12 @@ class TradeResult:
 class SimSummary:
     n: int = 0
     wins: int = 0
-    net: float = 0.0
+    net: float = 0.0  # after commission
+    gross: float = 0.0  # price P&L before commission
     gross_win: float = 0.0
     gross_loss: float = 0.0
     max_dd: float = 0.0
+    commission_total: float = 0.0
     trades: list[TradeResult] = field(default_factory=list)
 
     @property
@@ -91,7 +105,9 @@ class SimSummary:
             "n": self.n,
             "wins": self.wins,
             "wr": None if self.n == 0 else round(self.wr, 4),
+            "gross": round(self.gross, 2),
             "net": round(self.net, 2),
+            "commission": round(self.commission_total, 2),
             "pf": None if self.n == 0 else (None if not np.isfinite(self.pf) else round(self.pf, 3)),
             "max_dd": round(self.max_dd, 2),
             "gross_win": round(self.gross_win, 2),
@@ -104,7 +120,12 @@ def detect_signals(
     es: pa.Table,
     cfg: MatSimConfig,
 ) -> pa.Table:
-    """Causal ES+NQ confirmed bursts; event_ts_ns = bar end."""
+    """ES+NQ confirmed bursts; event_ts_ns = bar end (or confirm time).
+
+    ``cfg.es_stamp``:
+      - ``"causal"`` (default): ES at/before NQ — matches live MAT v2
+      - ``"confirm"``: ES within ±sync; stamp at max(nq, es) — includes NQ-first
+    """
     if nq.num_rows == 0:
         return pa.table({})
     burst_kw = dict(
@@ -120,13 +141,13 @@ def detect_signals(
     es_bars = trades_to_tape_bars(es, bar_ms=cfg.bar_ms) if es.num_rows else pa.table({})
     nq_burst = momentum_burst_events(nq_bars, **burst_kw)
     es_burst = momentum_burst_events(es_bars, **burst_kw) if es_bars.num_rows else pa.table({})
+    stamp = cfg.es_stamp if cfg.es_stamp in ("causal", "confirm", "nq") else "causal"
     events = cross_confirm_bursts(
-        nq_burst, es_burst, sync_ms=cfg.sync_ms, causal_only=True
+        nq_burst, es_burst, sync_ms=cfg.sync_ms, stamp=stamp
     )
     if events.num_rows == 0:
         return events
     lag = events.column("es_lag_ms").to_numpy()
-    # causal signed: ES before NQ => es_signed_lag_ms <= 0; abs lag = es_lag_ms
     keep = lag <= cfg.max_es_lag_ms
     if not keep.any():
         return pa.table({})
@@ -141,32 +162,100 @@ def _simulate_path(
     tp_pts: float,
     sl_pts: float,
     slip_pts: float,
+    *,
+    time_stop_sec: float = 0.0,
+    be_trigger_pts: float = 0.0,
+    trail_pts: float = 0.0,
 ) -> tuple[float, float, bool, int, str]:
-    """Return exit_px, pnl, win, bars_held, reason."""
+    """Return exit_px, pnl, win, bars_held, reason.
+
+    Optional exits (defaults off): ``time`` / ``be`` / ``trail``. Stop hits are
+    conservative vs TP when both print on the same bar.
+    """
     entry = float(path_px[entry_i]) + side * slip_pts  # worse fill
+    entry_ts = int(path_ts[entry_i])
     tp = entry + side * tp_pts
-    sl = entry - side * sl_pts
+    init_sl = entry - side * sl_pts
+    sl = init_sl
+    be_armed = False
+    trail_armed = False
+    best = entry
+    time_ns = int(time_stop_sec * 1e9) if time_stop_sec and time_stop_sec > 0 else 0
+
     for j in range(entry_i + 1, len(path_ts)):
         px = float(path_px[j])
+        # Update best / BE / trail before hit checks
+        if side > 0:
+            best = max(best, px)
+            mfe = best - entry
+        else:
+            best = min(best, px)
+            mfe = entry - best
+
+        if be_trigger_pts > 0 and mfe >= be_trigger_pts and not be_armed:
+            be_armed = True
+            # Move stop to entry (breakeven fill before exit slip)
+            sl = entry if side > 0 else entry
+            if side > 0:
+                sl = max(sl, entry)
+            else:
+                sl = min(sl, entry)
+
+        if trail_pts > 0 and (be_armed or be_trigger_pts <= 0):
+            # Trail from best once BE armed, or immediately if no BE trigger
+            if be_trigger_pts <= 0 or be_armed:
+                trail_armed = True
+                trail_sl = best - side * trail_pts
+                if side > 0:
+                    sl = max(sl, trail_sl)
+                else:
+                    sl = min(sl, trail_sl)
+
         hit_tp = px >= tp if side > 0 else px <= tp
         hit_sl = px <= sl if side > 0 else px >= sl
         if hit_tp and hit_sl:
-            # conservative: stop wins
             exit_px = sl - side * slip_pts
             pnl = side * (exit_px - entry)
-            return exit_px, pnl, False, j - entry_i, "sl"
+            reason = _stop_reason(sl, entry, init_sl, be_armed, trail_armed, side)
+            return exit_px, pnl, pnl > 0, j - entry_i, reason
         if hit_sl:
             exit_px = sl - side * slip_pts
             pnl = side * (exit_px - entry)
-            return exit_px, pnl, False, j - entry_i, "sl"
+            reason = _stop_reason(sl, entry, init_sl, be_armed, trail_armed, side)
+            return exit_px, pnl, pnl > 0, j - entry_i, reason
         if hit_tp:
             exit_px = tp - side * slip_pts
             pnl = side * (exit_px - entry)
             return exit_px, pnl, True, j - entry_i, "tp"
+        if time_ns > 0 and int(path_ts[j]) - entry_ts >= time_ns:
+            exit_px = px - side * slip_pts
+            pnl = side * (exit_px - entry)
+            return exit_px, pnl, pnl > 0, j - entry_i, "time"
     # EOD
     exit_px = float(path_px[-1]) - side * slip_pts
     pnl = side * (exit_px - entry)
     return exit_px, pnl, pnl > 0, len(path_ts) - 1 - entry_i, "eod"
+
+
+def _stop_reason(
+    sl: float,
+    entry: float,
+    init_sl: float,
+    be_armed: bool,
+    trail_armed: bool,
+    side: int,
+) -> str:
+    if trail_armed and (
+        (side > 0 and sl > entry + 1e-9) or (side < 0 and sl < entry - 1e-9)
+    ):
+        return "trail"
+    if be_armed and abs(sl - entry) < 1e-9:
+        return "be"
+    if trail_armed and abs(sl - init_sl) > 1e-9:
+        return "trail"
+    if be_armed:
+        return "be"
+    return "sl"
 
 
 GateFn = Callable[[int, RegimeSnapshot, RegimeSnapshot, float], bool]
@@ -227,10 +316,20 @@ def simulate_session(
         bars, bar_ts, cum_pv, cum_v, ev_ts, window_min=vol_window_min, **kw
     )
 
+    cd_pb_long = cd_pb_short = None
+    if cfg.cd_gate:
+        from research.features.cd import build_cd_series, lookup_cd_at_events
+
+        cd = build_cd_series(nq)
+        cd_fields = lookup_cd_at_events(cd, ev_ts) if cd.num_rows else {}
+        cd_pb_long = cd_fields.get("cd_pullback_long")
+        cd_pb_short = cd_fields.get("cd_pullback_short")
+
     last_exit_ts = -1
     last_signal_ts = -10**18
     cool_ns = int(cfg.signal_cooldown_sec * 1e9)
     slip_pts = cfg.slip_ticks * cfg.pts_per_tick
+    commission = float(cfg.commission_pts_rt or 0.0)
     equity = 0.0
     peak = 0.0
 
@@ -241,6 +340,14 @@ def simulate_session(
             continue
         if t0 - last_signal_ts < cool_ns:
             continue
+
+        if cfg.cd_gate and cd_pb_long is not None and cd_pb_short is not None:
+            ok_cd = (
+                (side > 0 and cd_pb_long[i] == 1)
+                or (side < 0 and cd_pb_short[i] == 1)
+            )
+            if not ok_cd:
+                continue
 
         sr, st, sv = snaps_r[i], snaps_t[i], snaps_v[i]
         if gate is not None and not gate(side, sr, st, sr.last_px):
@@ -255,8 +362,19 @@ def simulate_session(
         else:
             tp_pts, sl_pts = cfg.tp_pts, cfg.sl_pts
 
+        bracket = max(tp_pts, sl_pts)
+        be_trig = cfg.be_trigger_pts
+        trail = cfg.trail_pts
+        if cfg.be_frac and cfg.be_frac > 0:
+            be_trig = cfg.be_frac * bracket
+        if cfg.trail_frac and cfg.trail_frac > 0:
+            trail = cfg.trail_frac * bracket
+
         exit_px, pnl, win, held, reason = _simulate_path(
-            ts, px, entry_i, side, tp_pts, sl_pts, slip_pts
+            ts, px, entry_i, side, tp_pts, sl_pts, slip_pts,
+            time_stop_sec=cfg.time_stop_sec,
+            be_trigger_pts=be_trig,
+            trail_pts=trail,
         )
         # exit time approx
         exit_i = min(entry_i + held, len(ts) - 1)
@@ -290,46 +408,28 @@ def simulate_session(
             summary.gross_loss += abs(min(pnl, 0.0))
             if pnl > 0:
                 summary.gross_win += pnl
-        summary.net += pnl
-        equity += pnl
+        summary.gross += pnl
+        summary.commission_total += commission
+        net_pnl = pnl - commission
+        summary.net += net_pnl
+        equity += net_pnl
         peak = max(peak, equity)
         summary.max_dd = max(summary.max_dd, peak - equity)
 
     return summary
 
 
-def merge_summaries(parts: list[SimSummary]) -> SimSummary:
+def _rebuild_summary(trades: list[TradeResult], commission_pts_rt: float = 0.0) -> SimSummary:
     out = SimSummary()
     equity = 0.0
     peak = 0.0
-    for s in parts:
-        out.trades.extend(s.trades)
-        for tr in s.trades:
-            out.n += 1
-            out.net += tr.pnl
-            if tr.win:
-                out.wins += 1
-                out.gross_win += max(tr.pnl, 0.0)
-            else:
-                out.gross_loss += abs(min(tr.pnl, 0.0))
-                if tr.pnl > 0:
-                    out.gross_win += tr.pnl
-            equity += tr.pnl
-            peak = max(peak, equity)
-            out.max_dd = max(out.max_dd, peak - equity)
-    return out
-
-
-def filter_summary(s: SimSummary, pred) -> SimSummary:
-    out = SimSummary()
-    equity = 0.0
-    peak = 0.0
-    for tr in s.trades:
-        if not pred(tr):
-            continue
+    for tr in trades:
         out.trades.append(tr)
         out.n += 1
-        out.net += tr.pnl
+        out.gross += tr.pnl
+        out.commission_total += commission_pts_rt
+        net_pnl = tr.pnl - commission_pts_rt
+        out.net += net_pnl
         if tr.win:
             out.wins += 1
             out.gross_win += max(tr.pnl, 0.0)
@@ -337,10 +437,49 @@ def filter_summary(s: SimSummary, pred) -> SimSummary:
             out.gross_loss += abs(min(tr.pnl, 0.0))
             if tr.pnl > 0:
                 out.gross_win += tr.pnl
-        equity += tr.pnl
+        equity += net_pnl
         peak = max(peak, equity)
         out.max_dd = max(out.max_dd, peak - equity)
     return out
+
+
+def merge_summaries(parts: list[SimSummary], commission_pts_rt: float | None = None) -> SimSummary:
+    trades: list[TradeResult] = []
+    for s in parts:
+        trades.extend(s.trades)
+    if commission_pts_rt is None:
+        # Infer from parts if uniform, else 0 (pnls already netted per-session)
+        commissions = {round(s.commission_total / s.n, 6) for s in parts if s.n}
+        commission_pts_rt = next(iter(commissions)) if len(commissions) == 1 else 0.0
+        if commission_pts_rt == 0.0 and any(s.commission_total for s in parts):
+            # Mixed — rebuild with 0 and sum nets from parts instead
+            out = SimSummary()
+            equity = 0.0
+            peak = 0.0
+            for s in parts:
+                out.trades.extend(s.trades)
+                out.n += s.n
+                out.wins += s.wins
+                out.gross += s.gross
+                out.net += s.net
+                out.commission_total += s.commission_total
+                out.gross_win += s.gross_win
+                out.gross_loss += s.gross_loss
+                for tr in s.trades:
+                    # approximate DD across sessions in chronological append order
+                    c_per = s.commission_total / s.n if s.n else 0.0
+                    equity += tr.pnl - c_per
+                    peak = max(peak, equity)
+                    out.max_dd = max(out.max_dd, peak - equity)
+            return out
+    return _rebuild_summary(trades, commission_pts_rt)
+
+
+def filter_summary(s: SimSummary, pred, commission_pts_rt: float | None = None) -> SimSummary:
+    trades = [tr for tr in s.trades if pred(tr)]
+    if commission_pts_rt is None:
+        commission_pts_rt = (s.commission_total / s.n) if s.n else 0.0
+    return _rebuild_summary(trades, commission_pts_rt)
 
 
 # --- Gate builders used by EXP-0034 ---
@@ -408,8 +547,30 @@ def combine_gates(*gates: GateFn) -> GateFn:
 
 
 def make_vol_bracket(k: float, floor: float = 6.0, cap: float = 30.0):
+    """Symmetric TP=SL = clip(k * median_minute_range, floor, cap)."""
     def fn(sv: RegimeSnapshot) -> tuple[float, float]:
         raw = k * max(sv.median_minute_range, 0.25)
         pts = float(np.clip(raw, floor, cap))
         return pts, pts
+    return fn
+
+
+def make_vol_bracket_rr(
+    k: float,
+    tp_r: float,
+    sl_r: float,
+    *,
+    floor: float = 4.0,
+    cap: float = 40.0,
+):
+    """Asymmetric vol brackets: unit = k * med_minute_range; TP=tp_r*unit, SL=sl_r*unit.
+
+    Example: tp_r=3, sl_r=1 -> 1:3 risk:reward (risk 1R, target 3R).
+    Each side is clipped to [floor, cap] independently.
+    """
+    def fn(sv: RegimeSnapshot) -> tuple[float, float]:
+        unit = k * max(sv.median_minute_range, 0.25)
+        tp = float(np.clip(tp_r * unit, floor, cap))
+        sl = float(np.clip(sl_r * unit, floor, cap))
+        return tp, sl
     return fn

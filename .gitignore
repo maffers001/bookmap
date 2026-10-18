@@ -5,12 +5,11 @@ bookmap-addon/lib/
 *.jar
 !gradle/wrapper/gradle-wrapper.jar
 
-# Research data (large)
-data/raw/
-data/parquet/
+# Research data (large) — keep only placeholder
+data/**
+!data/.gitkeep
 results/
 !results/.gitkeep
-!data/.gitkeep
 
 # Python
 __pycache__/

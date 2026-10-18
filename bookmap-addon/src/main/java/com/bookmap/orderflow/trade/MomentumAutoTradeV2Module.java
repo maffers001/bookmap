@@ -67,6 +67,8 @@ import velox.api.layer1.simplified.TradeDataListener;
  * Defaults from EXP-0034: Trend mode = with-trend (1), Require VWAP side = true,
  * Max ES lag = 250. Regime range gate defaults OFF — stacking range&gt;80 with
  * trend+VWAP left almost no trades on many sessions (median 60m range ≫ 80).
+ * Vol multiple k defaults to <b>1</b> (OOS 2026-10-18). Optional
+ * {@code ES confirm mode=1} holds NQ-first bursts until ES confirms within max lag.
  *
  * Attach on NQ with ES also open. Default: signals only (enableTrading=false).
  */
@@ -107,6 +109,13 @@ public class MomentumAutoTradeV2Module implements
     /** Offline dig (EXP-0008): lag&lt;250ms lifts path and hit rate vs lag≥250. */
     @Parameter(name = "Max ES lag ms (0=off)", step = 50.0)
     Double maxEsLagMs = 250.0;
+
+    /**
+     * 0 = causal (ES at/before NQ — default live). 1 = confirm (allow NQ-first;
+     * hold pending NQ burst until same-side ES arrives within Max ES lag).
+     */
+    @Parameter(name = "ES confirm mode (0=causal 1=confirm)", step = 1.0)
+    Double esConfirmMode = 0.0;
 
     @Parameter(name = "Burst cooldown bars", step = 1.0)
     Double cooldownBars = 3.0;
@@ -216,8 +225,9 @@ public class MomentumAutoTradeV2Module implements
     @Parameter(name = "Vol-scaled brackets")
     Boolean volScaledBrackets = false;
 
+    /** Recommended default from OOS (2026-10-18): k=1 symmetric clip 6–30. */
     @Parameter(name = "Vol multiple k", step = 0.5)
-    Double volMultipleK = 3.0;
+    Double volMultipleK = 1.0;
 
     @Parameter(name = "Vol window min", step = 1.0)
     Double volWindowMin = 30.0;
@@ -268,6 +278,23 @@ public class MomentumAutoTradeV2Module implements
     private long lastSignalNs;
     private int lastSignalSide;
     private boolean signalThisInterval;
+
+    /** NQ-first pending burst waiting for ES confirm (confirm mode only). */
+    private PendingNqBurst pendingNqBurst;
+
+    private static final class PendingNqBurst {
+        final int side;
+        final long tsNs;
+        final double closePrice;
+        final long expiryNs;
+
+        PendingNqBurst(int side, long tsNs, double closePrice, long expiryNs) {
+            this.side = side;
+            this.tsNs = tsNs;
+            this.closePrice = closePrice;
+            this.expiryNs = expiryNs;
+        }
+    }
 
     /** False during catchup/history; true after {@link #onRealtimeStart()}. */
     private volatile boolean realtimeStarted;
@@ -549,6 +576,7 @@ public class MomentumAutoTradeV2Module implements
         }
         lastSignalNs = 0;
         nqBurstCount = esBurstCount = 0;
+        pendingNqBurst = null;
     }
 
     @Override
@@ -581,6 +609,7 @@ public class MomentumAutoTradeV2Module implements
                             esBurstCount, burst.side, burst.nTrades, burst.totalVol,
                             burst.imbalance, chartPx, burst.closePrice, formatReplayTime(ts)));
                 }
+                tryPendingConfirm(burst);
             }
             return;
         }
@@ -611,8 +640,32 @@ public class MomentumAutoTradeV2Module implements
                 && ("NQ".equals(state.role) || "OTHER".equals(state.role));
     }
 
+    private boolean isConfirmMode() {
+        return esConfirmMode != null && esConfirmMode >= 0.5;
+    }
+
+    private void clearPendingNq(String via) {
+        if (pendingNqBurst != null) {
+            Log.info("MAT2 pending NQ cleared (" + via + ")");
+            pendingNqBurst = null;
+        }
+    }
+
+    private void maybeExpirePending(long tsNs) {
+        if (pendingNqBurst != null && tsNs > pendingNqBurst.expiryNs) {
+            clearPendingNq("expiry");
+        }
+    }
+
     private void maybeSignal(Burst nqBurst, InstrumentState nqState) {
         syncSideFilterFromParams("params");
+        maybeExpirePending(nqBurst.tsNs);
+
+        // Opposite-side NQ burst cancels a pending confirm
+        if (pendingNqBurst != null && nqBurst.side != pendingNqBurst.side) {
+            clearPendingNq("opposite_nq_burst");
+        }
+
         EntryEval eval = evaluateEntry(nqBurst.side, nqBurst, nqState, false);
 
         esLagIndicator.addPoint(eval.lagMs >= Long.MAX_VALUE / 2 ? -1.0 : eval.lagMs);
@@ -628,11 +681,159 @@ public class MomentumAutoTradeV2Module implements
         }
 
         if (!eval.ok) {
+            // Confirm mode: hold NQ-first burst until ES arrives within maxEsLagMs
+            if (isConfirmMode()
+                    && ("ES_no_same_side_burst_in_sync".equals(eval.reason)
+                            || "ES_lag_gt_max".equals(eval.reason))) {
+                double maxLag = maxEsLagMs == null ? 250.0 : maxEsLagMs;
+                long expiry = nqBurst.tsNs + (long) (Math.max(maxLag, 1.0) * 1_000_000.0);
+                pendingNqBurst = new PendingNqBurst(
+                        nqBurst.side, nqBurst.tsNs, nqBurst.closePrice, expiry);
+                if (Boolean.TRUE.equals(verboseCandidateLog)) {
+                    Log.info(String.format(
+                            "MAT2 pending NQ-first side=%d nqTs=%d expiry=%d reason=%s",
+                            nqBurst.side, nqBurst.tsNs, expiry, eval.reason));
+                }
+            }
             signalIndicator.addPoint(0);
             return;
         }
 
-        fireSignal(nqBurst.side, nqBurst.closePrice, eval.lagMs, nqState);
+        clearPendingNq("causal_fire");
+        fireSignal(nqBurst.side, nqBurst.closePrice, eval.lagMs, nqState, false);
+    }
+
+    /**
+     * Confirm mode: when ES burst closes, fire a pending same-side NQ burst
+     * if ES arrived within maxEsLagMs of the NQ bar end.
+     */
+    private void tryPendingConfirm(Burst esBurst) {
+        if (!isConfirmMode() || pendingNqBurst == null || esBurst == null) {
+            return;
+        }
+        maybeExpirePending(esBurst.tsNs);
+        if (pendingNqBurst == null) {
+            return;
+        }
+        if (esBurst.side != pendingNqBurst.side) {
+            return;
+        }
+        long lagMs = (esBurst.tsNs - pendingNqBurst.tsNs) / 1_000_000L;
+        if (lagMs < 0) {
+            return;
+        }
+        double maxLag = maxEsLagMs == null ? 0.0 : maxEsLagMs;
+        if (maxLag > 0 && lagMs > maxLag) {
+            clearPendingNq("es_lag_gt_max");
+            return;
+        }
+        long syncNs = (long) ((syncMs == null ? 1500.0 : syncMs) * 1_000_000.0);
+        if (Math.abs(esBurst.tsNs - pendingNqBurst.tsNs) > syncNs) {
+            clearPendingNq("es_outside_sync");
+            return;
+        }
+
+        InstrumentState nqState = findPrimaryNqState();
+        if (nqState == null) {
+            return;
+        }
+        int side = pendingNqBurst.side;
+        long nqTs = pendingNqBurst.tsNs;
+        double nqPx = pendingNqBurst.closePrice;
+        // asof = ES confirm time (tradable, no look-ahead)
+        long asof = esBurst.tsNs > 0 ? esBurst.tsNs : (nowNs > 0 ? nowNs : 0);
+        EntryEval eval = evaluateEntryPostEsConfirm(side, nqTs, nqState, lagMs, asof);
+        if (Boolean.TRUE.equals(verboseCandidateLog) || !eval.ok) {
+            logCandidateConfirm(side, nqTs, nqPx, nqState, eval);
+        }
+        if (!eval.ok) {
+            clearPendingNq("confirm_gate_fail:" + eval.reason);
+            return;
+        }
+        clearPendingNq("confirm_fire");
+        // Plan-required confirm stamp line (nqTs / esTs / lag) before full SIGNAL log
+        Log.info(String.format(
+                "MAT2 SIGNAL(confirm) nqTs=%d esTs=%d lagMs=%d side=%d",
+                nqTs, esBurst.tsNs, lagMs, side));
+        fireSignal(side, nqPx, lagMs, nqState, true);
+    }
+
+    private InstrumentState findPrimaryNqState() {
+        if (primaryAlias == null) {
+            return null;
+        }
+        InstrumentState st = byAlias.get(primaryAlias);
+        return st != null && isPrimaryNq(st) ? st : null;
+    }
+
+    /**
+     * Like {@link #evaluateEntry} but ES already confirmed (skip ES presence/lag).
+     * Regime/trend/VWAP stamped at confirm time ({@code asof}).
+     */
+    private EntryEval evaluateEntryPostEsConfirm(
+            int side, long nqTsNs, InstrumentState nqState, long lagMs, long asof) {
+        if (nqState == null) {
+            return new EntryEval(false, "no_burst", lagMs);
+        }
+        if (Boolean.TRUE.equals(requireCdPullback)) {
+            boolean cdOk = side > 0 ? nqState.cd.isPullbackLong() : nqState.cd.isPullbackShort();
+            if (!cdOk) {
+                return new EntryEval(false, "cd_pullback_fail", lagMs);
+            }
+        }
+        long coolNs = (long) ((signalCooldownSec == null ? 5.0 : signalCooldownSec) * 1_000_000_000.0);
+        long refTs = asof > 0 ? asof : (nqTsNs > 0 ? nqTsNs : (nowNs > 0 ? nowNs : System.nanoTime()));
+        if (refTs - lastSignalNs < coolNs) {
+            return new EntryEval(false, "signal_cooldown", lagMs);
+        }
+        syncSideFilterFromParams("params");
+        if (!MatSideFilter.allowSide(side)) {
+            return new EntryEval(false, side > 0 ? "longs_disabled" : "shorts_disabled", lagMs);
+        }
+        int flatPos = flatCheckPosition();
+        boolean flat = !Boolean.TRUE.equals(flatOnly) || (flatPos == 0 && !flatLocked);
+        if (!flat) {
+            return new EntryEval(false, "not_flat(pos=" + flatPos + ",locked=" + flatLocked + ")", lagMs);
+        }
+        EntryEval gated = applyRegimeTrendGates(side, nqState, lagMs, asof);
+        if (!gated.ok) {
+            return gated;
+        }
+        return new EntryEval(true, "ok", lagMs);
+    }
+
+    private void logCandidateConfirm(
+            int side, long nqTsNs, double apiPx, InstrumentState nqState, EntryEval eval) {
+        int rw = regimeWindowMin == null ? 60 : Math.max(1, regimeWindowMin.intValue());
+        int tw = trendWindowMin == null ? 30 : Math.max(1, trendWindowMin.intValue());
+        long asof = nowNs > 0 ? nowNs : nqTsNs;
+        RegimeTracker.Snapshot sr = nqState.regime != null
+                ? nqState.regime.snapshot(rw, asof) : RegimeTracker.Snapshot.empty();
+        RegimeTracker.Snapshot st = nqState.regime != null
+                ? nqState.regime.snapshot(tw, asof) : RegimeTracker.Snapshot.empty();
+        String tag = eval.ok ? "MAT2 CANDIDATE PASS" : "MAT2 REJECT";
+        Log.info(String.format(
+                "%s reason=%s confirm_pending side=%d px=%.2f time=%s tsNs=%d lagMs=%s "
+                        + "trendMode=%.0f reqVwap=%s maxRange=%.0f "
+                        + "range%.0f=%.1f er=%.3f net%.0f=%.1f last=%.2f vwap=%.2f nBars=%d",
+                tag,
+                eval.reason,
+                side,
+                PriceTicks.toChartPoints(apiPx, nqState.instrumentPips),
+                formatReplayTime(nqTsNs),
+                nqTsNs,
+                eval.lagMs >= Long.MAX_VALUE / 2 ? "none" : Long.toString(eval.lagMs),
+                trendMode == null ? 0.0 : trendMode,
+                Boolean.TRUE.equals(requireVwapSide),
+                regimeMaxRangePts == null ? 0.0 : regimeMaxRangePts,
+                (double) rw,
+                sr.rangePts,
+                sr.efficiencyRatio,
+                (double) tw,
+                st.netPts,
+                sr.lastPx,
+                st.vwap,
+                st.nBars));
     }
 
     /** Replay-compare line: one per NQ burst when verbose. */
@@ -839,7 +1040,7 @@ public class MomentumAutoTradeV2Module implements
             return baseTp;
         }
         RegimeTracker.Snapshot sv = nqState.regime.snapshot(vw, asof);
-        double k = volMultipleK == null ? 3.0 : volMultipleK;
+        double k = volMultipleK == null ? 1.0 : volMultipleK;
         double floor = bracketMinPts == null ? 6.0 : bracketMinPts;
         double cap = bracketMaxPts == null ? 30.0 : bracketMaxPts;
         double raw = k * Math.max(sv.medianMinuteRange, 0.25);
@@ -885,10 +1086,16 @@ public class MomentumAutoTradeV2Module implements
     }
 
     private void fireSignal(int side, double apiPrice, long esLagMs, InstrumentState nqState) {
+        fireSignal(side, apiPrice, esLagMs, nqState, false);
+    }
+
+    private void fireSignal(
+            int side, double apiPrice, long esLagMs, InstrumentState nqState, boolean confirm) {
         lastSignalNs = nowNs > 0 ? nowNs : System.nanoTime();
         lastSignalSide = side;
         signalThisInterval = true;
         signalIndicator.addPoint(side);
+        clearPendingNq("signal_fired");
 
         double chartPrice = PriceTicks.toChartPoints(apiPrice, pips);
         if (side > 0) {
@@ -906,10 +1113,12 @@ public class MomentumAutoTradeV2Module implements
                 ? nqState.regime.snapshot(rw, lastSignalNs)
                 : RegimeTracker.Snapshot.empty();
         double brkt = resolveBracketPts(nqState);
+        String sigTag = confirm ? "MAT2 SIGNAL(confirm)" : "MAT2 SIGNAL";
         Log.info(String.format(
-                "MAT2 SIGNAL %s @%.2f time=%s tsNs=%d apiPx=%.0f esLagMs=%d cdTrend=%d cdPB=%s "
+                "%s %s @%.2f time=%s tsNs=%d apiPx=%.0f esLagMs=%d cdTrend=%d cdPB=%s "
                         + "range%.0f=%.1f er=%.3f net30=%.1f vwap=%.2f brkt=%.1f "
                         + "trading=%s realtime=%s pos=%d sideFilter=%s account=%s",
+                sigTag,
                 side > 0 ? "LONG" : "SHORT",
                 chartPrice,
                 formatReplayTime(lastSignalNs),

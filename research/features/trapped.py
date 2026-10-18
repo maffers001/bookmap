@@ -351,6 +351,7 @@ def trapped_events(trades: pa.Table, cfg: TrappedConfig | None = None) -> pa.Tab
     if not events_ts:
         return pa.table({})
 
+    # stamp = last input used (pullback / no-reclaim confirm)
     cols: dict = {
         "event_ts_ns": np.asarray(events_ts, dtype=np.int64),
         "side": np.asarray(events_side, dtype=np.int8),

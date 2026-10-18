@@ -254,6 +254,7 @@ def flush_into_hold_events(
 
     if not events_ts:
         return pa.table({})
+    # stamp = last input used (reclaim through wall)
     return pa.table({
         "event_ts_ns": np.asarray(events_ts, dtype=np.int64),
         "side": np.asarray(events_side, dtype=np.int8),

@@ -744,6 +744,7 @@ def hold_without_trade_events_from_levels(
         [r.last_update_ns if r.last_update_ns > 0 else r.first_seen_ns for r in rows],
         dtype=np.int64,
     )
+    # stamp = last input used (dwell-eligible time, capped at last update)
     event_ts = np.minimum(event_ts, last)
     return pa.table({
         "event_ts_ns": event_ts,

@@ -332,8 +332,14 @@ def filter_events_near_bursts(
     *,
     window_ms: int = 2000,
     require_same_side: bool = True,
+    causal: bool = True,
 ) -> pa.Table:
-    """Keep events that have a same-side (optional) burst within ±window_ms."""
+    """Keep events that have a same-side (optional) burst nearby.
+
+    When ``causal`` (default), only bursts at/after the event count, and
+    ``event_ts_ns`` is stamped at ``max(event, burst)`` (tradable confirm time).
+    Non-causal ±window is available with ``causal=False`` for digs only.
+    """
     if events.num_rows == 0 or bursts.num_rows == 0:
         return pa.table({})
     ev_ts = events.column("event_ts_ns").to_numpy().astype(np.int64)
@@ -345,23 +351,38 @@ def filter_events_near_bursts(
     window = int(window_ms * 1_000_000)
     keep = []
     lags = []
+    confirm_ts = []
     for i in range(len(ev_ts)):
-        lo = np.searchsorted(b_ts, ev_ts[i] - window, side="left")
-        hi = np.searchsorted(b_ts, ev_ts[i] + window, side="right")
-        best = None
+        if causal:
+            lo = np.searchsorted(b_ts, ev_ts[i], side="left")
+            hi = np.searchsorted(b_ts, ev_ts[i] + window, side="right")
+        else:
+            lo = np.searchsorted(b_ts, ev_ts[i] - window, side="left")
+            hi = np.searchsorted(b_ts, ev_ts[i] + window, side="right")
+        best_lag = None
+        best_bts = None
         for j in range(lo, hi):
             if require_same_side and int(b_side[j]) != int(ev_side[i]):
                 continue
             lag = abs(int(b_ts[j] - ev_ts[i]))
-            if best is None or lag < best:
-                best = lag
-        if best is not None:
+            if best_lag is None or lag < best_lag:
+                best_lag = lag
+                best_bts = int(b_ts[j])
+        if best_lag is not None and best_bts is not None:
             keep.append(i)
-            lags.append(best / 1e6)
+            lags.append(best_lag / 1e6)
+            confirm_ts.append(max(int(ev_ts[i]), best_bts) if causal else int(ev_ts[i]))
     if not keep:
         return pa.table({})
     idx = np.asarray(keep, dtype=np.int64)
     out = events.take(idx)
+    if causal:
+        # stamp = last input used (burst confirm)
+        out = out.set_column(
+            out.schema.get_field_index("event_ts_ns"),
+            "event_ts_ns",
+            pa.array(confirm_ts, type=pa.int64()),
+        )
     if "burst_lag_ms" in out.column_names:
         out = out.drop("burst_lag_ms")
     return out.append_column("burst_lag_ms", pa.array(lags, type=pa.float64()))

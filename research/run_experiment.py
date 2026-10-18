@@ -161,7 +161,13 @@ def _median(arr) -> float | None:
 
 def _load_depth(parquet_dir: Path, session_id: str, role: str) -> pa.Table:
     path = parquet_dir / f"session_id={session_id}" / "depth.parquet"
-    if not path.exists():
+    if not path.exists() or path.stat().st_size == 0:
+        print(
+            f"MISSING depth.parquet for session {session_id} "
+            f"(expected at {path}). Depth/MBO experiments will see 0 events. "
+            f"Run: python -m research.extract.to_parquet --session {session_id} --only depth,mbo",
+            flush=True,
+        )
         return pa.table({})
     filters = [("role", "=", role)] if role else None
     try:
@@ -181,7 +187,13 @@ def _load_depth(parquet_dir: Path, session_id: str, role: str) -> pa.Table:
 
 def _load_mbo(parquet_dir: Path, session_id: str, role: str) -> pa.Table:
     path = parquet_dir / f"session_id={session_id}" / "mbo.parquet"
-    if not path.exists():
+    if not path.exists() or path.stat().st_size == 0:
+        print(
+            f"MISSING mbo.parquet for session {session_id} "
+            f"(expected at {path}). Run: python -m research.extract.to_parquet "
+            f"--session {session_id} --only depth,mbo",
+            flush=True,
+        )
         return pa.table({})
     cols = ["ts_ns", "role", "op", "order_id", "is_bid", "price_ticks", "size"]
     filters = [("role", "=", role)] if role else None

@@ -21,5 +21,5 @@ sync_ms: 2000
 touch_cooldown_ms: 5000
 role_primary: NQ
 rth_uk_only: true
-horizons_ms: [250, 500, 1000, 2000, 5000, 10000]
-point_targets: [10, 20]
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000, 20000, 30000, 60000]
+point_targets: [5, 10, 20, 30]

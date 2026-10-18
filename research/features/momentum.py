@@ -145,18 +145,34 @@ def cross_confirm_bursts(
     es_events: pa.Table,
     sync_ms: int = 1500,
     *,
-    causal_only: bool = False,
+    causal_only: bool | None = None,
+    stamp: str | None = None,
 ) -> pa.Table:
-    """Keep NQ bursts that have a same-side ES burst within ±sync_ms.
+    """Keep NQ bursts that have a same-side ES burst within sync_ms.
 
-    When ``causal_only`` is True, only ES bursts that end at or before the NQ
-    burst (signed lag >= 0, ES leads/coincides) count — matching MAT's live
-    ``hasRecentBurst`` / ``lagMsTo`` gate.
+    ``stamp`` modes (default ``"confirm"`` — tradable, no look-ahead):
+      - ``"confirm"``: ES within ±sync; ``event_ts_ns = max(nq_end, es_end)``
+        (NQ-first events enter at ES confirm time).
+      - ``"causal"``: only ES at/before NQ (matches live MAT ``hasRecentBurst``);
+        ``event_ts_ns = nq_end``.
+      - ``"nq"``: ES within ±sync; stamp at NQ end (old non-causal research default;
+        can use future ES — prefer ``confirm``).
+
+    ``causal_only=True/False`` maps to ``stamp="causal"/"nq"`` for backward compat.
     """
+    if stamp is None:
+        if causal_only is True:
+            stamp = "causal"
+        elif causal_only is False:
+            stamp = "nq"
+        else:
+            stamp = "confirm"
+    if stamp not in ("confirm", "causal", "nq"):
+        raise ValueError(f"unknown stamp mode: {stamp}")
+
     if nq_events.num_rows == 0:
         return pa.table({})
     if es_events.num_rows == 0:
-        # no ES → empty confirmed set
         return pa.table({})
 
     nq_ts = nq_events.column("event_ts_ns").to_numpy().astype(np.int64)
@@ -165,23 +181,30 @@ def cross_confirm_bursts(
     es_side = es_events.column("side").to_numpy()
     window = int(sync_ms * 1_000_000)
 
-    # sort ES for search
     order = np.argsort(es_ts)
     es_ts = es_ts[order]
     es_side = es_side[order]
 
     keep = []
-    es_n_tr = es_events.column("n_trades").to_numpy()[order] if "n_trades" in es_events.column_names else np.zeros(len(es_ts))
-    es_vol = es_events.column("total_vol").to_numpy()[order] if "total_vol" in es_events.column_names else np.zeros(len(es_ts))
+    es_n_tr = (
+        es_events.column("n_trades").to_numpy()[order]
+        if "n_trades" in es_events.column_names
+        else np.zeros(len(es_ts))
+    )
+    es_vol = (
+        es_events.column("total_vol").to_numpy()[order]
+        if "total_vol" in es_events.column_names
+        else np.zeros(len(es_ts))
+    )
     matched_es_trades = []
     matched_es_vol = []
     matched_lag_ms = []
     matched_signed_lag_ms = []
+    matched_es_ts = []
 
     for i, (t, s) in enumerate(zip(nq_ts, nq_side)):
-        # causal: ES in [t - window, t]; otherwise ±window
         lo_t = t - window
-        hi_t = t if causal_only else t + window
+        hi_t = t if stamp == "causal" else t + window
         lo = np.searchsorted(es_ts, lo_t, side="left")
         hi = np.searchsorted(es_ts, hi_t, side="right")
         best = None
@@ -191,8 +214,6 @@ def cross_confirm_bursts(
             if es_side[j] != s:
                 continue
             signed = int(es_ts[j] - t)  # negative => ES before NQ
-            # For causal_only, signed lag used by MAT is NQ - ES (>= 0).
-            # Keep signed as ES - NQ for backward compat with es_signed_lag_ms.
             lag = abs(signed)
             if best_abs is None or lag < best_abs:
                 best_abs = lag
@@ -204,19 +225,28 @@ def cross_confirm_bursts(
             matched_es_vol.append(float(es_vol[best]))
             matched_lag_ms.append(best_abs / 1e6)
             matched_signed_lag_ms.append(best_signed / 1e6)
+            matched_es_ts.append(int(es_ts[best]))
 
     if not keep:
         return pa.table({})
 
     idx = np.asarray(keep, dtype=np.int64)
+    nq_sel = nq_ts[idx]
+    es_sel = np.asarray(matched_es_ts, dtype=np.int64)
+    if stamp == "confirm":
+        event_ts = np.maximum(nq_sel, es_sel)
+    else:
+        event_ts = nq_sel
     cols = {
-        "event_ts_ns": nq_ts[idx],
+        "event_ts_ns": event_ts,
         "side": nq_side[idx].astype(np.int8),
         "event_type": ["es_nq_momentum"] * len(idx),
         "es_lag_ms": np.asarray(matched_lag_ms, dtype=np.float64),
         "es_signed_lag_ms": np.asarray(matched_signed_lag_ms, dtype=np.float64),
         "es_n_trades": np.asarray(matched_es_trades, dtype=np.float64),
         "es_total_vol": np.asarray(matched_es_vol, dtype=np.float64),
+        "nq_event_ts_ns": nq_sel,
+        "es_event_ts_ns": es_sel,
     }
     for name in nq_events.column_names:
         if name in ("event_ts_ns", "side", "event_type"):

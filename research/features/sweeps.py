@@ -93,6 +93,7 @@ def aggressor_sweep_events(
             side = -1
         else:
             continue
+        # stamp = last input used (sweep end print t1)
         events.append({
             "event_ts_ns": t1,
             "side": side,
