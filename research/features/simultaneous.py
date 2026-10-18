@@ -133,8 +133,11 @@ def simultaneous_flow_events(
         return pa.table({})
 
     side = np.where(long_c[idx], 1, -1).astype(np.int8)
+    # Bar end = when the simultaneous bar is known (no look-ahead into the bar).
+    bar_ns = int(cfg.bar_ms * 1_000_000)
+    event_ts = (ts[idx] + bar_ns).astype(np.int64)
     return pa.table({
-        "event_ts_ns": ts[idx].astype(np.int64),
+        "event_ts_ns": event_ts,
         "side": side,
         "event_type": pa.array(["sim_flow"] * len(idx), type=pa.string()),
         "nq_imbalance": nq_imb[idx],

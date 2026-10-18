@@ -82,8 +82,14 @@ def momentum_burst_events(
     tick_size: float = 1.0,
     min_max_print: float = 0.0,
     cooldown_bars: int = 3,
+    bar_ms: int = 100,
 ) -> pa.Table:
-    """One-sided fast-tape bursts with price progress in the same direction."""
+    """One-sided fast-tape bursts with price progress in the same direction.
+
+    ``event_ts_ns`` is the **bar end** (bar_start + bar_ms), matching live MAT
+    which can only fire after the 100 ms bar closes. Labelling from bar start
+    was a look-ahead (the burst move itself counted toward the target).
+    """
     if bars.num_rows == 0:
         return pa.table({})
 
@@ -95,6 +101,7 @@ def momentum_burst_events(
     ts = bars.column("ts_ns").to_numpy()
     buy_v = bars.column("buy_vol").to_numpy()
     sell_v = bars.column("sell_vol").to_numpy()
+    bar_ns = int(bar_ms * 1_000_000)
 
     progress = np.abs(net) / max(tick_size, 1e-9)
     fast = (n_tr >= min_trades) & (vol >= min_vol)
@@ -117,8 +124,10 @@ def momentum_burst_events(
         return pa.table({})
 
     side = np.where(long_burst[idx], 1, -1).astype(np.int8)
+    # Bar end = when the burst is known (matches TapeBurstTracker finishBar).
+    event_ts = (ts[idx] + bar_ns).astype(np.int64)
     return pa.table({
-        "event_ts_ns": ts[idx].astype(np.int64),
+        "event_ts_ns": event_ts,
         "side": side,
         "event_type": ["momentum_burst"] * len(idx),
         "n_trades": n_tr[idx],
@@ -135,8 +144,15 @@ def cross_confirm_bursts(
     nq_events: pa.Table,
     es_events: pa.Table,
     sync_ms: int = 1500,
+    *,
+    causal_only: bool = False,
 ) -> pa.Table:
-    """Keep NQ bursts that have a same-side ES burst within ±sync_ms."""
+    """Keep NQ bursts that have a same-side ES burst within ±sync_ms.
+
+    When ``causal_only`` is True, only ES bursts that end at or before the NQ
+    burst (signed lag >= 0, ES leads/coincides) count — matching MAT's live
+    ``hasRecentBurst`` / ``lagMsTo`` gate.
+    """
     if nq_events.num_rows == 0:
         return pa.table({})
     if es_events.num_rows == 0:
@@ -163,15 +179,20 @@ def cross_confirm_bursts(
     matched_signed_lag_ms = []
 
     for i, (t, s) in enumerate(zip(nq_ts, nq_side)):
-        lo = np.searchsorted(es_ts, t - window, side="left")
-        hi = np.searchsorted(es_ts, t + window, side="right")
+        # causal: ES in [t - window, t]; otherwise ±window
+        lo_t = t - window
+        hi_t = t if causal_only else t + window
+        lo = np.searchsorted(es_ts, lo_t, side="left")
+        hi = np.searchsorted(es_ts, hi_t, side="right")
         best = None
         best_abs = None
         best_signed = None
         for j in range(lo, hi):
             if es_side[j] != s:
                 continue
-            signed = int(es_ts[j] - t)
+            signed = int(es_ts[j] - t)  # negative => ES before NQ
+            # For causal_only, signed lag used by MAT is NQ - ES (>= 0).
+            # Keep signed as ES - NQ for backward compat with es_signed_lag_ms.
             lag = abs(signed)
             if best_abs is None or lag < best_abs:
                 best_abs = lag

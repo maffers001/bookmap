@@ -10,7 +10,8 @@ Custom Bookmap Layer 1 add-ons for NQ scalping with ES confirmation:
 | **Effort vs Result** | Aggression vs price progress (absorption / exhaustion) |
 | **Liquidity Reaction** | Large-order attract / repel / absorb / dwell / withdraw |
 | **ES/NQ Flow Confirm** | Normalized ES vs NQ flow agreement (attach on NQ; keep ES open) |
-| **Momentum AutoTrade (ES+NQ)** | EXP-0008 tape momentum signals (+ optional CD pullback); optional bracket orders |
+| **Momentum AutoTrade (ES+NQ)** | v1 — EXP-0008 tape momentum signals (+ optional CD pullback); optional bracket orders |
+| **Momentum AutoTrade v2 (ES+NQ)** | v1 + regime/trend/VWAP gates + vol-scaled brackets (EXP-0034); leave v1 unchanged |
 | **MAT Hotkeys** | Classic companion: keyboard shortcuts for MAT long/short side filter |
 | **Pitch and Catch** | High-vol peak/trough (“pitch”) then low-vol move away (“catch”); chart markers |
 | **HV Extreme Move** | Simple: HV peak/trough → mark when price is N ticks away |
@@ -47,6 +48,17 @@ Output JAR:
 
 ```text
 bookmap-addon\build\libs\bookmap-orderflow.jar
+```
+
+If Gradle wrapper fails (SSL), compile manually:
+
+```powershell
+cd c:\Work\Mat\bookmap\bookmap-addon
+$cp = "C:\Program Files\Bookmap\lib\bm-l1api.jar;C:\Program Files\Bookmap\lib\bm-simplified-api-wrapper.jar"
+$out = "build\classes\java\main"
+$sources = Get-ChildItem -Recurse -Filter "*.java" -Path "src\main\java" | % FullName
+javac -encoding UTF-8 -cp $cp -d $out @sources
+Push-Location $out; jar cf "..\..\..\libs\bookmap-orderflow-mat-v2.jar" .; Pop-Location
 ```
 
 The build compiles against your installed Bookmap API jars (`%BOOKMAP_HOME%\lib\bm-l1api.jar` and `bm-simplified-api-wrapper.jar`, default `C:\Program Files\Bookmap`) so the add-on matches your Bookmap runtime.
@@ -143,6 +155,37 @@ Reverse always respects **Allow longs/shorts**. Logs: `MAT REVERSE …`, `MAT TP
 
 **Safety:** trading defaults **OFF**. Do not enable on a live account until you have validated on replay/sim.
 
+### Momentum AutoTrade v2 (ES+NQ)
+
+Same core as v1 (EXP-0008 tape + ES sync, reverse-on-stop, TP extend, Ctrl+Shift side hotkeys), plus optional **regime / trend / VWAP** gates and **vol-scaled brackets** from **EXP-0034**.
+
+Do **not** enable trading on v1 and v2 at the same time — they share `MatSideFilter`.
+
+JAR: `bookmap-addon/build/libs/bookmap-orderflow-mat-v2.jar` (contains both v1 and v2).
+
+**Look-ahead note:** research now stamps bursts at **bar end** (corrected 2026-10-18). Older ~85% hit+10 tick figures used bar-start entry and are invalid vs live MAT. Corrected EXP-0008 `p_hit_10pts` ≈ **0.56**.
+
+**New params** (EXP-0034 defaults baked in):
+
+| Param | Default | Meaning |
+|---|---|---|
+| **Regime window min** | 60 | Rolling 1-min bars for day-type |
+| **Regime gate: max range pts (0=off)** | **0** (off) | Skip when range exceeds this; leave off by default — 60m NQ range is usually ≫80 so this starved signals when stacked |
+| **Regime gate: max efficiency ratio (0=off)** | 0 (off) | Same for `\|net\| / path` |
+| **Regime hot action (0=skip 1=counter)** | 0 (skip) | When hot: skip all, or only allow against-trend |
+| **Trend window min** | 30 | Net lookback for trend mode |
+| **Trend mode (0=off 1=with 2=against)** | **1** (with) | Require burst with rolling net |
+| **Require VWAP side** | **true** | Long only ≥ session VWAP; short only ≤ |
+| **Vol-scaled brackets** | false | TP=SL = k × median 1-min range (floor/cap) |
+| **Vol multiple k** / **Vol window min** / **Bracket min/max pts** | 3 / 30 / 6–30 | Scaling controls |
+| **VWAP session open UK min-of-day** | 870 | UK 14:30 |
+
+Logs: `MAT2 SIGNAL …`, `MAT2 REJECT regime_hot_skip|trend_mode_fail|vwap_side_fail …`.
+
+Defaults are **with-trend + VWAP** (range gate off). Trend uses **completed 1-minute bars only** (no intra-minute hindsight). VWAP is a running trade VWAP.
+
+**Replay check vs offline reference (session 021026):** see `results/MAT2_REF_021026.md`. Install `bookmap-orderflow-mat-v2-diag.jar`, leave **Verbose candidate log = true**, grep `MAT2 CANDIDATE` / `MAT2 SIGNAL` and match `tsNs=` to the table.
+
 ### Pitch and Catch
 Warns when a **high-volume** rotation peak/trough is followed by a **low-volume** move of **Catch pts** (default 20) without reclaiming the extreme.
 
@@ -207,7 +250,7 @@ bookmap-addon/
     effort/       Effort vs Result
     liquidity/    Liquidity Reaction
     crossmarket/  ES/NQ Flow Confirm
-    trade/        Momentum AutoTrade (ES+NQ) + MAT Hotkeys companion
+    trade/        Momentum AutoTrade v1 + v2 (ES+NQ) + MAT Hotkeys companion
     pitch/        Pitch and Catch
     hvmove/       HV Extreme Move
     retest/       Trapped Retest

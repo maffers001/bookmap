@@ -1,0 +1,50 @@
+name: EXP-0034
+hypothesis: H4
+title: MAT gates — day-type, trend direction, vol-scaled brackets (corrected bar-end)
+description: >
+  Honest MAT-style bracket backtest after fixing bar-start look-ahead.
+  Sweep day-type (range/ER) skip vs counter-trend-when-hot, trend with/against,
+  VWAP side, and vol-scaled brackets. Train/holdout by calendar date.
+  Success = same-sign lift vs baseline on train AND holdout.
+
+detector: mat_gates
+bar_ms: 100
+min_trades: 6
+min_vol: 25
+min_imbalance: 0.55
+min_progress_ticks: 1.0
+tick_size: 1.0
+sync_ms: 1500
+max_es_lag_ms: 250
+cooldown_bars: 3
+signal_cooldown_sec: 5
+tp_pts: 10
+sl_pts: 10
+slip_ticks: 1
+# Primary window for sim; UK RTH also reported
+window: us_rth
+pts_per_tick: 0.25
+regime_window_min: 60
+trend_window_min: 30
+vol_window_min: 30
+train_sessions:
+  - "260326"
+  - "030826"
+  - "040826"
+  - "050826"
+  - "160926"
+  - "170926"
+  - "180926"
+  - "210926"
+  - "220926"
+holdout_sessions:
+  - "011026"
+  - "021026"
+  - "051026"
+  - "061026"
+  - "071026"
+bad_sessions:
+  - "030826"
+  - "040826"
+  - "050826"
+  - "260326"

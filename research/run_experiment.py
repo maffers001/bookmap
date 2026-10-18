@@ -338,6 +338,7 @@ def run_exp_momentum(cfg: dict, exp: dict, session_ids: list[str]) -> dict:
         tick_size=tick_size,
         min_max_print=float(exp.get("min_max_print", 0.0)),
         cooldown_bars=int(exp.get("cooldown_bars", 3)),
+        bar_ms=bar_ms,
     )
 
     labeled_parts: list[pa.Table] = []
@@ -437,6 +438,7 @@ def run_exp_depth_momentum(cfg: dict, exp: dict, session_ids: list[str]) -> dict
         min_progress_ticks=float(exp.get("min_progress_ticks", 1.0)),
         tick_size=tick_size,
         cooldown_bars=int(exp.get("cooldown_bars", 3)),
+        bar_ms=bar_ms,
     )
     nq_cfg = LargeLevelConfig(
         absolute_size=int(exp.get("nq_absolute_size", 50)),
@@ -600,8 +602,7 @@ def run_exp_dual_lvn(cfg: dict, exp: dict, session_ids: list[str]) -> dict:
     compare_mom = bool(exp.get("compare_momentum", False))
     burst_kw = dict(
         min_trades=6, min_vol=25.0, min_imbalance=0.55,
-        min_progress_ticks=1.0, tick_size=1.0, cooldown_bars=3,
-    )
+        min_progress_ticks=1.0, tick_size=1.0, cooldown_bars=3, bar_ms=100)
 
     dual_parts: list[pa.Table] = []
     nq_only_parts: list[pa.Table] = []
@@ -934,6 +935,7 @@ def run_exp_cd_pullback(cfg: dict, exp: dict, session_ids: list[str]) -> dict:
         min_progress_ticks=float(exp.get("min_progress_ticks", 1.0)),
         tick_size=tick_size,
         cooldown_bars=int(exp.get("cooldown_bars", 3)),
+        bar_ms=bar_ms,
     )
 
     pb_parts: list[pa.Table] = []
@@ -1229,6 +1231,7 @@ def run_exp_momentum_bb_regime(cfg: dict, exp: dict, session_ids: list[str]) -> 
         min_progress_ticks=float(exp.get("min_progress_ticks", 1.0)),
         tick_size=tick_size,
         cooldown_bars=int(exp.get("cooldown_bars", 3)),
+        bar_ms=bar_ms,
     )
 
     all_parts: list[pa.Table] = []
@@ -1381,6 +1384,7 @@ def run_exp_dual_cd_filter(cfg: dict, exp: dict, session_ids: list[str]) -> dict
         min_progress_ticks=float(exp.get("min_progress_ticks", 1.0)),
         tick_size=tick_size,
         cooldown_bars=int(exp.get("cooldown_bars", 3)),
+        bar_ms=bar_ms,
     )
 
     all_parts: list[pa.Table] = []
@@ -1755,8 +1759,7 @@ def run_exp_aggressor_sweep(cfg: dict, exp: dict, session_ids: list[str]) -> dic
     )
     burst_kw = dict(
         min_trades=6, min_vol=25.0, min_imbalance=0.55,
-        min_progress_ticks=1.0, tick_size=1.0, cooldown_bars=3,
-    )
+        min_progress_ticks=1.0, tick_size=1.0, cooldown_bars=3, bar_ms=100)
 
     dual_parts: list[pa.Table] = []
     nq_parts: list[pa.Table] = []
@@ -2047,8 +2050,7 @@ def run_exp_value_depart(cfg: dict, exp: dict, session_ids: list[str]) -> dict:
     )
     burst_kw = dict(
         min_trades=6, min_vol=25.0, min_imbalance=0.55,
-        min_progress_ticks=1.0, tick_size=1.0, cooldown_bars=3,
-    )
+        min_progress_ticks=1.0, tick_size=1.0, cooldown_bars=3, bar_ms=100)
 
     by_kind: dict[str, list[pa.Table]] = {k: [] for k in kinds}
     mom_parts: list[pa.Table] = []
@@ -2218,8 +2220,7 @@ def run_exp_book_imbalance(cfg: dict, exp: dict, session_ids: list[str]) -> dict
     )
     burst_kw = dict(
         min_trades=6, min_vol=25.0, min_imbalance=0.55,
-        min_progress_ticks=1.0, tick_size=1.0, cooldown_bars=3,
-    )
+        min_progress_ticks=1.0, tick_size=1.0, cooldown_bars=3, bar_ms=100)
 
     dual_parts: list[pa.Table] = []
     nq_parts: list[pa.Table] = []
@@ -2423,8 +2424,7 @@ def run_exp_dual_micro_regime(cfg: dict, exp: dict, session_ids: list[str]) -> d
     )
     burst_kw = dict(
         min_trades=6, min_vol=25.0, min_imbalance=0.55,
-        min_progress_ticks=1.0, tick_size=1.0, cooldown_bars=3,
-    )
+        min_progress_ticks=1.0, tick_size=1.0, cooldown_bars=3, bar_ms=100)
 
     dual_parts: list[pa.Table] = []
     nq_parts: list[pa.Table] = []
@@ -2662,6 +2662,7 @@ def run_exp_es_leads_momentum(cfg: dict, exp: dict, session_ids: list[str]) -> d
         min_progress_ticks=float(exp.get("min_progress_ticks", 1.0)),
         tick_size=tick_size,
         cooldown_bars=int(exp.get("cooldown_bars", 3)),
+        bar_ms=bar_ms,
     )
 
     all_parts: list[pa.Table] = []
@@ -2789,6 +2790,7 @@ def run_exp_swing_break_momentum(cfg: dict, exp: dict, session_ids: list[str]) -
         min_progress_ticks=float(exp.get("min_progress_ticks", 1.0)),
         tick_size=tick_size,
         cooldown_bars=int(exp.get("cooldown_bars", 3)),
+        bar_ms=bar_ms,
     )
 
     all_parts: list[pa.Table] = []
@@ -2909,8 +2911,7 @@ def run_exp_failed_swing_break(cfg: dict, exp: dict, session_ids: list[str]) -> 
     )
     burst_kw = dict(
         min_trades=6, min_vol=25.0, min_imbalance=0.55,
-        min_progress_ticks=1.0, tick_size=tick_size, cooldown_bars=3,
-    )
+        min_progress_ticks=1.0, tick_size=tick_size, cooldown_bars=3, bar_ms=100)
 
     dual_parts: list[pa.Table] = []
     nq_parts: list[pa.Table] = []
@@ -3068,8 +3069,7 @@ def run_exp_flush_into_hold(cfg: dict, exp: dict, session_ids: list[str]) -> dic
     )
     burst_kw = dict(
         min_trades=6, min_vol=25.0, min_imbalance=0.55,
-        min_progress_ticks=1.0, tick_size=tick_size, cooldown_bars=3,
-    )
+        min_progress_ticks=1.0, tick_size=tick_size, cooldown_bars=3, bar_ms=100)
 
     dual_parts: list[pa.Table] = []
     nq_parts: list[pa.Table] = []
@@ -3367,6 +3367,7 @@ def run_exp_rotation_filter(cfg: dict, exp: dict, session_ids: list[str]) -> dic
         min_progress_ticks=float(exp.get("min_progress_ticks", 1.0)),
         tick_size=tick_size,
         cooldown_bars=int(exp.get("cooldown_bars", 3)),
+        bar_ms=bar_ms,
     )
     ll_cfg = LargeLevelConfig(
         absolute_size=int(exp.get("absolute_size", 50)),
@@ -3566,8 +3567,7 @@ def run_exp_trapped_peak(cfg: dict, exp: dict, session_ids: list[str]) -> dict:
         min_imbalance=0.55,
         min_progress_ticks=1.0,
         tick_size=tick_size,
-        cooldown_bars=3,
-    )
+        cooldown_bars=3, bar_ms=100)
 
     nq_parts: list[pa.Table] = []
     null_parts: list[pa.Table] = []
@@ -3709,8 +3709,7 @@ def run_exp_range_imbalance(cfg: dict, exp: dict, session_ids: list[str]) -> dic
         min_imbalance=0.55,
         min_progress_ticks=1.0,
         tick_size=tick_size,
-        cooldown_bars=3,
-    )
+        cooldown_bars=3, bar_ms=100)
 
     # key -> list of labeled tables
     cell_parts: dict[str, list[pa.Table]] = {}
@@ -3868,8 +3867,7 @@ def run_exp_simultaneous_flow(cfg: dict, exp: dict, session_ids: list[str]) -> d
         min_imbalance=0.55,
         min_progress_ticks=1.0,
         tick_size=tick_size,
-        cooldown_bars=3,
-    )
+        cooldown_bars=3, bar_ms=100)
 
     cell_parts: dict[str, list[pa.Table]] = {}
     primary_parts: list[pa.Table] = []
@@ -4032,6 +4030,282 @@ def run_exp_simultaneous_flow(cfg: dict, exp: dict, session_ids: list[str]) -> d
     return {"summary": summary, "events": primary}
 
 
+def _filter_rth_us_et_table(trades: pa.Table) -> pa.Table:
+    """US RTH 09:30–16:00 America/New_York."""
+    if trades.num_rows == 0:
+        return trades
+    try:
+        from zoneinfo import ZoneInfo
+        et = ZoneInfo("America/New_York")
+    except Exception:
+        et = timezone(timedelta(hours=-4))  # EDT fallback
+    ts = trades.column("ts_ns").to_numpy()
+    keep = []
+    for ts_ns in ts:
+        dt = datetime.fromtimestamp(ts_ns / 1e9, tz=timezone.utc).astimezone(et)
+        t = dt.timetz().replace(tzinfo=None)
+        keep.append(time(9, 30) <= t < time(16, 0))
+    mask = np.array(keep, dtype=bool)
+    if not mask.any():
+        return trades.slice(0, 0)
+    return trades.take(np.where(mask)[0])
+
+
+def run_exp_mat_gates(cfg: dict, exp: dict, session_ids: list[str]) -> dict:
+    """EXP-0034 — MAT bracket sim + day-type / trend / vol-scaled gate sweep."""
+    from research.backtest.mat_sim import (
+        MatSimConfig,
+        combine_gates,
+        filter_summary,
+        gate_always,
+        make_daytype_counter,
+        make_daytype_skip,
+        make_trend_mode,
+        make_vol_bracket,
+        make_vwap_side,
+        merge_summaries,
+        simulate_session,
+    )
+
+    parquet_dir = Path(cfg["parquet_dir"])
+    results_dir = Path(cfg["results_dir"]) / exp.get("name", "EXP-0034")
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    base_cfg = MatSimConfig(
+        bar_ms=int(exp.get("bar_ms", 100)),
+        min_trades=int(exp.get("min_trades", 6)),
+        min_vol=float(exp.get("min_vol", 25)),
+        min_imbalance=float(exp.get("min_imbalance", 0.55)),
+        min_progress_ticks=float(exp.get("min_progress_ticks", 1.0)),
+        tick_size=float(exp.get("tick_size", 1.0)),
+        cooldown_bars=int(exp.get("cooldown_bars", 3)),
+        sync_ms=int(exp.get("sync_ms", 1500)),
+        max_es_lag_ms=float(exp.get("max_es_lag_ms", 250)),
+        signal_cooldown_sec=float(exp.get("signal_cooldown_sec", 5)),
+        tp_pts=float(exp.get("tp_pts", 10)),
+        sl_pts=float(exp.get("sl_pts", 10)),
+        slip_ticks=float(exp.get("slip_ticks", 1)),
+        pts_per_tick=float(exp.get("pts_per_tick", 0.25)),
+    )
+    regime_w = int(exp.get("regime_window_min", 60))
+    trend_w = int(exp.get("trend_window_min", 30))
+    vol_w = int(exp.get("vol_window_min", 30))
+    train_set = set(exp.get("train_sessions") or [])
+    holdout_set = set(exp.get("holdout_sessions") or [])
+    bad_set = set(exp.get("bad_sessions") or [])
+
+    # Preload windowed trades once
+    cache: dict[str, tuple[pa.Table, pa.Table]] = {}
+    for sid in session_ids:
+        print(f"[mat-gates] load {sid} …", flush=True)
+        nq = _load_trades(parquet_dir, sid, "NQ")
+        es = _load_trades(parquet_dir, sid, "ES")
+        if nq.num_rows == 0:
+            continue
+        nq = _filter_rth_us_et_table(nq)
+        es = _filter_rth_us_et_table(es) if es.num_rows else es
+        if nq.num_rows == 0:
+            continue
+        cache[sid] = (nq, es)
+
+    def run_variant(name: str, gate, bracket_fn=None, cfg_override=None) -> dict:
+        cfg_use = cfg_override or base_cfg
+        parts = []
+        for sid, (nq, es) in cache.items():
+            s = simulate_session(
+                sid, nq, es, cfg_use,
+                gate=gate,
+                regime_window_min=regime_w,
+                trend_window_min=trend_w,
+                vol_window_min=vol_w,
+                bracket_fn=bracket_fn,
+            )
+            parts.append(s)
+        all_s = merge_summaries(parts)
+        train = filter_summary(all_s, lambda t: t.session_id in train_set)
+        hold = filter_summary(all_s, lambda t: t.session_id in holdout_set)
+        bad = filter_summary(all_s, lambda t: t.session_id in bad_set)
+        good = filter_summary(all_s, lambda t: t.session_id not in bad_set)
+        per_sid = {
+            sid: filter_summary(all_s, lambda t, s=sid: t.session_id == s).to_dict()
+            for sid in cache
+        }
+        return {
+            "name": name,
+            "all": all_s.to_dict(),
+            "train": train.to_dict(),
+            "holdout": hold.to_dict(),
+            "bad4": bad.to_dict(),
+            "good10": good.to_dict(),
+            "per_session": per_sid,
+        }
+
+    variants: list[dict] = []
+
+    # Baseline fixed ±10 / ±20
+    print("[mat-gates] baseline ±10 …", flush=True)
+    variants.append(run_variant("baseline_tp10", gate_always))
+    cfg20 = MatSimConfig(**{**base_cfg.__dict__, "tp_pts": 20.0, "sl_pts": 20.0})
+    variants.append(run_variant("baseline_tp20", gate_always, cfg_override=cfg20))
+
+    # Day-type skip
+    for R in (60, 80, 100, 120):
+        print(f"[mat-gates] daytype skip range>{R} …", flush=True)
+        variants.append(run_variant(
+            f"daytype_skip_range{R}",
+            make_daytype_skip(max_range=float(R)),
+        ))
+    for E in (0.10, 0.15, 0.20):
+        print(f"[mat-gates] daytype skip er>{E} …", flush=True)
+        variants.append(run_variant(
+            f"daytype_skip_er{E:.2f}",
+            make_daytype_skip(max_er=E),
+        ))
+
+    # Day-type counter-when-hot
+    for R in (80, 100, 120):
+        print(f"[mat-gates] daytype counter-when range>{R} …", flush=True)
+        variants.append(run_variant(
+            f"daytype_counter_range{R}",
+            make_daytype_counter(max_range=float(R)),
+        ))
+    for E in (0.10, 0.15):
+        print(f"[mat-gates] daytype counter-when er>{E} …", flush=True)
+        variants.append(run_variant(
+            f"daytype_counter_er{E:.2f}",
+            make_daytype_counter(max_er=E),
+        ))
+
+    # Trend modes (always on)
+    for mode in ("with", "against"):
+        print(f"[mat-gates] trend {mode} …", flush=True)
+        variants.append(run_variant(f"trend_{mode}", make_trend_mode(mode)))
+
+    # VWAP side
+    print("[mat-gates] vwap side …", flush=True)
+    variants.append(run_variant("vwap_side", make_vwap_side(True)))
+
+    # Combined: skip range100 + against when cool? and counter-hot + against
+    print("[mat-gates] combos …", flush=True)
+    variants.append(run_variant(
+        "skip_range100_and_against",
+        combine_gates(make_daytype_skip(max_range=100), make_trend_mode("against")),
+    ))
+    variants.append(run_variant(
+        "counter_range100",
+        make_daytype_counter(max_range=100),
+    ))
+    variants.append(run_variant(
+        "against_and_vwap",
+        combine_gates(make_trend_mode("against"), make_vwap_side(True)),
+    ))
+
+    # Vol-scaled brackets (no gate)
+    for k in (2, 3, 4, 6):
+        print(f"[mat-gates] vol bracket k={k} …", flush=True)
+        variants.append(run_variant(
+            f"vol_k{k}",
+            gate_always,
+            bracket_fn=make_vol_bracket(float(k)),
+        ))
+
+    # Best-looking daytype + vol (range100 skip + k=3)
+    variants.append(run_variant(
+        "skip_range100_vol_k3",
+        make_daytype_skip(max_range=100),
+        bracket_fn=make_vol_bracket(3.0),
+    ))
+    variants.append(run_variant(
+        "counter_range100_vol_k3",
+        make_daytype_counter(max_range=100),
+        bracket_fn=make_vol_bracket(3.0),
+    ))
+
+    baseline = next(v for v in variants if v["name"] == "baseline_tp10")
+
+    def lift(v: dict, split: str) -> float | None:
+        b = baseline[split].get("net")
+        n = v[split].get("net")
+        if b is None or n is None:
+            return None
+        return round(n - b, 2)
+
+    recommended = []
+    for v in variants:
+        if v["name"] == "baseline_tp10":
+            continue
+        lt, lh = lift(v, "train"), lift(v, "holdout")
+        # same-sign lift on train AND holdout, and holdout n >= 20
+        if lt is None or lh is None:
+            continue
+        if lt > 0 and lh > 0 and (v["holdout"].get("n") or 0) >= 20:
+            recommended.append({
+                "name": v["name"],
+                "train_lift": lt,
+                "holdout_lift": lh,
+                "train": v["train"],
+                "holdout": v["holdout"],
+                "bad4": v["bad4"],
+                "good10": v["good10"],
+            })
+    recommended.sort(key=lambda r: r["holdout_lift"], reverse=True)
+
+    # summary.md
+    lines = [
+        "# EXP-0034 — MAT gates (bar-end corrected)",
+        "",
+        f"Sessions: {len(cache)} (US RTH). Slippage: {base_cfg.slip_ticks} tick/side.",
+        f"Train={sorted(train_set)} Holdout={sorted(holdout_set)} Bad4={sorted(bad_set)}",
+        "",
+        "## Baseline (tp=sl=10 pts)",
+        f"- all: {baseline['all']}",
+        f"- train: {baseline['train']}",
+        f"- holdout: {baseline['holdout']}",
+        f"- bad4: {baseline['bad4']}",
+        f"- good10: {baseline['good10']}",
+        "",
+        "## Recommended (same-sign lift train AND holdout, holdout n≥20)",
+        "",
+    ]
+    if not recommended:
+        lines.append("_No variant cleared the success bar._")
+    else:
+        for r in recommended:
+            lines.append(
+                f"- **{r['name']}**: train_lift={r['train_lift']} holdout_lift={r['holdout_lift']} "
+                f"| train {r['train']} | holdout {r['holdout']} | bad4 {r['bad4']}"
+            )
+    lines.extend(["", "## All variants", ""])
+    lines.append("| variant | train net | holdout net | bad4 net | good10 net | train n | hold n |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|")
+    for v in variants:
+        lines.append(
+            f"| {v['name']} | {v['train'].get('net')} | {v['holdout'].get('net')} | "
+            f"{v['bad4'].get('net')} | {v['good10'].get('net')} | "
+            f"{v['train'].get('n')} | {v['holdout'].get('n')} |"
+        )
+    summary_md = "\n".join(lines) + "\n"
+    (results_dir / "summary.md").write_text(summary_md, encoding="utf-8")
+
+    report = {
+        "status": "ok",
+        "baseline": baseline,
+        "variants": [{k: v[k] for k in ("name", "all", "train", "holdout", "bad4", "good10")} for v in variants],
+        "recommended": recommended,
+        "sessions_used": sorted(cache.keys()),
+        "gates": {
+            "bar_ms": base_cfg.bar_ms,
+            "sync_ms": base_cfg.sync_ms,
+            "max_es_lag_ms": base_cfg.max_es_lag_ms,
+            "slip_ticks": base_cfg.slip_ticks,
+            "causal_only": True,
+            "event_ts": "bar_end",
+        },
+        "note": "Bar-end entry + causal ES; older EXP-0008 hit rates used bar-start look-ahead.",
+    }
+    return {"summary": report}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("experiment", help="e.g. EXP-0002")
@@ -4112,6 +4386,8 @@ def main(argv: list[str] | None = None) -> int:
         result = run_exp_range_imbalance(cfg, exp, session_ids)
     elif exp.get("detector") == "simultaneous_flow" or exp_name == "EXP-0033":
         result = run_exp_simultaneous_flow(cfg, exp, session_ids)
+    elif exp.get("detector") == "mat_gates" or exp_name == "EXP-0034":
+        result = run_exp_mat_gates(cfg, exp, session_ids)
     else:
         print(f"Unknown experiment detector for {exp_name}", file=sys.stderr)
         return 2

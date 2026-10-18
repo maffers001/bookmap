@@ -17,6 +17,15 @@
 - Material lift vs unconditional / time-matched baseline
 - ES confirmation either improves NQ outcomes or is explicitly falsified
 
+## Momentum bar-end timestamps (2026-10-18)
+
+`momentum_burst_events` / simultaneous tape-bar detectors stamp `event_ts_ns` at
+**bar end** (bar_start + bar_ms). Earlier results labelled from **bar start**,
+which included the burst move itself in the outcome path (look-ahead). Corrected
+EXP-0008 hit+10 ticks is ~0.55–0.60 vs the prior ~0.85–0.90. Treat all
+momentum-based reports dated before this fix as invalid for live MAT comparison.
+MAT / EXP-0034 use causal ES confirm (ES burst end ≤ NQ burst end).
+
 ## Data
 
 - Source: Bookmap `.bmf` via Replay + Session Extractor add-on

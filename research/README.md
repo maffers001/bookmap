@@ -20,4 +20,10 @@ python -m research.run_experiment EXP-0002 --sessions all
 
 Reports land in `results/EXP-0002/`.
 
-See [docs/RESEARCH_RULES.md](../docs/RESEARCH_RULES.md), [docs/HYPOTHESES.md](../docs/HYPOTHESES.md), [docs/FEEDS_INVENTORY.md](../docs/FEEDS_INVENTORY.md).
+MAT gate / bracket backtest (bar-end corrected):
+
+```powershell
+python -m research.run_experiment EXP-0034 --sessions all
+```
+
+See [docs/RESEARCH_RULES.md](../docs/RESEARCH_RULES.md) (momentum bar-end note), [docs/HYPOTHESES.md](../docs/HYPOTHESES.md), [docs/FEEDS_INVENTORY.md](../docs/FEEDS_INVENTORY.md), [results/README.md](../results/README.md).
