@@ -46,6 +46,12 @@
 
 ## Run notes
 
+### 2026-10-18 night — time-of-day (vol k=1, not 12.5/30)
+
+- **Yardstick:** same frozen base — **vol k=1** symmetric brackets, trend+VWAP, causal ES, 1-tick slip, 0.25 pt/RT. Window extended to UK **14:30–21:00** for ToD only.
+- Results: `results/MAT2_TOD_VOLK1/`. Edge concentrated 14:30–16:30; first 5m strong (+134); 14:35–14:45 and close 20:50–21:00 weak. See summary for half-hour/hour tables.
+- First-5m indicator param sweep: `results/MAT2_TOD_FIRST5_SWEEP/` (follow-up).
+
 ### 2026-10-18 night — OOS + post-fix exploration (base = vol k=1)
 
 - **OOS (9 new sessions):** `results/MAT2_ALL_SESSIONS_VOLK1/` (also mirrored under `MAT2_ALL_SESSIONS_TP12p5_SL30/`).
