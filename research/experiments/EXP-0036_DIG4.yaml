@@ -1,0 +1,35 @@
+name: EXP-0036_DIG4
+hypothesis: H29
+title: Dig4 — freeze against_m04 + ER-skip neighbours (test-autotrade gate)
+description: >
+  Confirm DIG3 candidate before any test auto-trade. Single idea: keep
+  against_m04 fade (es_imb_max=-0.4, NQ still-bursting, max_wait 5s) and gate
+  with daytype_skip(max_er=E) for E in {0.25, 0.30, 0.35}. No short-only, no
+  wait filter, no against-trend/VWAP (DIG3 showed those hurt or are fitting).
+  Pre-registered bar (on EACH neighbour, not just 0.30): train AND hold AND
+  new all > 0; days+ >= 14/23; top-3 share of +net <= 0.55; leave-one-day-out
+  net < 0 on at most 2 drops. If 0.30 and at least one neighbour clear the
+  bar -> freeze as TEST_AUTOTRADE candidate. If 0.30 fails a neighbour -> drop
+  ER gate, keep ungated m04 as open dig only.
+
+detector: correlated_exhaust_fade_freeze
+bar_ms: 100
+fade_max_wait_sec: 5
+slip_ticks: 1
+commission_pts_rt: 0.25
+horizons_ms: [10000, 60000]
+point_targets: [5, 10, 20]
+
+exhaust:
+  nq_min_imbalance: 0.55
+  nq_min_vol: 25
+  nq_min_trades: 6
+  es_imb_max: -0.4
+  es_min_vol: 0
+  use_imb: true
+  use_vol: false
+  max_wait_sec: 0
+  skip_bars: 0
+
+er_neighbours: [0.25, 0.30, 0.35]
+exclude_sessions: []

@@ -36,7 +36,7 @@ Restricting events to CD MA direction (22-tick range CD with 100 SMA / Bollinger
 
 **Test:** EXP-0009 (post-filter on existing events). First result: with-flow hurts H2 absorb-fade; against-trend looks better. Pullback∩OF rare — next design should emit CD pullbacks as primary events.
 
-**Follow-up EXP-0014:** CD pullback as primary is weak (hit+10 46%). Better as optional gate on EXP-0008 momentum (path lift, similar hit). Prefer ES lag&lt;250ms filter for hit/path.
+**Follow-up EXP-0014:** Pre-fix primary weak on hit; ×mom path strong but hit loses to 0008 → demoted to gate. Points re-run (causal): n=49 hit10 **0.55** / @60s **+7.8**. MAT *gate* new cohort fails (−182) — do not ship as filter. **Reopen dig:** standalone CD×mom entries under MAT vol-k=1 P&L (not vs 0008 hit%).
 
 ## H7 — Dual-market LVN rejection
 
@@ -80,7 +80,7 @@ Large resting size near BBO on **both** ES and NQ is challenged (price approache
 
 A single `aggressor_order_id` that prints ≥min_prints with ≥min_vol and price span ≥min_span_ticks is a “without hesitation” sweep. When NQ and ES both produce a same-side sweep within a short sync window (prefer |ES lag| &lt; 250ms), short-horizon NQ continuation beats random null, NQ-only sweeps, and EXP-0008 100ms bar bursts.
 
-**Test:** EXP-0017. **Result:** dual hit+10 52% vs null 43% vs EXP-0008 lag&lt;250 85% — fails vs tape bursts. No ship.
+**Test:** EXP-0017. **Result (pre-fix):** dual hit+10 52% vs null 43% vs look-ahead 0008 85% — killed for ≪0008 while beating null. **Reopen:** points event study then conditional MAT P&L; 0008 is a continuation overlay bar, not an auto-reject when null is beaten.
 
 ## H13 — Correlated near-BBO MBO vacuum
 
@@ -102,7 +102,7 @@ Within X ticks of mid, compare resting ask size (above) vs bid size (below):
 bid-heavy → long. **Magnet (alt):** fade into the heavy side. Dual ES+NQ same-side
 confirm should lift vs NQ-only and vs null.
 
-**Test:** EXP-0020. **Result:** NQ-only pressure hit+10 ≈44% ≈ null; dual rare. Sensitivity on thr/radius does not lift. Falsified on these days. No ship.
+**Test:** EXP-0020. **Result:** NQ-only **pressure** hit+10 ≈0.43 ≈ null — falsified. Points dual_magnet n=20 hit10 **0.70** / @10s **+6.2** — tiny, never MAT P&L'd; one-shot dig only (low priority).
 
 ## H16 — Dual micro-regime (attract→take + opposite hold)
 
@@ -217,12 +217,10 @@ Distinct from EXP-0008 (±sync burst confirm, can be sequential) and H23
 (price co-move without requiring aggressor imbalance).
 
 **Test:** EXP-0033 (+ dig bar_ms / imbalance / vol / progress / dual-range).
-**Result:** Same-clock flow alone beats null but loses to EXP-0008 (b100 n=467
-hit+10 **73%** / @10s **+5.7** vs null **43%** / 0008 **85%**). Adding same-sign
-price progress recovers to ≈0008 (b250_flow_px n=346 **87%** / **+9.2**). Dig
-high-vol+price (nq≥40) n=73–169 hit **90–92%** — in-sample overlay only, no ship
-without holdout. Dual range r22 empty; r10 thin. Lead unchanged; note 0008
-|lag|&lt;50ms n=156 **87%** / **+11.1** already captures “same time.”
+**Result:** Base same-clock flow beats null but loses to 0008 (pre-fix ticks).
+High-vol+price (nq≥40) was strongest in-sample and parked for lack of holdout —
+**reopen** as 23d MAT overlay / alternate-entry P&L dig (not auto-dead for ≪0008).
+Dual range stay closed. Lead remains 0008; |lag|&lt;50 already captures “same time.”
 *(Pre-fix numbers: ticks + look-ahead comparator — see EXPERIMENT_LOG reset.)*
 
 ## H28 — Correlated absorption (both tapes hit a wall at once)
@@ -261,11 +259,15 @@ Exit overlay on vol k=1 and 12.5/30 × causal/confirm; 8 rule variants; fade
 event study in points vs null and corrected 0008; fade P&L via events override.
 **Result (23d):** **Exit: reject** (unchanged). Fires on ~65% of trades and
 gives back winners (−981 on matched fired trades vs bracket +1840).
-**Fade: open dig** (P&L yardstick; EXP-0008 is continuation, not the bar).
-Ungated vol k=1: m04 n=114 net **+479** (train −4 / hold +144 / new +339),
-days+ 16/23, top3 share of +net **0.42**; m03 +471 (top3 0.51); m02 +444
-(top3 0.57 — over-concentrated). Soft ES vol floors 1/3/5: vol1 ≡ none; vol3/5
-preserve hold+new (m04 +353 / +384) unlike hard ≥10 which killed the edge
-(`EXP-0036_DIG2`). Train is a few large wins vs losses, not uniformly flat.
-**Status:** exit closed; fade **open dig**, prefer `against_m04` — not shipped
-(train not yet >0 on all cohorts).
+**Fade:** P&L yardstick (EXP-0008 is continuation, not the bar). Ungated vol
+k=1 m04: n=114 net **+479** (train −4 / hold +144 / new +339), days+ 16/23,
+top3 share **0.42**, LOO never negative (`EXP-0036_DIG2`/`_DIG3`). Soft ES vol
+OK; hard ≥10 kill the edge. DIG3: against-trend gates hurt; shorts dominate
+(stratum only); additive to MAT (+1259 vs MAT +779).
+**DIG4 freeze:** `against_m04` + `skip_er0.3` clears ship bar
+(n=91 net **+355**, train +6 / hold +123 / new +226, days+ 16, top3 0.45,
+LOO_neg=0); neighbour `skip_er0.25` also clears (+311). `skip_er0.35` fails
+train. 2-tick slip still +332 but train −1 — live fills matter.
+**Status:** exit closed; fade **FROZEN for TEST_AUTOTRADE** — see
+`results/EXP-0036_DIG4/TEST_AUTOTRADE_SPEC.md`. No further param search on
+these 23d. Not in MAT JAR yet (separate fade module).

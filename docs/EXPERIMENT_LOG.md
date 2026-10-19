@@ -22,13 +22,13 @@
 | EXP-0011 | H7 dual LVN rejection | re-run 14d (see notes) | 14d | was falsified on 5d ticks |
 | EXP-0012 | H8 liquidity flip at LVN | needs re-run (units/comparator) | 5d | flip=0; beyond-only n=3 (one cluster) — not validated |
 | EXP-0013 | H9 correlated dwell/repel | needs re-run (units/comparator) | 5d | uncontacted dwell/withdraw almost never closes on NQ abs≥50 |
-| EXP-0014 | H6 CD pullback primary | re-run 14d (see notes) | 14d | causal confirm window |
+| EXP-0014 | H6 CD pullback primary | **reopen dig** (standalone P&L) | 14d→23d | best path in points; MAT *gate* failed OOS; never MAT-sim'd as own entries |
 | EXP-0015 | H10 CD BB regime × momentum | needs re-run (units/comparator) | 5d→14d ticks | wide≈narrow; non-monotonic in 14d tick re-run |
 | EXP-0016 | H11 dual challenge-wo-trade ± LVN × narrow BB | re-run 14d (see notes) | 14d | |
-| EXP-0017 | H12 aggressor sweep momentum | needs re-run (units/comparator) | 5d | dual hit+10 52% vs null 43% vs EXP-0008 lag250 85% — worse than bar bursts |
+| EXP-0017 | H12 aggressor sweep momentum | **reopen** points+P&L dig | 5d | beat null; killed only vs look-ahead 0008 85% — never points re-run |
 | EXP-0018 | H13 near-BBO MBO vacuum | needs re-run (units/comparator) | 5d | dual hit+10 40% ≈ null 41%; n=5245 no edge |
 | EXP-0019 | H14 VPOC/HVN departure (S20/S4 port) | needs re-run (units/comparator) | 5d | S20 hit+10 40% / S4 36% ≤ null 46% vs old 0008 85%; scalp horizon ≠ TP 25pt holds |
-| EXP-0020 | H15 near-book depth imbalance | re-run 14d (see notes) | 14d | |
+| EXP-0020 | H15 near-book depth imbalance | pressure **reject**; dual_magnet **tiny dig** | 14d | dual_magnet n=20 hit10 0.70 / @10s +6.2 — never MAT P&L |
 | EXP-0021 | H16 dual micro-regime take+hold | needs re-run (units/comparator) | 5d | composite dual n=0; dual take≈null; dual hold n=9 hit22% |
 | EXP-0022 | H17 dual ES+NQ CD trend/BB filter | needs re-run (units/comparator) | 5d | matched CD: ES flat; adapted ES: small hit bumps, path ≤ unfiltered 0008 |
 | EXP-0023 | H7b tightened dual LVN (HVN sandwich) | needs re-run (units/comparator) | 5d | dual≈0; NQ-only hit~31–44% ≈ null; dig lookback/frac no lift |
@@ -41,10 +41,10 @@
 | EXP-0030 | H24 avg rotation gate (mom fresh / fade ext) | needs re-run (units/comparator) | 5d→14d ticks | inverted again on 14d |
 | EXP-0031 | H25 trapped peak (LVN band + quiet 20pt / ≤30s) | needs re-run (units/comparator) | 5d | H25b n=26 shorts 27%≪null; dig best ~55% flat |
 | EXP-0032 | H26 range-bar buy/sell imb vs prior avg | needs re-run (units/comparator) | 5d | all cells ~44–49%≈null; path ≤0; ≪0008 85% |
-| EXP-0033 | H27 simultaneous ES+NQ aggressor flow | needs re-run (units/comparator) | 5d→14d ticks | dual range stratum was look-ahead; stamp fixed |
+| EXP-0033 | H27 simultaneous ES+NQ aggressor flow | base flow dead; **high-vol dig reopen** | 5d→14d ticks | high-vol+price parked vs 0008 without holdout P&L |
 | EXP-0034 | H4 MAT gates | ran | 14d US RTH | trend+VWAP lift; see results/EXP-0034 |
 | EXP-0035 | H28 correlated absorption fade (per-market adaptive thresholds) | ran — **reject** | 23d UK 14:30–17:00 (depth 15d) | dual hit10 .32–.36 ≈ NQ-only ≪ 0008 .45; ES adds nothing; train P&L negative |
-| EXP-0036 | H29 correlated exhaustion (exit + fade) | exit **reject**; fade **reopened dig** | 23d UK 14:30–17:00 | exit stays reject; fade P&L live (`against_m04` vol k=1 +479) — dig via `EXP-0036_DIG` / `_DIG2`, do not re-run Part A |
+| EXP-0036 | H29 correlated exhaustion (exit + fade) | exit **reject**; fade **FROZEN test-autotrade** (DIG4) | 23d UK 14:30–17:00 | m04+`skip_er0.3` +355; neighbour 0.25 also clears; spec in DIG4 |
 
 ## Run notes
 
@@ -93,6 +93,48 @@
   Top days recur: `011026` (hold), `300926`/`151026`/`290926` (new), `050826` (train). Worst: `180926`, `260326`, `121026`, `160926`. Train is not uniformly flat — it is a few big wins vs a few big losses (050826 +79…+92 vs 180926 −73).
 - **Ship bar (DIG2):** train+hold+new all >0, days+ ≥14, top3 share ≤0.55, soft floor OK. **Not cleared** — train still ≈0 / slightly negative on m04; m02 fails concentration. **Keep open dig**, prefer `against_m04` (least concentrated, strongest new). Next dig options: drop worst train days as a robustness check (not fitting), side split, ToD within 14:30–17:00, or require NQ still-bursting stricter so train losers filter out.
 - **EXP-0036 Part A:** still reject; do not re-run.
+
+### 2026-10-19 — EXP-0036_DIG3 (fade anatomy)
+
+- Results: `results/EXP-0036_DIG3/`. Runner `correlated_exhaust_fade_dig`; events carry exhaustion-bar + `burst_*` fields; `TradeResult.exit_ts_ns` for overlap. Baseline reproduces DIG2: **m04 n=114 net +479** (train −4 / hold +144 / new +339), days+ 16, top3 share **0.42**, leave-one-day-out net<0 = **0**/23.
+- **§1 Regime:** range skip gates hurt. **ER skip helps** — `skip_er0.3` n=91 net **+355** (train +6 / hold +123 / new +226), days+ 16, top3 share 0.45 — only slice clearing the pre-registered ship bar, but train is fragile. `skip_er0.4` stronger net (+387) but train −13. Story: fade when efficiency ratio is low (rotational), not when the tape is trending cleanly — opposite of MAT's continuation regime.
+- **§2 Anatomy:** exit mix tp 68 / sl 46; bracket size win≈loss (~23 pts); **net on bracket≥20 = +476 (n=81) vs <20 = +32 (n=33)** — vol k=1 is doing the work (full-reversal trade). Fixed ±20 and vol k=1.5 both worse than vol k=1. Event study hit10 0.51 / @60s +3.9.
+- **§3 Against gates (hypothesis failed):** `trend_against` / `vwap_against` / both all cut net vs ungated; only `vwap_against` has train>0 (+24) but days+ 13. Continuations-style `trend_with+vwap_with` still +261 but train −34. **Do not gate the fade "against" trend.**
+- **§4 Side/ToD:** **shorts carry everything** (short +509 / long −30). ToD: 14:30 and 15:30 strongest; 16:30 weak. Short dominance may be Sept–Oct drift — flag before ship.
+- **§5 Trigger quality (signal carries info):** gold cell `wait_500_2000` n=46 net **+411** (train +129 / new +225); `wait_gt2000` kills train (−123). Stronger ES against (`es_imb≤−0.6`) +388 vs mild −0.4..−0.6 +91. Mid NQ-still-pushing best. **Low burst ES vol** (lo tercile) +427 vs hi −78 — thin confirming ES on the *burst* (not the exhaust bar) is the feature. ES-first slightly better than NQ-first.
+- **§6 MAT overlap:** fade is **additive**, not just exit-and-reverse. `not_in_mat` +453 vs `in_mat_opp` +27; combined independent books MAT+fade **+1259** vs MAT alone +779. `after_mat_sl` is rare (13%) but very high WR when it fires (n=12, +236).
+- **§7 Robustness:** loo all positive. Neighbourhood `es_imb_max=-0.45` and `nq_imb≥0.65` look stronger on train — treat as exploratory (post-hoc), not a retune. 2-tick slip still +451. `wait10` blows up new but wrecks train.
+- **Decision: keep open dig.** Baseline does not clear train>0. `skip_er0.3` clears the letter of the bar with train +6 only — confirm on a frozen holdout / DIG4 before any ship. Do **not** stack short-only + wait 0.5–2s + ER gate in one step (fitting). DIG4 candidates (one at a time): (a) freeze `skip_er0.3` and re-check on any new sessions, (b) report short-only as a stratum not a filter, (c) wait∈[500,2000] as a soft quality flag.
+
+### 2026-10-19 — EXP-0036_DIG4 (ER-gate freeze confirmation → test auto-trade)
+
+- Results: `results/EXP-0036_DIG4/`. Runner `correlated_exhaust_fade_freeze`. Pre-registered: each ER neighbour must clear train∧hold∧new>0, days+≥14, top3≤0.55, LOO_neg≤2; freeze only if **0.30 and ≥1 neighbour** clear.
+- **Neighbours (1-tick):** ungated +479 train−4 (fails); `skip_er0.25` n=80 **+311** train+20/hold+146/new+145 **cleared**; `skip_er0.3` n=91 **+355** train+6/hold+123/new+226 **cleared**; `skip_er0.35` n=97 +387 train−13 **fails**. LOO_neg=0 on all gated; top3 ~0.45–0.49.
+- **2-tick slip on 0.3:** net +332 but train −1 → does not clear ship bar; live fill quality is the main risk.
+- **Decision: FREEZE for TEST_AUTOTRADE.** Spec: `results/EXP-0036_DIG4/TEST_AUTOTRADE_SPEC.md` — against_m04 fade, ER≤0.30, UK 14:30–17:00, vol k=1, 1 contract, kill −150 / 3 losing sessions. No further param search on these 23d. Next step is live/paper wiring (not in MAT continuation JAR).
+
+### 2026-10-19 — Audit: ideas discounted vs EXP-0008
+
+Same mistake pattern as the first EXP-0036 fade close: treating continuation hit rates (esp. the void look-ahead **85%**) as the success bar for fades / path overlays / alternate entries, then walking away without MAT vol-k=1 P&L.
+
+**Rule:** 0008 is the right bar only for *continuation overlays that claim to beat the lead*. Fades / alternate entries use **null + MAT P&L**. Path-strong thin ideas get a P&L dig, not a hit% kill.
+
+| Idea | Why it looked like the 0036 mistake | Stay closed? | Dig action |
+|------|-------------------------------------|--------------|------------|
+| EXP-0036 fade | Hit ≪ 0008; P&L +479 | No — **frozen DIG4** | Test auto-trade (spec) |
+| EXP-0035 absorb fade | Framed ≪ 0008 | **Yes** — dual≈NQ-only + train P&L all negative | No reopen |
+| **EXP-0014** CD×mom | Pre-fix: nice path but hit **loses to 0008**; demoted to gate; gate new −182 | Gate stay closed | **Standalone** causal CD×mom events → vol k=1 P&L (23d). Yardstick = P&L vs null, not vs 0008 hit |
+| **EXP-0017** sweeps | Beat null 52% vs 43%; killed solely vs 0008 **85%** | Unknown | Points event study (60s) → if still beats null, MAT P&L as alternate entry |
+| **EXP-0020** dual_magnet | Points: n=20 hit10 **0.70** / @10s **+6.2**; parked “dig only”, never dug | Pressure stay closed | Tiny-n MAT P&L dig (expect thin; one shot) |
+| **EXP-0033** high-vol | Beat null / ≈0008 in ticks; parked “no holdout”; base flow later called dead vs 0008 | Base flow stay closed | High-vol+price stratum as MAT overlay / alternate entry on 23d P&L |
+
+**Not the same mistake (correctly closed):** fades ≈null in points (0005/0006/0011/0016/0019/0026/0027/0031); continuations ≈null (0029/0032/0018/0021); swing-break 0025 no hit lift in points; CD *gate* on MAT (new cohort disagree). Pre-fix “≪0008 85%” rows that also fail null stay dead without a dig.
+
+**Dig backlog order (EXP-0036 fade frozen; next reopen digs):**
+1. EXP-0014 standalone CD×mom MAT P&L
+2. EXP-0017 points re-run → conditional P&L
+3. EXP-0033 high-vol holdout P&L
+4. EXP-0020 dual_magnet one-shot P&L (lowest priority)
 
 ### 2026-10-18 night — time-of-day (vol k=1, not 12.5/30)
 

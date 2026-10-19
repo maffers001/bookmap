@@ -76,6 +76,7 @@ class TradeResult:
     net30: float = float("nan")
     vwap: float = float("nan")
     med_r30: float = float("nan")
+    exit_ts_ns: int = 0
 
 
 @dataclass
@@ -436,6 +437,7 @@ def simulate_session(
             net30=st.net_pts,
             vwap=st.vwap,
             med_r30=sv.median_minute_range,
+            exit_ts_ns=last_exit_ts,
         )
         summary.trades.append(tr)
         summary.n += 1
@@ -575,6 +577,20 @@ def make_vwap_side(require: bool = True):
         if side > 0:
             return px >= st.vwap
         return px <= st.vwap
+    return g
+
+
+def make_vwap_side_mode(mode: str = "with"):
+    """mode: with | against | off — fade-friendly gate when ``against``."""
+    def g(side, sr, st, px) -> bool:
+        if mode == "off" or not np.isfinite(st.vwap) or not np.isfinite(px):
+            return True
+        above = px >= st.vwap
+        if mode == "with":
+            return above if side > 0 else (not above)
+        if mode == "against":
+            return (not above) if side > 0 else above
+        return True
     return g
 
 

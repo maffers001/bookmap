@@ -62,6 +62,10 @@ class _Bars:
         )
 
 
+# Return: (bar_start_ns, reason, nq_bar_i, es_bar_j_or_-1)
+_Hit = tuple[int, str, int, int]
+
+
 def _first_exhaust_bar(
     nq: _Bars,
     es: _Bars,
@@ -69,9 +73,11 @@ def _first_exhaust_bar(
     side: int,
     es_burst_vol: float,
     p: ExhaustParams,
-) -> tuple[int, str] | None:
-    """Return (bar_start_ns, reason) of the first exhaustion bar, or None."""
-    bar_ns = int(p.bar_ms * 1_000_000)
+) -> _Hit | None:
+    """Return (bar_start_ns, reason, nq_i, es_j) of the first exhaustion bar, or None.
+
+    ``es_j`` is -1 when the ES bar is missing (empty-counts path).
+    """
     i0 = int(np.searchsorted(nq.start, entry_ts, side="left")) + int(p.skip_bars)
     if i0 >= len(nq.start):
         return None
@@ -105,12 +111,12 @@ def _first_exhaust_bar(
             and (p.es_min_vol <= 0 or es_vol >= p.es_min_vol)
             and side * es_imb <= p.es_imb_max
         ):
-            return b0, "exhaust_imb"
+            return b0, "exhaust_imb", i, j
         if vol_thr >= 0:
             if has_es and es_vol < vol_thr:
-                return b0, "exhaust_vol"
+                return b0, "exhaust_vol", i, j
             if (not has_es) and p.es_vol_counts_empty:
-                return b0, "exhaust_vol"
+                return b0, "exhaust_vol", i, -1
     return None
 
 
@@ -133,6 +139,16 @@ def build_exhaust_exit_fn(nq_bars: pa.Table, es_bars: pa.Table, p: ExhaustParams
     return exit_fn
 
 
+_BURST_PASSTHROUGH = (
+    "es_lag_ms",
+    "es_signed_lag_ms",
+    "es_total_vol",
+    "total_vol",
+    "imbalance",
+    "n_trades",
+)
+
+
 def exhaust_fade_events(
     confirm_events: pa.Table,
     nq_bars: pa.Table,
@@ -144,7 +160,9 @@ def exhaust_fade_events(
     """Standalone event: after each confirm burst, the first exhaustion bar.
 
     Event is stamped at that bar's close; ``side`` is the fade (against the
-    burst). Extra columns carry the burst side/time and wait.
+    burst). Extra columns carry the burst side/time, wait, exhaustion-bar
+    fields (``nq_imb_x`` / ``es_imb_x`` / vols), and selected ``burst_*``
+    columns copied from the confirming burst when present.
     """
     if confirm_events.num_rows == 0 or nq_bars.num_rows == 0:
         return pa.table({})
@@ -160,30 +178,47 @@ def exhaust_fade_events(
         if "es_total_vol" in confirm_events.column_names
         else np.zeros(len(ev_ts))
     )
+    burst_cols = {
+        name: confirm_events.column(name).to_numpy(zero_copy_only=False)
+        for name in _BURST_PASSTHROUGH
+        if name in confirm_events.column_names
+    }
 
-    out_ts, out_side, b_ts, b_side, wait_ms, reason, nq_px = [], [], [], [], [], [], []
+    out_ts, out_side, b_ts, b_side, wait_ms, reason = [], [], [], [], [], []
+    nq_px, nq_imb_x, nq_vol_x, es_imb_x, es_vol_x = [], [], [], [], []
+    burst_out: dict[str, list] = {f"burst_{n}": [] for n in burst_cols}
     last_stamp = -1
     for k in np.argsort(ev_ts, kind="stable"):
         t0, s = int(ev_ts[k]), int(ev_side[k])
         hit = _first_exhaust_bar(nq, es, t0, s, float(ev_vol[k]), pp)
         if hit is None:
             continue
-        stamp = hit[0] + bar_ns
+        b0, why, ni, ej = hit
+        stamp = b0 + bar_ns
         if stamp == last_stamp:  # two bursts resolving on the same bar
             continue
         last_stamp = stamp
-        i = int(np.searchsorted(nq.start, hit[0], side="left"))
         out_ts.append(stamp)
         out_side.append(-s)
         b_ts.append(t0)
         b_side.append(s)
         wait_ms.append((stamp - t0) / 1e6)
-        reason.append(hit[1])
-        nq_px.append(float(nq.close[i]) if i < len(nq.close) else float("nan"))
+        reason.append(why)
+        nq_px.append(float(nq.close[ni]) if ni < len(nq.close) else float("nan"))
+        nq_imb_x.append(float(nq.imb[ni]))
+        nq_vol_x.append(float(nq.vol[ni]))
+        if ej >= 0:
+            es_imb_x.append(float(es.imb[ej]))
+            es_vol_x.append(float(es.vol[ej]))
+        else:
+            es_imb_x.append(0.0)
+            es_vol_x.append(0.0)
+        for name, arr in burst_cols.items():
+            burst_out[f"burst_{name}"].append(arr[k])
 
     if not out_ts:
         return pa.table({})
-    return pa.table({
+    cols: dict = {
         "event_ts_ns": np.asarray(out_ts, dtype=np.int64),
         "side": np.asarray(out_side, dtype=np.int8),
         "event_type": ["corr_exhaust_fade"] * len(out_ts),
@@ -192,4 +227,11 @@ def exhaust_fade_events(
         "wait_ms": np.asarray(wait_ms, dtype=np.float64),
         "exhaust_reason": reason,
         "nq_close_ticks": np.asarray(nq_px, dtype=np.float64),
-    })
+        "nq_imb_x": np.asarray(nq_imb_x, dtype=np.float64),
+        "nq_vol_x": np.asarray(nq_vol_x, dtype=np.float64),
+        "es_imb_x": np.asarray(es_imb_x, dtype=np.float64),
+        "es_vol_x": np.asarray(es_vol_x, dtype=np.float64),
+    }
+    for name, vals in burst_out.items():
+        cols[name] = np.asarray(vals)
+    return pa.table(cols)

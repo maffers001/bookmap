@@ -1,0 +1,53 @@
+name: EXP-0036_DIG3
+hypothesis: H29
+title: Dig3 — ES-against fade anatomy (regime, gates, trigger quality, MAT overlap, robustness)
+description: >
+  Pre-registered dig on the reopened ES-against fade (against_m04 family).
+  Yardstick = MAT vol-k=1 P&L (not EXP-0008 hit rates). Ship bar: on the chosen
+  slice, train AND hold AND new all > 0, days+ >= 14/23, top-3 share of positive
+  net <= 0.55, leave-one-day-out net never < 0 on more than 2 drops, and the
+  regime/strata story must hold on train AND new. Short of that = keep open dig.
+  Exit overlay and EXP-0035 are out of scope.
+
+detector: correlated_exhaust_fade_dig
+bar_ms: 100
+min_trades: 6
+min_vol: 25
+min_imbalance: 0.55
+min_progress_ticks: 1.0
+sync_ms: 1500
+max_es_lag_ms: 250
+signal_cooldown_sec: 5
+slip_ticks: 1
+commission_pts_rt: 0.25
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000, 20000, 30000, 60000]
+point_targets: [5, 10, 20, 30]
+fade_max_wait_sec: 5
+
+# Primary + neighbour
+exhaust:
+  nq_min_imbalance: 0.55
+  nq_min_vol: 25
+  nq_min_trades: 6
+  es_imb_max: -0.4
+  es_min_vol: 0
+  use_imb: true
+  use_vol: false
+  max_wait_sec: 0
+  skip_bars: 0
+
+variants:
+  against_m04: {}
+  against_m03: {es_imb_max: -0.3}
+
+# Section 7 neighbourhood (run after primary)
+neighbourhood:
+  es_imb_m35: {es_imb_max: -0.35}
+  es_imb_m45: {es_imb_max: -0.45}
+  nq_imb65: {nq_min_imbalance: 0.65}
+  wait10: {fade_max_wait_sec: 10}
+
+daytype_ranges: [150, 175, 200]
+daytype_ers: [0.3, 0.4]
+confirm_brackets: [vol_k1, fixed_20, vol_k15]
+exclude_sessions: []

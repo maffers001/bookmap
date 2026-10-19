@@ -6,6 +6,8 @@ import importlib
 _DETECTORS = {
     "correlated_absorb": "research.correlated.exp_0035_absorb",
     "correlated_exhaust": "research.correlated.exp_0036_exhaust",
+    "correlated_exhaust_fade_dig": "research.correlated.exp_0036_fade_dig",
+    "correlated_exhaust_fade_freeze": "research.correlated.exp_0036_fade_freeze",
 }
 
 
