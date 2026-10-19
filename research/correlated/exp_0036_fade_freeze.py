@@ -279,8 +279,9 @@ def _write_spec(freeze: bool, p_ex: ExhaustParams, report: dict, sids: list[str]
         "",
         "- Window: UK **14:30–17:00** only",
         "- **ER skip:** take the trade only if 60-min efficiency ratio "
-        "`er60 = |net|/range` on NQ ≤ **0.30** (same `RegimeSnapshot.efficiency_ratio` "
-        "as `make_daytype_skip(max_er=0.3)` / MAT regime window 60)",
+        "`er60 = |net| / path` (path = Σ|Δclose| over completed minutes) on NQ ≤ **0.30** "
+        "(same `RegimeSnapshot.efficiency_ratio` as `make_daytype_skip(max_er=0.3)` / "
+        "MAT regime window 60)",
         "- **No** trend-with / VWAP-with (hurts the fade)",
         "- **No** short-only filter (report stratum only; do not encode yet)",
         "- Flat-only + signal cooldown **5 s**",
@@ -327,10 +328,19 @@ def _write_spec(freeze: bool, p_ex: ExhaustParams, report: dict, sids: list[str]
         "",
         "- Research runner: `detector: correlated_exhaust_fade_freeze` / "
         "`research.features.corr_exhaust.exhaust_fade_events`",
-        "- Live: not yet in MAT continuation JAR — needs a separate fade module "
-        "(or offline signal → broker) implementing the signal+ER gate above",
-        "- ER must use the **same** 60-min completed-minute regime as "
-        "`research.features.regime.lookup_regime(..., window_min=60)`",
+        "- Live: Bookmap add-on **Correlated Fade AutoTrade (ES+NQ)** "
+        "(`bookmap-addon/.../trade/CorrFadeAutoTradeModule.java` over "
+        "`core/CorrFadeDetector.java`), JAR `build/libs/bookmap-orderflow-cfade.jar`. "
+        "Separate book from MAT; defaults = this spec; trading OFF by default.",
+        "- Offline parity: detector + RegimeTracker replayed on the 23 sessions reproduce "
+        "the research fade list 132/132 (stamp, side, es_imb_x, wait, close) and identical "
+        "er60 / bracket at each fade.",
+        "- Replay reference: `python -m research.export_cfade_ref --session <sid>` → "
+        "`results/CFADE_REF_<sid>.md` (all candidates + ER verdict + expected trades).",
+        "- ER uses the **same** 60-min completed-minute regime as "
+        "`research.features.regime.lookup_regime(..., window_min=60)`; the add-on resets its "
+        "regime tracker at UK 14:30 so the first hour matches the window-filtered research.",
+        "- Not automated: flatten at 17:00 and the 3-losing-sessions stop (manual).",
         "",
         f"Sessions in freeze sample ({len(sids)}): {', '.join(sids)}",
         "",

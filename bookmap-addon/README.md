@@ -12,6 +12,7 @@ Custom Bookmap Layer 1 add-ons for NQ scalping with ES confirmation:
 | **ES/NQ Flow Confirm** | Normalized ES vs NQ flow agreement (attach on NQ; keep ES open) |
 | **Momentum AutoTrade (ES+NQ)** | v1 — EXP-0008 tape momentum signals (+ optional CD pullback); optional bracket orders |
 | **Momentum AutoTrade v2 (ES+NQ)** | v1 + regime/trend/VWAP gates + vol-scaled brackets (EXP-0034); leave v1 unchanged |
+| **Correlated Fade AutoTrade (ES+NQ)** | H29 / EXP-0036_DIG4 frozen test auto-trade: fade an ES+NQ burst when NQ keeps pushing but ES flips against it; ER ≤ 0.30 gate; vol k=1 brackets |
 | **MAT Hotkeys** | Classic companion: keyboard shortcuts for MAT long/short side filter |
 | **Pitch and Catch** | High-vol peak/trough (“pitch”) then low-vol move away (“catch”); chart markers |
 | **HV Extreme Move** | Simple: HV peak/trough → mark when price is N ticks away |
@@ -189,6 +190,38 @@ Defaults are **with-trend + VWAP** (range gate off). Trend uses **completed 1-mi
 `python -m research.export_mat2_ref --session 021026 --stamp confirm --bracket vol_k1`  
 Install `bookmap-orderflow-mat-v2-confirm.jar`, set **ES confirm mode=1**, **Vol-scaled=true**, **k=1**, Verbose=true; grep `MAT2 SIGNAL` / `MAT2 SIGNAL(confirm)` and match with `python -m research.compare_replay_ref`.
 
+### Correlated Fade AutoTrade (ES+NQ)
+
+Frozen H29 fade from **EXP-0036_DIG4** (`results/EXP-0036_DIG4/TEST_AUTOTRADE_SPEC.md`). A *separate book* from MAT: MAT trades **with** the ES+NQ burst; this trades **against** it once ES stops participating. Both can run together as independent signals (DIG3 §6: additive), but do not enable trading on both against the same account until the fade has its own live record.
+
+JAR: `bookmap-addon/build/libs/bookmap-orderflow-cfade.jar` (contains every add-on). Classes: `trade/CorrFadeAutoTradeModule` (panel, gates, orders) over `core/CorrFadeDetector` (Bookmap-free signal; `core/TapeBarSeries` gives per-slot NQ/ES bars).
+
+**Signal (all 100 ms tape bars, causal):**
+1. ES+NQ **confirm** burst — EXP-0008 rules (6 trades, vol 25, |imb| 0.55, progress 1 tick, cooldown 3), ES same side within ±1500 ms and |lag| ≤ 250 ms, stamp = max(NQ bar end, ES bar end). Pairing is by bar **stamp** with a short history on both legs, because Bookmap bars close lazily (on the next print) so either leg can become known after the other.
+2. From the stamp, first complete bar (≤ **5 s**) where NQ is still bursting with the trade (side×imb ≥ 0.55, vol ≥ 25, trades ≥ 6) **and** ES is against it (side×imb ≤ **−0.4** on a bar with ES prints).
+3. **Fade** (side = −burst side) at that bar's close. Two bursts resolving on the same bar → one fade.
+
+**Gates:** UK **14:30–17:00**; **Max efficiency ratio 0.30** on the 60-min regime (`|net| / path` over completed minutes; tracker resets at window open so the first hour matches research); flat-only; 5 s cooldown from the last *taken* signal; Allow longs/shorts. **No** trend/VWAP gate — DIG3 showed those hurt the fade.
+
+**Brackets:** TP = SL = clip(k × median 30-min 1-minute range, 6, 30), **k = 1**, sent as Bookmap tick-offset brackets with a market entry.
+
+| Panel | Meaning |
+|---|---|
+| **CF Signal** | `+1` fade long / `−1` fade short / `0` |
+| **CF Fade Long / Short** | Primary-chart markers at the fade bar close |
+| **CF ER60** | Current 60-min efficiency ratio (gate at 0.30) |
+| **CF Pending fades** | Confirmed bursts still being watched for an ES-against bar |
+
+**Trading / ops params:** Enable trading (default **off**), Use selected account, Order size (default 1), **Kill switch: max session loss pts** (default 150 — no more orders that UK day once realised net ≤ −150; signals still plot), Verbose log.
+
+Logs: `CFADE CONFIRM#…`, `CFADE FADE PASS|REJECT reason=… wait_ms= es_imb_x= er60= detectDelayMs=`, `CFADE SIGNAL …`, `CFADE ORDER …`, `CFADE TRADE CLOSED … pnl= session net=`, `CFADE KILL SWITCH`. Reject reasons: `outside_window`, `regime_er_skip`, `signal_cooldown`, `not_flat(...)`, `longs_disabled` / `shorts_disabled`.
+
+**Offline parity (2026-10-19):** `CorrFadeDetector` + `RegimeTracker` replayed on the 23 research sessions reproduce the research fade list **132 / 132** exactly (stamp, side, `es_imb_x`, `wait_ms`, close) and identical `er60` / bracket at every fade.
+
+**Replay check:** `python -m research.export_cfade_ref --session 021026` → `results/CFADE_REF_021026.md` lists every candidate with its ER verdict and the expected `CFADE SIGNAL` rows; grep the Bookmap log and match `tsNs=`.
+
+**Not implemented (ops rules in the spec):** no auto-flatten at 17:00 and no cross-session "3 losing sessions" stop — handle manually.
+
 ### Pitch and Catch
 Warns when a **high-volume** rotation peak/trough is followed by a **low-volume** move of **Catch pts** (default 20) without reclaiming the extreme.
 
@@ -253,13 +286,13 @@ bookmap-addon/
     effort/       Effort vs Result
     liquidity/    Liquidity Reaction
     crossmarket/  ES/NQ Flow Confirm
-    trade/        Momentum AutoTrade v1 + v2 (ES+NQ) + MAT Hotkeys companion
+    trade/        Momentum AutoTrade v1 + v2 (ES+NQ) + MAT Hotkeys companion + Correlated Fade AutoTrade
     pitch/        Pitch and Catch
     hvmove/       HV Extreme Move
     retest/       Trapped Retest
 ```
 
-Order submission is only in **Momentum AutoTrade**, and only when **Enable trading** is checked.
+Order submission is only in **Momentum AutoTrade** (v1/v2) and **Correlated Fade AutoTrade**, and only when **Enable trading** is checked.
 
 ## Session Extractor playbook (research corpus)
 
