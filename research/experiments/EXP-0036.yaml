@@ -1,0 +1,60 @@
+name: EXP-0036
+hypothesis: H29
+title: Correlated exhaustion — NQ still pushing while ES has stopped (exit rule + fade event)
+description: >
+  After an ES+NQ confirmed burst, the first 100 ms bar where NQ aggressor
+  imbalance is still with the trade (>= 0.55, and NQ still bursting: vol >= 25,
+  n >= 6) but ES has stopped (ES imbalance <= 0 on a bar with prints, or ES
+  volume < 30% of its confirming burst) is read as NQ running alone.
+  Part A: use it as an exit on the frozen MAT bases and compare with brackets
+  only on the same sessions / matched entries. Part B: use it as a standalone
+  fade event after any confirm burst (event study in points vs null and vs the
+  corrected EXP-0008 bursts, plus MAT-sim P&L via the events override).
+  Causal: only bars starting at/after entry; exit at that bar's close.
+
+detector: correlated_exhaust
+bar_ms: 100
+min_trades: 6
+min_vol: 25
+min_imbalance: 0.55
+min_progress_ticks: 1.0
+sync_ms: 1500
+max_es_lag_ms: 250
+signal_cooldown_sec: 5
+slip_ticks: 1
+commission_pts_rt: 0.25
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000, 20000, 30000, 60000]
+point_targets: [5, 10, 20, 30]
+
+# Exhaustion rule (default). Plan-literal variant = loose_nq.
+exhaust:
+  nq_min_imbalance: 0.55
+  nq_min_vol: 25
+  nq_min_trades: 6
+  es_imb_max: 0.0
+  es_vol_frac: 0.30
+  es_vol_counts_empty: false
+  use_imb: true
+  use_vol: true
+  max_wait_sec: 0
+  skip_bars: 0
+
+variants:
+  loose_nq: {nq_min_vol: 0, nq_min_trades: 0}
+  imb_only: {use_vol: false}
+  vol_only: {use_imb: false}
+  es_against: {es_imb_max: -0.3, use_vol: false}
+  empty_counts: {es_vol_counts_empty: true}
+  skip3: {skip_bars: 3}
+  wait10: {max_wait_sec: 10}
+
+fade_variants: [default, loose_nq, es_against]
+fade_max_wait_sec: 5
+
+bases:
+  - {name: volk1_causal, es_stamp: causal, vol_k: 1.0, trend: with, vwap: true}
+  - {name: volk1_confirm, es_stamp: confirm, vol_k: 1.0, trend: with, vwap: true}
+  - {name: tp12p5_sl30_causal, es_stamp: causal, tp_pts: 12.5, sl_pts: 30, trend: with, vwap: true}
+  - {name: tp12p5_sl30_confirm, es_stamp: confirm, tp_pts: 12.5, sl_pts: 30, trend: with, vwap: true}
+
+exclude_sessions: []

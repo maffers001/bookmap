@@ -43,14 +43,66 @@
 | EXP-0032 | H26 range-bar buy/sell imb vs prior avg | needs re-run (units/comparator) | 5d | all cells ~44–49%≈null; path ≤0; ≪0008 85% |
 | EXP-0033 | H27 simultaneous ES+NQ aggressor flow | needs re-run (units/comparator) | 5d→14d ticks | dual range stratum was look-ahead; stamp fixed |
 | EXP-0034 | H4 MAT gates | ran | 14d US RTH | trend+VWAP lift; see results/EXP-0034 |
+| EXP-0035 | H28 correlated absorption fade (per-market adaptive thresholds) | ran — **reject** | 23d UK 14:30–17:00 (depth 15d) | dual hit10 .32–.36 ≈ NQ-only ≪ 0008 .45; ES adds nothing; train P&L negative |
+| EXP-0036 | H29 correlated exhaustion (exit + fade) | exit **reject**; fade **reopened dig** | 23d UK 14:30–17:00 | exit stays reject; fade P&L live (`against_m04` vol k=1 +479) — dig via `EXP-0036_DIG` / `_DIG2`, do not re-run Part A |
 
 ## Run notes
+
+### 2026-10-19 — EXP-0036 correlated exhaustion (first of the correlated series)
+
+- **Plumbing:** `simulate_session(events=..., exit_fn=...)` — events override (verified identical to the detect path on 021026) and a signal-driven force-exit (stop/TP still win ties on the same print). New `research/correlated/{harness,run,exp_0036_exhaust}.py`; `run_experiment` gets one `correlated_*` dispatch. Feature: `research/features/corr_exhaust.py`.
+- **Cohorts:** train 9 / hold 5 / new 9 (= 23 sessions; `161026` is in **new**, already consumed as OOS when the vol k=1 base was frozen, so no further holdout exists for this series).
+- **Base reproduction:** vol k=1 causal n=502 net **+779.2** (matches `MAT2_OVERLAYS_VOLK1`).
+- **Exit (Part A), all 4 bases × 8 variants — reject.** Default rule fires on 65–67% of trades. Matched entries, vol k=1 causal: bracket on fired trades **+1840 gross (209 TP / 114 SL)** → exit **−981**. Net: default −294 vs +779; `imb_only` +193; `wait10` +177; `es_against` (ES imb ≤ −0.3) **+503** — the only variant with days+ = base, but hold −105 and still −276 vs base. Same ordering on confirm and on 12.5/30 (12.5/30 base +570 → best variant +64). Exhaustion is not a reliable early-exit; ES going quiet/against after a confirmed NQ burst does not predict the NQ leg failing within the bracket.
+- **Fade (Part B), confirm bursts → first exhaustion bar ≤5 s, side against burst.** `default` n=452 hit10 0.42 ≈ null 0.40, @60s +0.9; `loose_nq` (plan-literal, imbalance-only) ≈ null. `es_against` n=168 (old 99 / new 69): hit10 **0.46 / 0.51** vs null 0.38 / 0.44 vs 0008 0.43 / 0.47; @60s **+1.4 / +5.1**; MFE 16–18 vs MAE 14–17. Event bar technically met on both cohorts but n is thin and it is 1 of 3 pre-listed fade variants.
+- **Fade P&L (no trend/VWAP gate):** `es_against` vol k=1 n=143 net **+470** (train +20 / hold +176 / new +275), 15/23 days+, maxDD 153; same events fixed 10/10 **−128**. Default and loose_nq fades negative on all brackets.
+- **Decision:** exit idea closed. Fade-on-ES-reversal flagged **dig** (not ship): sweep `es_imb_max` −0.2/−0.4, require min ES vol on the against bar, add trend/VWAP gate, and report ES-leg outcome before any further work. Results: `results/EXP-0036/`.
+
+### 2026-10-19 — EXP-0035 correlated absorption fade
+
+- **Scale check first** (`%TEMP%` script, 3 sessions): ES 100 ms bar vol p50/p95 ≈ 6–9 / 42–49 vs NQ 2 / 11–14; ES trades ≈ 1.7–2.6× NQ; `|net| ≤ 1 tick` holds on 99–100% of ES bars vs 68–80% NQ. A shared `min_vol=25` would be ~p80 on ES and ~p99 on NQ, and "flat" is meaningless on ES at 1 tick. Hence **per-market** thresholds: causal rolling quantile of own-market bar volume over trailing 30 completed minutes (verified: changing bars inside a minute leaves that minute's threshold unchanged), floors NQ 10 / ES 20, flat NQ ≤1 tick / ES ==0. On 021026 the p95 thresholds came out NQ 14 / ES 50 — self-scaling as intended.
+- **Plumbing:** `features/corr_absorb.py` (`AbsorbParams`, `rolling_quantile_by_minute`, `absorption_bars`, `level_contact_flags`); harness `cross_match` (generic ES/NQ matcher, `match_col`, confirm/causal stamp) and `level_contacts` (NQ `LargeLevelTracker` contacted levels, cached `results/_cache/<sid>_nq_level_contacts.parquet`; ~30 s/session; 15/23 sessions have depth). `correlated_absorb` dispatch; `research/experiments/EXP-0035.yaml`.
+- **Counts (default q95):** NQ absorb bars 7652, ES 7887, **dual 376** (≈16/session); ES-first 31%.
+- **Event study (NQ path, fade side):** dual hit10 **0.34** (old 0.33 / new 0.36), @60s +0.5 (old +0.8 / new +0.0), MFE 9.1 / MAE 8.5. NQ-only absorption 0.31 / +0.2. 0008 confirm 0.45 / +0.3. Same-n null 0.30 but noisy; large-n null (EXP-0036 run, n=2133) is 0.40 / +0.6. **Dual ≈ NQ-only** — ES confirmation adds nothing; MFE≈MAE≈9 says these bars occur in quiet tape where neither side goes anywhere in 60 s.
+- **Variants:** q90 (dual 874) 0.33; q98 (68) 0.24; flat0 (133) 0.36; range_cap (145) ≈ null; rel3 identical to default (rolling median already implied by q95); b250 (59) 0.32; sync500 (520) 0.34; imb70 (180) 0.33. No variant reaches 0008 or beats the large-n null.
+- **Strata:** level_contact old 0.36 (n=150) vs no_level 0.28 (n=95) — small lift, @60s +1.0 vs +0.4, not enough; new-cohort depth n=8/5 (depth missing on new sessions). ES-first slightly better than NQ-first on old (+1.2 vs +0.6 @60s) — thin. Short fades > long fades consistently (@60s +1.3 vs −0.3) — directional drift in the sample, not a rule.
+- **P&L (events override):** vol k=1 ungated train **negative for every variant** (default −361, q90 −354, imb70 −117). Only all-cohort-positive cell: `imb70` fixed 10/10 n=166 **+237** (train +46 / hold +90 / new +102) — 1 of 36 cells with hit10 0.33; treat as chance.
+- **Decision: reject H28.** Correlated absorption on 100/250 ms bars does not beat NQ-only absorption, null or 0008. Not a ship, not a dig. If revisited, it needs a different construction (multi-second absorption into a tracked level with ES confirming over seconds, not a single bar).
+
+### 2026-10-19 — EXP-0036_DIG (es_against fade dig)
+
+- Runner: same `correlated_exhaust` path with `skip_exit_overlay`, `es_min_vol`, NQ+ES labelling, `fade_pnl_gates: [none, trend_vwap]`. Results: `results/EXP-0036_DIG/`.
+- **ES imb sweep (−0.2 / −0.3 / −0.4), NQ outcomes:** tighter is better on path — `against_m04` hit10 **0.51** / @60s **+3.9** (old 0.47 / +2.6; new 0.57 / +6.1, n_new=49). Vol k=1 ungated net m02/m03/m04 = **+444 / +471 / +479**, but **train ≈ 0** (−4…+20) on all three; edge is hold+new. Fixed ±10 still negative (m04 −41).
+- **Min ES vol on the against bar kills the edge.** `esvol10` collapses net (m02 −8, m03 +97, m04 +221 with new weak); `esvol25` goes negative. So the “signal” lives on **thin** ES against prints — suspicious, not a liquidity-backed reversal.
+- **Trend+VWAP gate:** cuts n by ~⅔; train goes negative; new still strong. Gate concentrates the OOS-looking slice, does not fix train. Not a ship path.
+- **ES-leg outcomes:** fade side @10s/@60s mildly positive on ES (+0.2…+0.7 vs null −0.3) — confirms ES really flipped with the trigger — but hit5 only ~0.13 and hit10≈0 (ES rarely moves 10 pts in 60 s here). No tradable ES-leg standalone.
+- **Initial close (over-tight):** no-ship on thin-ES + train≈0 + vs-0008 hit rates. **Reopened 2026-10-19:** for a fade, MAT vol-k=1 P&L is the yardstick (0008 is continuation). m04 +479 / m03 +471 / m02 +444 with hold+new carrying train-flat is a live candidate. Exit overlay remains reject — **no need to re-run EXP-0036 Part A**. Dig continues in `EXP-0036_DIG2`.
+
+### 2026-10-19 — EXP-0036_DIG2 (reopened fade: concentration + soft ES vol)
+
+- Results: `results/EXP-0036_DIG2/`. Yardstick = ungated vol k=1 P&L (no trend/VWAP). Soft floors `es_min_vol` ∈ {1,3,5}; hard floors 10/25 already known-bad from DIG1.
+- **Soft floors:** `esvol1` ≡ no floor (every against bar already has vol ≥1). `esvol3` / `esvol5` cut net but do **not** kill it — m04: 0→+479, vol3→+353, vol5→+384 (new still +240 / +185). Contrast DIG1 hard floors (≥10) which collapsed the edge. Soft volume is tolerable; hard is not.
+- **Per-session concentration (ungated, no floor):**
+
+  | variant | net | train | hold | new | days+ | top3 share of +net |
+  |---|---:|---:|---:|---:|---:|---:|
+  | m02 | +444 | +21 | +230 | +194 | 15/23 | **0.57** (over bar) |
+  | m03 | +471 | +20 | +176 | +275 | 15/23 | 0.51 |
+  | m04 | +479 | −4 | +144 | +339 | **16/23** | **0.42** (best) |
+
+  Top days recur: `011026` (hold), `300926`/`151026`/`290926` (new), `050826` (train). Worst: `180926`, `260326`, `121026`, `160926`. Train is not uniformly flat — it is a few big wins vs a few big losses (050826 +79…+92 vs 180926 −73).
+- **Ship bar (DIG2):** train+hold+new all >0, days+ ≥14, top3 share ≤0.55, soft floor OK. **Not cleared** — train still ≈0 / slightly negative on m04; m02 fails concentration. **Keep open dig**, prefer `against_m04` (least concentrated, strongest new). Next dig options: drop worst train days as a robustness check (not fitting), side split, ToD within 14:30–17:00, or require NQ still-bursting stricter so train losers filter out.
+- **EXP-0036 Part A:** still reject; do not re-run.
 
 ### 2026-10-18 night — time-of-day (vol k=1, not 12.5/30)
 
 - **Yardstick:** same frozen base — **vol k=1** symmetric brackets, trend+VWAP, causal ES, 1-tick slip, 0.25 pt/RT. Window extended to UK **14:30–21:00** for ToD only.
 - Results: `results/MAT2_TOD_VOLK1/`. Edge concentrated 14:30–16:30; first 5m strong (+134); 14:35–14:45 and close 20:50–21:00 weak. See summary for half-hour/hour tables.
-- First-5m indicator param sweep: `results/MAT2_TOD_FIRST5_SWEEP/` (follow-up).
+- First-5m indicator param sweep: `results/MAT2_TOD_FIRST5_SWEEP/` (vol k=1 base).
+  - BASE first-5: n=71 net **+134** (old +83 / new +52).
+  - Loosening burst (`min_vol=15`, lower imb) or tightening (`min_vol≥40`, imb≥0.65, progress≥2, bar 50/200) **hurts**.
+  - Mild lifts: `signal_cooldown=0` (+160), vol k≥1.5 at cap (+138). Fixed **±25** looks best on first-5 (+300) but is bracket fitting on n=71 — treat as exploratory, not a ship.
+  - `gate=off` +259 but **new −14** — reject. Confirm stamp weakens open. **No indicator retune for open** beyond optional cooldown=0 dig.
 
 ### 2026-10-18 night — OOS + post-fix exploration (base = vol k=1)
 

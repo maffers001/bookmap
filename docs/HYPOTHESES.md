@@ -223,3 +223,49 @@ price progress recovers to ≈0008 (b250_flow_px n=346 **87%** / **+9.2**). Dig
 high-vol+price (nq≥40) n=73–169 hit **90–92%** — in-sample overlay only, no ship
 without holdout. Dual range r22 empty; r10 thin. Lead unchanged; note 0008
 |lag|&lt;50ms n=156 **87%** / **+11.1** already captures “same time.”
+*(Pre-fix numbers: ticks + look-ahead comparator — see EXPERIMENT_LOG reset.)*
+
+## H28 — Correlated absorption (both tapes hit a wall at once)
+
+Heavy one-sided aggression that fails to move price = absorption (inverse of the
+0008 progress gate). If ES **and** NQ both absorb on the same aggressor side
+within 250 ms, the wall is market-wide, not one resting order → fade the
+aggressor on NQ. ES and NQ are different tapes (ES 100 ms volume ~3–4× NQ,
+trade count ~2×, ES |net| ≤ 1 tick on ~99% of bars), so thresholds are
+**per-market causal rolling quantiles** (trailing 30 completed minutes) with
+per-market flat rules (NQ ≤1 tick, ES unchanged) and absolute floors.
+
+**Test:** EXP-0035 (`research/features/corr_absorb.py`). 9 rule variants
+(q90/95/98, flat0, range cap, rel-vol, 250 ms bars, sync 500, imb ≥0.70);
+comparators null, corrected 0008, and **NQ-only absorption from the same
+rule**; strata depth-level contact (15 sessions), ES-first, side; fade P&L.
+**Result (23d): reject.** Dual fade hit10 **0.32–0.36** ≈ NQ-only **0.30–0.35**
+≪ 0008 0.45 and ≤ the large-n null (0.40); @60s +0.3…+1.0; MFE≈MAE≈9 pts
+(these bars sit in quiet tape). ES confirmation adds nothing to NQ-only
+absorption. Level-contact stratum ≈ no lift (old 0.36 vs 0.28, n=150/95).
+P&L: train negative on vol k=1 for every variant; only `imb70` fixed 10/10
+is positive on all cohorts (+237, n=166) — 1 of 36 cells, hit10 0.33, not a
+signal. Closed; don't revisit as a 100 ms bar construction.
+
+## H29 — Correlated exhaustion (NQ runs alone, ES has stopped)
+
+An ES+NQ confirmed burst stays healthy while both markets keep pushing. The
+first 100 ms bar after entry where NQ aggressor imbalance is still with the
+trade (≥0.55, NQ still bursting: vol ≥25, n ≥6) but ES has stopped — ES
+imbalance ≤0 on a bar with prints, or ES volume <30% of its confirming burst —
+marks NQ running alone. Two readings: (a) exit the MAT trade at that bar close;
+(b) fade the burst at that bar close. Causal: only bars starting at/after entry.
+
+**Test:** EXP-0036 (`research/features/corr_exhaust.py`, `research/correlated/`).
+Exit overlay on vol k=1 and 12.5/30 × causal/confirm; 8 rule variants; fade
+event study in points vs null and corrected 0008; fade P&L via events override.
+**Result (23d):** **Exit: reject** (unchanged). Fires on ~65% of trades and
+gives back winners (−981 on matched fired trades vs bracket +1840).
+**Fade: open dig** (P&L yardstick; EXP-0008 is continuation, not the bar).
+Ungated vol k=1: m04 n=114 net **+479** (train −4 / hold +144 / new +339),
+days+ 16/23, top3 share of +net **0.42**; m03 +471 (top3 0.51); m02 +444
+(top3 0.57 — over-concentrated). Soft ES vol floors 1/3/5: vol1 ≡ none; vol3/5
+preserve hold+new (m04 +353 / +384) unlike hard ≥10 which killed the edge
+(`EXP-0036_DIG2`). Train is a few large wins vs losses, not uniformly flat.
+**Status:** exit closed; fade **open dig**, prefer `against_m04` — not shipped
+(train not yet >0 on all cohorts).

@@ -1,0 +1,50 @@
+name: EXP-0035
+hypothesis: H28
+title: Correlated absorption — heavy same-side aggression fails to move price in both ES and NQ (fade)
+description: >
+  Per market, an absorption bar = total_vol >= causal rolling quantile of that
+  market's own 100 ms bars (trailing 30 completed minutes), |imbalance| >= 0.55,
+  and no price progress (NQ |net| <= 1 tick; ES |net| == 0 — ES barely moves in
+  100 ms so a 1-tick allowance would pass ~99% of ES bars). Absolute floors
+  NQ 10 / ES 20 stop a dead tape qualifying. Dual = NQ and ES absorption with
+  the same aggressor side within 250 ms; trade = fade the aggressor on NQ.
+  Thresholds are never shared between markets (ES volume ~3-4x NQ).
+  Comparators: null, corrected EXP-0008 confirm bursts, and NQ-only absorption
+  from the same rule (does ES confirmation add anything?). Strata: NQ large
+  level contacted on the bar (depth, 15 sessions), ES-first vs NQ-first, side.
+
+detector: correlated_absorb
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000, 20000, 30000, 60000]
+point_targets: [5, 10, 20, 30]
+depth_stratum: true
+level_radius_ticks: 8
+pnl_gates: [none, trend_vwap]
+
+absorb:
+  bar_ms: 100
+  vol_q: 0.95
+  ntr_q: 0.0
+  lookback_min: 30
+  warmup_min: 5
+  min_rel_vol: 0.0
+  nq_abs_min_vol: 10
+  es_abs_min_vol: 20
+  min_imbalance: 0.55
+  nq_flat_ticks: 1
+  es_flat_ticks: 0
+  nq_max_range_ticks: 0
+  es_max_range_ticks: 0
+  sync_ms: 250
+  cooldown_bars: 3
+
+variants:
+  q90: {vol_q: 0.90}
+  q98: {vol_q: 0.98}
+  flat0: {nq_flat_ticks: 0}
+  range_cap: {nq_max_range_ticks: 2, es_max_range_ticks: 1}
+  rel3: {min_rel_vol: 3.0}
+  b250: {bar_ms: 250, nq_flat_ticks: 1, es_flat_ticks: 0, nq_abs_min_vol: 20, es_abs_min_vol: 40}
+  sync500: {sync_ms: 500}
+  imb70: {min_imbalance: 0.70}
+
+exclude_sessions: []

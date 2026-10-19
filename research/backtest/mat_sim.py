@@ -166,11 +166,18 @@ def _simulate_path(
     time_stop_sec: float = 0.0,
     be_trigger_pts: float = 0.0,
     trail_pts: float = 0.0,
+    force_exit_ns: int = 0,
+    force_reason: str = "force",
 ) -> tuple[float, float, bool, int, str]:
     """Return exit_px, pnl, win, bars_held, reason.
 
     Optional exits (defaults off): ``time`` / ``be`` / ``trail``. Stop hits are
     conservative vs TP when both print on the same bar.
+
+    ``force_exit_ns`` (absolute ns, 0 = off): market-exit at the first print at or
+    after that timestamp, unless TP/SL already resolved on an earlier print (or on
+    that same print — stop/TP still win the tie). Used for signal-driven exits
+    such as the correlated-exhaustion rule (EXP-0036).
     """
     entry = float(path_px[entry_i]) + side * slip_pts  # worse fill
     entry_ts = int(path_ts[entry_i])
@@ -231,6 +238,10 @@ def _simulate_path(
             exit_px = px - side * slip_pts
             pnl = side * (exit_px - entry)
             return exit_px, pnl, pnl > 0, j - entry_i, "time"
+        if force_exit_ns > 0 and int(path_ts[j]) >= force_exit_ns:
+            exit_px = px - side * slip_pts
+            pnl = side * (exit_px - entry)
+            return exit_px, pnl, pnl > 0, j - entry_i, force_reason
     # EOD
     exit_px = float(path_px[-1]) - side * slip_pts
     pnl = side * (exit_px - entry)
@@ -261,6 +272,10 @@ def _stop_reason(
 GateFn = Callable[[int, RegimeSnapshot, RegimeSnapshot, float], bool]
 # (side, snap_regime_window, snap_trend_window, last_px) -> accept
 
+ExitFn = Callable[[int, int, dict], tuple[int, str] | None]
+# (entry_ts_ns, side, event_row) -> (force_exit_ts_ns, reason) or None.
+# Called once per accepted entry; must only look at data at/after entry_ts_ns.
+
 
 @dataclass
 class BracketFn:
@@ -281,11 +296,25 @@ def simulate_session(
     vol_window_min: int = 30,
     bracket_fn: Callable[[RegimeSnapshot], tuple[float, float]] | None = None,
     vwap_from_ns: int | None = None,
+    events: pa.Table | None = None,
+    exit_fn: ExitFn | None = None,
 ) -> SimSummary:
-    events = detect_signals(nq, es, cfg)
+    """Bar-end bracket sim over NQ trades.
+
+    ``events``: optional pre-built signal table (``event_ts_ns``, ``side`` + any
+    extras) — skips ``detect_signals`` so other detectors can reuse the
+    flat-only / cooldown / trend / VWAP / bracket machinery.
+    ``exit_fn``: optional signal-driven exit; see ``ExitFn``.
+    """
+    if events is None:
+        events = detect_signals(nq, es, cfg)
     summary = SimSummary()
     if events.num_rows == 0 or nq.num_rows == 0:
         return summary
+    if "event_ts_ns" not in events.column_names or "side" not in events.column_names:
+        raise ValueError("events override needs 'event_ts_ns' and 'side' columns")
+    ev_order = np.argsort(events.column("event_ts_ns").to_numpy().astype(np.int64), kind="stable")
+    events = events.take(ev_order)
 
     ts = nq.column("ts_ns").to_numpy().astype(np.int64)
     px = nq.column("price").to_numpy().astype(np.float64) * cfg.pts_per_tick
@@ -370,11 +399,20 @@ def simulate_session(
         if cfg.trail_frac and cfg.trail_frac > 0:
             trail = cfg.trail_frac * bracket
 
+        force_ns, force_reason = 0, "force"
+        if exit_fn is not None:
+            row = {name: events.column(name)[i].as_py() for name in events.column_names}
+            fx = exit_fn(int(ts[entry_i]), side, row)
+            if fx is not None:
+                force_ns, force_reason = int(fx[0]), str(fx[1])
+
         exit_px, pnl, win, held, reason = _simulate_path(
             ts, px, entry_i, side, tp_pts, sl_pts, slip_pts,
             time_stop_sec=cfg.time_stop_sec,
             be_trigger_pts=be_trig,
             trail_pts=trail,
+            force_exit_ns=force_ns,
+            force_reason=force_reason,
         )
         # exit time approx
         exit_i = min(entry_i + held, len(ts) - 1)

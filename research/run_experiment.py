@@ -4400,6 +4400,10 @@ def main(argv: list[str] | None = None) -> int:
         result = run_exp_simultaneous_flow(cfg, exp, session_ids)
     elif exp.get("detector") == "mat_gates" or exp_name == "EXP-0034":
         result = run_exp_mat_gates(cfg, exp, session_ids)
+    elif str(exp.get("detector", "")).startswith("correlated_"):
+        from research.correlated.run import run_correlated  # lazy: avoids import cycle
+
+        result = run_correlated(cfg, exp, session_ids)
     else:
         print(f"Unknown experiment detector for {exp_name}", file=sys.stderr)
         return 2

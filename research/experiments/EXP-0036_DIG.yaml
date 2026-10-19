@@ -1,0 +1,65 @@
+name: EXP-0036_DIG
+hypothesis: H29
+title: Dig — es_against fade (ES imb thresholds, min ES vol, trend/VWAP, ES-leg outcomes)
+description: >
+  Follow-up dig on the only positive EXP-0036 fade cell (es_against).
+  Sweep ES imbalance threshold (-0.2 / -0.3 / -0.4), require a minimum ES volume
+  on the against bar (0 / 10 / 25), report NQ and ES path outcomes, and compare
+  fade P&L with and without the frozen trend+VWAP gate. Exit overlay skipped
+  (already rejected in EXP-0036). Ship bar unchanged: hit+10 and @60s above
+  null and EXP-0008 on old AND new, n >= 50; or P&L lift on train+hold+new with
+  maxDD not worse than the ungated vol-k1 fade.
+
+detector: correlated_exhaust
+bar_ms: 100
+min_trades: 6
+min_vol: 25
+min_imbalance: 0.55
+min_progress_ticks: 1.0
+sync_ms: 1500
+max_es_lag_ms: 250
+signal_cooldown_sec: 5
+slip_ticks: 1
+commission_pts_rt: 0.25
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000, 20000, 30000, 60000]
+point_targets: [5, 10, 20, 30]
+
+skip_exit_overlay: true
+bases: []
+
+# Base = es_against from EXP-0036 (imb-only, ES must be against the burst)
+exhaust:
+  nq_min_imbalance: 0.55
+  nq_min_vol: 25
+  nq_min_trades: 6
+  es_imb_max: -0.3
+  es_min_vol: 0
+  use_imb: true
+  use_vol: false
+  max_wait_sec: 0
+  skip_bars: 0
+
+variants:
+  against_m02: {es_imb_max: -0.2}
+  against_m03: {}
+  against_m04: {es_imb_max: -0.4}
+  against_m02_esvol10: {es_imb_max: -0.2, es_min_vol: 10}
+  against_m03_esvol10: {es_min_vol: 10}
+  against_m04_esvol10: {es_imb_max: -0.4, es_min_vol: 10}
+  against_m03_esvol25: {es_min_vol: 25}
+  against_m04_esvol25: {es_imb_max: -0.4, es_min_vol: 25}
+
+fade_variants:
+  - against_m02
+  - against_m03
+  - against_m04
+  - against_m02_esvol10
+  - against_m03_esvol10
+  - against_m04_esvol10
+  - against_m03_esvol25
+  - against_m04_esvol25
+fade_max_wait_sec: 5
+fade_pnl_gates: [none, trend_vwap]
+fade_label_legs: [NQ, ES]
+
+exclude_sessions: []

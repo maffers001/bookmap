@@ -1,0 +1,76 @@
+name: EXP-0036_DIG2
+hypothesis: H29
+title: Dig2 — ES-against fade P&L (per-session concentration + soft ES vol floors)
+description: >
+  Reopened dig on the profitable ungated vol-k=1 fade (m02/m03/m04 nets
+  +444/+471/+479). Yardstick is MAT P&L, not EXP-0008 hit rates (0008 is
+  continuation; this is a fade). Goals: (1) per-session net table and top-3
+  concentration for m02/m03/m04; (2) soft ES against-bar volume floors 1/3/5
+  (hard floors 10/25 already killed the edge in DIG1 — is any soft floor
+  tolerable?). Exit overlay skipped. No trend/VWAP gate (DIG1 showed it hurts
+  train). Ship bar: train, hold and new all positive under vol k=1, days+ >= 14,
+  top3 share of positive net <= 0.55, and a soft ES vol floor that does not
+  collapse new-cohort net.
+
+detector: correlated_exhaust
+bar_ms: 100
+min_trades: 6
+min_vol: 25
+min_imbalance: 0.55
+min_progress_ticks: 1.0
+sync_ms: 1500
+max_es_lag_ms: 250
+signal_cooldown_sec: 5
+slip_ticks: 1
+commission_pts_rt: 0.25
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000, 20000, 30000, 60000]
+point_targets: [5, 10, 20, 30]
+
+skip_exit_overlay: true
+bases: []
+per_session_pnl: true
+pnl_brackets: [vol_k1]
+fade_pnl_gates: [none]
+fade_label_legs: [NQ]
+fade_max_wait_sec: 5
+
+exhaust:
+  nq_min_imbalance: 0.55
+  nq_min_vol: 25
+  nq_min_trades: 6
+  es_imb_max: -0.3
+  es_min_vol: 0
+  use_imb: true
+  use_vol: false
+  max_wait_sec: 0
+  skip_bars: 0
+
+variants:
+  against_m02: {es_imb_max: -0.2}
+  against_m03: {}
+  against_m04: {es_imb_max: -0.4}
+  against_m02_esvol1: {es_imb_max: -0.2, es_min_vol: 1}
+  against_m03_esvol1: {es_min_vol: 1}
+  against_m04_esvol1: {es_imb_max: -0.4, es_min_vol: 1}
+  against_m02_esvol3: {es_imb_max: -0.2, es_min_vol: 3}
+  against_m03_esvol3: {es_min_vol: 3}
+  against_m04_esvol3: {es_imb_max: -0.4, es_min_vol: 3}
+  against_m02_esvol5: {es_imb_max: -0.2, es_min_vol: 5}
+  against_m03_esvol5: {es_min_vol: 5}
+  against_m04_esvol5: {es_imb_max: -0.4, es_min_vol: 5}
+
+fade_variants:
+  - against_m02
+  - against_m03
+  - against_m04
+  - against_m02_esvol1
+  - against_m03_esvol1
+  - against_m04_esvol1
+  - against_m02_esvol3
+  - against_m03_esvol3
+  - against_m04_esvol3
+  - against_m02_esvol5
+  - against_m03_esvol5
+  - against_m04_esvol5
+
+exclude_sessions: []
