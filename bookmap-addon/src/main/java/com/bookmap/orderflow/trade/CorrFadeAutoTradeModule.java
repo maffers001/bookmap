@@ -737,29 +737,111 @@ public class CorrFadeAutoTradeModule implements
         filledByOrderId.put(order.orderId, filled);
         netFills += order.isBuy ? delta : -delta;
         flatLocked = !(netFills == 0 && position == 0);
-        double fillPx = PriceTicks.toChartPoints(order.averageFillPrice, pips);
+        // Replay SIM often leaves averageFillPrice=NaN; fall back to limit/stop/last.
+        double fillPx = resolveFillPx(order);
         Log.info(String.format("CFADE FILL %s order=%s type=%s delta=%d filled=%d px=%.2f netFills=%d statusPos=%d",
                 order.isBuy ? "BUY" : "SELL", order.orderId, order.type, delta, filled, fillPx,
                 netFills, position));
 
-        if (openSide == 0 || fillPx <= 0) {
+        if (openSide == 0) {
             return;
         }
         boolean entryDir = (order.isBuy && openSide > 0) || (!order.isBuy && openSide < 0);
         if (entryDir) {
             if (order.type == OrderType.MKT || order.fakeMarketOrder) {
-                entryFillPx = fillPx;
+                // Keep signal entry when SIM omits fill price — never overwrite with NaN.
+                if (fillPx > 0 && !Double.isNaN(fillPx)) {
+                    entryFillPx = fillPx;
+                }
                 Log.info(String.format("CFADE trade open %s entry=%.2f",
                         openSide > 0 ? "LONG" : "SHORT", entryFillPx));
             }
             return;
         }
         // Opposite-direction fill = bracket leg (TP LMT / SL STP) closing the trade.
+        if (!(fillPx > 0) || Double.isNaN(fillPx)) {
+            Log.info("CFADE TRADE CLOSED skipped — no usable exit price (avg/limit/stop/last all missing)");
+            return;
+        }
+        if (!(entryFillPx > 0) || Double.isNaN(entryFillPx)) {
+            Log.info("CFADE TRADE CLOSED skipped — entry still unset/NaN");
+            return;
+        }
         onTradeClosed(fillPx, order.type);
+    }
+
+    /**
+     * Replay SIM {@code averageFillPrice} is often NaN. Prefer avg when present;
+     * else LMT {@code limitPrice} / STP {@code stopPrice}; else last tape price.
+     *
+     * <p>Order avg/limit/stop/execution prices on this install are already chart
+     * points (e.g. 30785). Tape {@code onTrade} prices are tick indices and still
+     * need {@link PriceTicks#toChartPoints}. Applying that helper to order prices
+     * wrongly ×pips (30785→7696) and trips the kill switch.
+     */
+    private double resolveFillPx(OrderInfoUpdate order) {
+        double pip = pips > 0 ? pips : 0.25;
+        double avg = order.averageFillPrice;
+        if (!Double.isNaN(avg) && avg > 0) {
+            return orderPriceToChart(avg, pip);
+        }
+        if (order.type == OrderType.LMT || order.type == OrderType.STP_LMT) {
+            double lim = order.limitPrice;
+            if (!Double.isNaN(lim) && lim != 0) {
+                return orderPriceToChart(lim, pip);
+            }
+        }
+        if (order.type == OrderType.STP || order.type == OrderType.STP_LMT) {
+            double stop = order.stopPrice;
+            if (!Double.isNaN(stop) && stop != 0) {
+                return orderPriceToChart(stop, pip);
+            }
+        }
+        InstrumentState nq = primaryState();
+        if (nq != null && nq.lastPrice > 0 && !Double.isNaN(nq.lastPrice)) {
+            return PriceTicks.toChartPoints(nq.lastPrice, pip);
+        }
+        return Double.NaN;
+    }
+
+    /** Order-layer prices → chart points (usually already points; see resolveFillPx). */
+    private double orderPriceToChart(double orderPx, double pip) {
+        if (entryFillPx > 0 && !Double.isNaN(entryFillPx)
+                && Math.abs(orderPx - entryFillPx) <= 500.0) {
+            return orderPx; // already points near the signal entry
+        }
+        double asTicks = PriceTicks.toChartPoints(orderPx, pip);
+        if (entryFillPx > 0 && !Double.isNaN(entryFillPx)
+                && Math.abs(asTicks - entryFillPx) <= 500.0) {
+            return asTicks; // was a tick index
+        }
+        // No entry yet (or ambiguous): NQ chart ~3e4, NQ ticks ~1e5.
+        if (orderPx >= 80_000.0) {
+            return orderPx * pip;
+        }
+        return orderPx;
     }
 
     private void onTradeClosed(double exitPx, OrderType type) {
         double pnl = openSide * (exitPx - entryFillPx);
+        if (Double.isNaN(pnl)) {
+            Log.info(String.format(
+                    "CFADE TRADE CLOSED skipped NaN pnl entry=%.2f exit=%.2f via=%s",
+                    entryFillPx, exitPx, type));
+            openSide = 0;
+            entryFillPx = 0;
+            return;
+        }
+        // Guard: max bracket is 30 pts; abs(pnl)≫ that means a price-unit bug.
+        if (Math.abs(pnl) > 100.0) {
+            Log.info(String.format(
+                    "CFADE TRADE CLOSED ignored absurd pnl=%.2f entry=%.2f exit=%.2f via=%s "
+                            + "(price-unit mismatch?) — position cleared, sessionNet unchanged",
+                    pnl, entryFillPx, exitPx, type));
+            openSide = 0;
+            entryFillPx = 0;
+            return;
+        }
         sessionNetPts += pnl;
         sessionTrades++;
         if (pnl > 0) {
@@ -785,7 +867,25 @@ public class CorrFadeAutoTradeModule implements
 
     @Override
     public void onOrderExecuted(velox.api.layer1.data.ExecutionInfo executionInfo) {
-        // Fills tracked via onOrderUpdated.
+        // Replay SIM: ExecutionInfo.price is often populated when averageFillPrice is not.
+        // Entry refinement only — exits already resolved from limit/stop in onOrderUpdated.
+        if (executionInfo == null || openSide == 0) {
+            return;
+        }
+        double px = executionInfo.price;
+        if (Double.isNaN(px) || px <= 0) {
+            return;
+        }
+        double pip = pips > 0 ? pips : 0.25;
+        double chart = orderPriceToChart(px, pip);
+        if (!(chart > 0) || Double.isNaN(chart)) {
+            return;
+        }
+        // If we still only have the signal estimate, upgrade from the execution print.
+        if (!(entryFillPx > 0) || Double.isNaN(entryFillPx)) {
+            entryFillPx = chart;
+            Log.info(String.format("CFADE entry from execution px=%.2f", entryFillPx));
+        }
     }
 
     private void maybeRollSessionDate(long tsNs) {
