@@ -12,22 +12,33 @@ public final class PriceTicks {
     }
 
     /**
-     * Rithmic Simplified-API trade {@code price} on this install arrives as a
-     * tick index (e.g. NQ ~117000 → 29250 pts). Chart markers and orders need
-     * instrument price points = ticks × pips.
+     * Map an API price to instrument chart points.
      *
-     * Heuristic: if {@code apiPrice} looks like a tick index (≫ typical index
-     * futures points), multiply by pips; otherwise leave as points.
+     * <p>Tape {@code onTrade} prices on this install are usually tick indices
+     * (NQ ~1e5+, modern ES ~8e4+). Some paths already supply chart points
+     * (NQ/ES ~2e4–4e4). Threshold {@code 80_000} separates them: multiplying
+     * chart points by pips (e.g. 29824→7456) plots PRIMARY markers off-chart.
      */
     public static double toChartPoints(double apiPrice, double pips) {
         if (pips <= 0) {
             return apiPrice;
         }
-        // NQ ticks ~1e5; ES ticks ~2e4–4e4. Chart points are typically &lt; 50k for ES/NQ.
-        if (apiPrice >= 20_000.0) {
+        if (apiPrice >= 80_000.0) {
             return apiPrice * pips;
         }
         return apiPrice;
+    }
+
+    /**
+     * Normalize an API trade price to a tick index for trackers.
+     * Tick indices ({@code >= 80_000}) pass through; chart points become
+     * {@code round(price / pips)}.
+     */
+    public static int apiPriceToTick(double apiPrice, double pips) {
+        if (apiPrice >= 80_000.0 || pips <= 0) {
+            return (int) Math.round(apiPrice);
+        }
+        return (int) Math.round(apiPrice / pips);
     }
 
     /** Inverse of {@link #toChartPoints} when converting point thresholds into API units. */

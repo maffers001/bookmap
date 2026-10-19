@@ -259,19 +259,20 @@ Two-swing trapped-size fade: **high-volume** extreme (peak1), then a **lower-vol
 **Suggested start (NQ):** Confirm `5`, Peak band `2`, Min pullback `5`, Break `4`, High vol mult `1.5`, Max retest frac `0.60`. Tighten Max retest frac (e.g. `0.45`) for quieter second peaks only.
 
 ### HV Extreme Move
-Minimal building block: find a **high-volume** local peak or trough, then mark when price has moved **Move ticks** (default 20) away.
+Minimal building block: find a **high-volume** local peak or trough, then mark when price has moved **Move pts** (default 20) away. Distances are in **price points** (converted to ticks via `pips`); old “Move ticks = 20” was only ~5 NQ pts.
 
 | Panel | Meaning |
 |---|---|
-| **HV Ext Peak / Trough** | Extreme price while watching |
-| **HV Ext Target** | Extreme ± Move ticks while watching |
-| **HV Ext Fire Long / Short** | Marker when the move completes |
-| **HV Ext Armed** | `+1` trough / `−1` peak / `0` idle |
-| **HV Ext Vol ratio** | Extreme-band vol ÷ (avg × band width) |
+| **HV Ext Peak / Trough** | Extreme price while watching (toggle with **Show in-play lines**) |
+| **HV Ext Target** | Extreme ± Move pts while watching |
+| **HV Ext Fire Long / Short** | Marker at the **HV tip** (trough / peak) when the move completes — not at the trigger price |
+| **HV Ext Armed** | `+1` trough / `−1` peak / `0` idle (**Show armed**) |
+| **HV Ext Signal** | Brief `±1` fire pulse (**Show signal**; shares ±1 axis with Armed) |
+| **HV Ext Vol ratio** | Extreme-band vol ÷ (avg × band width) (**Show vol ratio**; own axis, off by default) |
 
-**Logic:** reverse **Confirm ticks** from a running high/low → candidate extreme. Keep if band volume ≥ **High vol mult** × average. Fire when distance ≥ **Move ticks** (or cancel if a new extreme forms first).
+**Logic:** reverse **Confirm pts** from a running high/low → candidate extreme. Keep if band volume (≥ **Peak band pts** around tip) ≥ **High vol mult** × average. Fire when distance ≥ **Move pts** (or cancel if a new extreme forms first).
 
-**Suggested start:** Move `20`, Confirm `4`, Band `1`, High vol mult `2.0`, Lookback `15` min. Watch Bookmap log for `HV EXT WATCH` / `HV EXT FIRE`.
+**Suggested start (NQ):** Move `20`, Confirm `5`, Peak band `2`, High vol mult `2.0`, Lookback `15` min. Leave **Show vol ratio** off so the fire pulse stays visible. Watch Bookmap log for `HV EXT WATCH` / `HV EXT FIRE`.
 
 ## Project layout
 

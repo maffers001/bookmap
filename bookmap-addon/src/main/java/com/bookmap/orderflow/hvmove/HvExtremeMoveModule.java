@@ -28,19 +28,20 @@ import velox.api.layer1.simplified.TimeListener;
 import velox.api.layer1.simplified.TradeDataListener;
 
 /**
- * Simple HV extreme move: mark when price is N ticks away from a high-volume
+ * Simple HV extreme move: mark when price is N pts away from a high-volume
  * peak (short) or trough (long).
  *
  * <ul>
  *   <li>{@code HV Ext Peak/Trough} — extreme price while watching</li>
- *   <li>{@code HV Ext Target} — extreme ± Move ticks while watching</li>
- *   <li>{@code HV Ext Fire Long/Short} — marker when the move completes</li>
+ *   <li>{@code HV Ext Target} — extreme ± Move pts while watching</li>
+ *   <li>{@code HV Ext Fire Long/Short} — marker at the HV tip (trough/peak) when the move completes</li>
  *   <li>{@code HV Ext Armed} — +1 trough / −1 peak / 0 idle</li>
  *   <li>{@code HV Ext Signal} — brief fire pulse</li>
+ *   <li>{@code HV Ext Vol ratio} — tip band vol ÷ (avg × band width)</li>
  * </ul>
  */
 @Layer1SimpleAttachable
-@Layer1StrategyName("HV Extreme Move")
+@Layer1StrategyName("HV Extreme Move tip")
 @Layer1ApiVersion(Layer1ApiVersionValue.VERSION2)
 public class HvExtremeMoveModule implements
         CustomModule,
@@ -49,14 +50,14 @@ public class HvExtremeMoveModule implements
         IntervalListener,
         HistoricalDataListener {
 
-    @Parameter(name = "Move ticks", step = 1.0)
-    Double moveTicks = 20.0;
+    @Parameter(name = "Move pts", step = 0.25)
+    Double movePts = 20.0;
 
-    @Parameter(name = "Confirm ticks", step = 1.0)
-    Double confirmTicks = 4.0;
+    @Parameter(name = "Confirm pts", step = 0.25)
+    Double confirmPts = 5.0;
 
-    @Parameter(name = "Extreme band ticks", step = 1.0)
-    Double extremeBandTicks = 1.0;
+    @Parameter(name = "Peak band pts", step = 0.25)
+    Double peakBandPts = 2.0;
 
     @Parameter(name = "High vol mult", step = 0.1)
     Double highVolMult = 2.0;
@@ -64,7 +65,7 @@ public class HvExtremeMoveModule implements
     @Parameter(name = "Profile lookback min", step = 1.0)
     Double lookbackMin = 15.0;
 
-    @Parameter(name = "Cooldown cooldown sec", step = 5.0)
+    @Parameter(name = "Cooldown sec", step = 5.0)
     Double cooldownSec = 30.0;
 
     @Parameter(name = "Show longs", step = 1.0)
@@ -72,6 +73,18 @@ public class HvExtremeMoveModule implements
 
     @Parameter(name = "Show shorts", step = 1.0)
     Boolean showShorts = true;
+
+    @Parameter(name = "Show signal", step = 1.0)
+    Boolean showSignal = true;
+
+    @Parameter(name = "Show armed", step = 1.0)
+    Boolean showArmed = true;
+
+    @Parameter(name = "Show vol ratio", step = 1.0)
+    Boolean showVolRatio = false;
+
+    @Parameter(name = "Show in-play lines", step = 1.0)
+    Boolean showInPlay = true;
 
     private double pips = 0.25;
     private long nowNs;
@@ -122,31 +135,38 @@ public class HvExtremeMoveModule implements
         fireLong.setWidth(3);
         fireShort.setWidth(3);
 
-        AxisGroup bottom = new AxisGroup();
-        bottom.add(signalIndicator);
-        bottom.add(armedIndicator);
-        bottom.add(volRatioIndicator);
+        // Signal/Armed share ±1 scale; Vol ratio stays on its own axis.
+        AxisGroup signalAxis = new AxisGroup();
+        signalAxis.add(signalIndicator);
+        signalAxis.add(armedIndicator);
 
         Log.info(String.format(
-                "HV Extreme Move init alias=%s pips=%.4f moveTicks=%.0f confirm=%.0f "
-                        + "band=%.0f highMult=%.2f lookbackMin=%.0f",
+                "HVEXT tipfix3 init alias=%s pips=%.4f movePts=%.2f confirmPts=%.2f "
+                        + "bandPts=%.2f highMult=%.2f lookbackMin=%.0f (PRIMARY=tick index)",
                 alias,
                 pips,
-                moveTicks,
-                confirmTicks,
-                extremeBandTicks,
+                movePts,
+                confirmPts,
+                peakBandPts,
                 highVolMult,
                 lookbackMin));
     }
 
     private HvExtremeMoveTracker buildTracker() {
-        int move = moveTicks == null ? 20 : Math.max(1, moveTicks.intValue());
-        int confirm = confirmTicks == null ? 4 : Math.max(1, confirmTicks.intValue());
-        int band = extremeBandTicks == null ? 1 : Math.max(0, extremeBandTicks.intValue());
+        int move = Math.max(1, ptsToTicks(movePts == null ? 20.0 : movePts));
+        int confirm = Math.max(1, ptsToTicks(confirmPts == null ? 5.0 : confirmPts));
+        int band = Math.max(0, ptsToTicks(peakBandPts == null ? 2.0 : peakBandPts));
         double mult = highVolMult == null ? 2.0 : highVolMult;
         long lookbackNs = (long) ((lookbackMin == null ? 15.0 : lookbackMin) * 60_000_000_000L);
         long coolNs = (long) ((cooldownSec == null ? 30.0 : cooldownSec) * 1_000_000_000L);
         return new HvExtremeMoveTracker(move, confirm, band, mult, lookbackNs, coolNs);
+    }
+
+    private int ptsToTicks(double pts) {
+        if (pips <= 0) {
+            return (int) Math.round(pts);
+        }
+        return (int) Math.round(pts / pips);
     }
 
     @Override
@@ -159,13 +179,7 @@ public class HvExtremeMoveModule implements
         if (tracker == null || size <= 0) {
             return;
         }
-        // On this install API trade price is already a tick index when large.
-        int tick;
-        if (price >= 20_000.0) {
-            tick = (int) Math.round(price);
-        } else {
-            tick = PriceTicks.toTicks(price, pips);
-        }
+        int tick = PriceTicks.apiPriceToTick(price, pips);
         long t = nowNs > 0 ? nowNs : System.nanoTime();
         tracker.onTrade(t, tick, size);
 
@@ -182,34 +196,32 @@ public class HvExtremeMoveModule implements
             return;
         }
 
-        double chart = tickToChart(sig.triggerTick);
+        // PRIMARY indicators on this install take API tick indices (same as
+        // onTrade price). Passing chart points (ticks×pips) gets ×pips again
+        // in the UI (29851 → 7462) and plots off-chart.
+        double tipChart = PriceTicks.toChartPoints(sig.extremeTick, pips);
         lastSignalSide = sig.side == Side.LONG ? 1 : -1;
         signalHold = 20;
         if (sig.side == Side.LONG) {
-            lastFireLong = chart;
+            lastFireLong = sig.extremeTick;
             lastFireShort = Double.NaN;
         } else {
-            lastFireShort = chart;
+            lastFireShort = sig.extremeTick;
             lastFireLong = Double.NaN;
         }
 
         Log.info(String.format(
-                "HV EXT FIRE %s extreme=%d trigger=%d move=%d vol=%.0f avg/tick=%.2f ratio=%.2f chart=%.2f",
+                "HV EXT FIRE %s extreme=%d tipChart=%.2f primaryTick=%d trigger=%d move=%d "
+                        + "vol=%.0f avg/tick=%.2f ratio=%.2f",
                 sig.side,
+                sig.extremeTick,
+                tipChart,
                 sig.extremeTick,
                 sig.triggerTick,
                 sig.moveTicks,
                 sig.extremeVol,
                 sig.avgVolPerTick,
-                sig.volRatio,
-                chart));
-    }
-
-    private double tickToChart(int tick) {
-        if (pips <= 0) {
-            return tick;
-        }
-        return tick * pips;
+                sig.volRatio));
     }
 
     @Override
@@ -223,7 +235,11 @@ public class HvExtremeMoveModule implements
             return;
         }
 
-        signalIndicator.addPoint(lastSignalSide);
+        if (Boolean.TRUE.equals(showSignal)) {
+            signalIndicator.addPoint(lastSignalSide);
+        } else {
+            signalIndicator.addPoint(Double.NaN);
+        }
         if (signalHold > 0) {
             signalHold--;
             if (signalHold == 0) {
@@ -234,6 +250,7 @@ public class HvExtremeMoveModule implements
         Side watching = tracker.watchingSide();
         boolean drawLong = Boolean.TRUE.equals(showLongs);
         boolean drawShort = Boolean.TRUE.equals(showShorts);
+        boolean drawInPlay = Boolean.TRUE.equals(showInPlay);
 
         double armed = 0;
         double peak = Double.NaN;
@@ -242,12 +259,16 @@ public class HvExtremeMoveModule implements
 
         if (watching == Side.SHORT && drawShort) {
             armed = -1;
-            peak = tickToChart(tracker.extremeTick());
-            target = tickToChart(tracker.extremeTick() - tracker.moveTicks());
+            if (drawInPlay) {
+                peak = tracker.extremeTick();
+                target = tracker.extremeTick() - tracker.moveTicks();
+            }
         } else if (watching == Side.LONG && drawLong) {
             armed = 1;
-            trough = tickToChart(tracker.extremeTick());
-            target = tickToChart(tracker.extremeTick() + tracker.moveTicks());
+            if (drawInPlay) {
+                trough = tracker.extremeTick();
+                target = tracker.extremeTick() + tracker.moveTicks();
+            }
         }
 
         if (watching != lastArmedLog) {
@@ -266,8 +287,18 @@ public class HvExtremeMoveModule implements
             lastArmedLog = watching;
         }
 
-        armedIndicator.addPoint(armed);
-        volRatioIndicator.addPoint(tracker.currentExtremeVolRatio());
+        if (Boolean.TRUE.equals(showArmed)) {
+            armedIndicator.addPoint(armed);
+        } else {
+            armedIndicator.addPoint(Double.NaN);
+        }
+
+        if (Boolean.TRUE.equals(showVolRatio)) {
+            volRatioIndicator.addPoint(tracker.currentExtremeVolRatio());
+        } else {
+            volRatioIndicator.addPoint(Double.NaN);
+        }
+
         peakLine.addPoint(peak);
         troughLine.addPoint(trough);
         targetLine.addPoint(target);
