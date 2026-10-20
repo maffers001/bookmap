@@ -15,7 +15,7 @@ Custom Bookmap Layer 1 add-ons for NQ scalping with ES confirmation:
 | **Correlated Fade AutoTrade (ES+NQ)** | H29 / EXP-0036_DIG4 frozen test auto-trade: fade an ES+NQ burst when NQ keeps pushing but ES flips against it; ER ≤ 0.30 gate; vol k=1 brackets |
 | **MAT Hotkeys** | Classic companion: keyboard shortcuts for MAT long/short side filter |
 | **Pitch and Catch** | High-vol peak/trough (“pitch”) then low-vol move away (“catch”); chart markers |
-| **HV Extreme Move** | Simple: HV peak/trough → mark when price is N ticks away |
+| **HV Extreme Move AutoTrade** | HV tip → clean Move pts leg → tip markers; optional market + TP/SL brackets |
 | **Trapped Retest** | HV peak → weak lower-vol retest → fire on break beyond 2nd swing |
 
 ## Prerequisites
@@ -258,21 +258,24 @@ Two-swing trapped-size fade: **high-volume** extreme (peak1), then a **lower-vol
 
 **Suggested start (NQ):** Confirm `5`, Peak band `2`, Min pullback `5`, Break `4`, High vol mult `1.5`, Max retest frac `0.60`. Tighten Max retest frac (e.g. `0.45`) for quieter second peaks only.
 
-### HV Extreme Move
-Minimal building block: find a **high-volume** local peak or trough, then mark when price has moved **Move pts** (default 20) away. Distances are in **price points** (converted to ticks via `pips`); old “Move ticks = 20” was only ~5 NQ pts.
+### HV Extreme Move AutoTrade
+HV tip → **Move pts** leg (optional clean gates) → tip markers. Optional **market entry** with fixed **Take profit pts** / **Stop loss pts** brackets (same pattern as MAT). Strategy name in Bookmap: **HV Extreme Move AutoTrade**. Default: signals only (`Enable trading` off).
 
 | Panel | Meaning |
 |---|---|
-| **HV Ext Peak / Trough** | Extreme price while watching (toggle with **Show in-play lines**) |
+| **HV Ext Peak / Trough** | Extreme while watching (**Show in-play lines**) |
 | **HV Ext Target** | Extreme ± Move pts while watching |
-| **HV Ext Fire Long / Short** | Marker at the **HV tip** (trough / peak) when the move completes — not at the trigger price |
-| **HV Ext Armed** | `+1` trough / `−1` peak / `0` idle (**Show armed**) |
-| **HV Ext Signal** | Brief `±1` fire pulse (**Show signal**; shares ±1 axis with Armed) |
-| **HV Ext Vol ratio** | Extreme-band vol ÷ (avg × band width) (**Show vol ratio**; own axis, off by default) |
+| **HV Ext Fire Long / Short** | Marker at the **HV tip** when the move completes |
+| **HV Ext Signal** | Brief `±1` fire pulse |
+| **HV Ext Path ER** | Live path efficiency while armed |
 
-**Logic:** reverse **Confirm pts** from a running high/low → candidate extreme. Keep if band volume (≥ **Peak band pts** around tip) ≥ **High vol mult** × average. Fire when distance ≥ **Move pts** (or cancel if a new extreme forms first).
+**Signal defaults (NQ-tuned):** Move `20`, Confirm `10`, Peak band `5`, High vol mult `2`, Min path efficiency `0` (off), Max pullback `5`, Max leg sec `0` (off), Lookback `15`, Cooldown `30`.
 
-**Suggested start (NQ):** Move `20`, Confirm `5`, Peak band `2`, High vol mult `2.0`, Lookback `15` min. Leave **Show vol ratio** off so the fire pulse stays visible. Watch Bookmap log for `HV EXT WATCH` / `HV EXT FIRE`.
+**Clean-leg gates:** Min path efficiency (`disp / path length`, `0`=off), Max pullback pts, Max leg sec. Fail → cancel (no fire).
+
+**Trading params:** Enable trading (default **off**), Use selected account, Order size, **Take profit pts** (default 10), **Stop loss pts** (default 10), Use brackets, Flat-only. Orders only after realtime (not during replay catchup). LONG after HV trough + move up; SHORT after HV peak + move down.
+
+Logs: `HVEXT AT init`, `HV EXT FIRE … trading=`, `HVEXT AT ORDER sent …`, `HVEXT AT TRADE CLOSED …`.
 
 ## Project layout
 
@@ -293,7 +296,7 @@ bookmap-addon/
     retest/       Trapped Retest
 ```
 
-Order submission is only in **Momentum AutoTrade** (v1/v2) and **Correlated Fade AutoTrade**, and only when **Enable trading** is checked.
+Order submission is in **Momentum AutoTrade** (v1/v2), **Correlated Fade AutoTrade**, and **HV Extreme Move AutoTrade**, and only when **Enable trading** is checked.
 
 ## Session Extractor playbook (research corpus)
 
