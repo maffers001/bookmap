@@ -63,8 +63,9 @@ import velox.api.layer1.simplified.TradeDataListener;
  * <b>fade</b> the burst at that bar's close.
  *
  * <p>Gates: UK 14:30–17:00, 60-min efficiency ratio ≤ 0.30, flat-only, 5 s
- * cooldown. Brackets: TP = SL = clip(k × median 30-min minute range, 6, 30),
- * k = 1. No trend / VWAP gate (DIG3: those hurt the fade).
+ * cooldown. Brackets (vol RR, {@code results/CFADE_ASYM_RR/}): unit =
+ * k × median 30-min minute range; SL = clip(1R×unit, 4, 40), TP = clip(2R×unit, 4, 40).
+ * No trend / VWAP gate (DIG3: those hurt the fade).
  *
  * <p>Separate from Momentum AutoTrade (continuation). Both can run together
  * as independent books (DIG3 §6: additive), but do <b>not</b> enable trading
@@ -171,18 +172,24 @@ public class CorrFadeAutoTradeModule implements
     @Parameter(name = "Flat-only (no pyramid)")
     Boolean flatOnly = true;
 
-    // --- Brackets (vol k=1) ---
+    // --- Brackets (vol RR: SL 1R / TP 2R — CFADE_ASYM_RR) ---
     @Parameter(name = "Vol multiple k", step = 0.5)
     Double volMultipleK = 1.0;
 
     @Parameter(name = "Vol window min", step = 1.0)
     Double volWindowMin = 30.0;
 
+    @Parameter(name = "SL R multiple", step = 0.25)
+    Double slRMultiple = 1.0;
+
+    @Parameter(name = "TP R multiple", step = 0.25)
+    Double tpRMultiple = 2.0;
+
     @Parameter(name = "Bracket min pts", step = 1.0)
-    Double bracketMinPts = 6.0;
+    Double bracketMinPts = 4.0;
 
     @Parameter(name = "Bracket max pts", step = 1.0)
-    Double bracketMaxPts = 30.0;
+    Double bracketMaxPts = 40.0;
 
     // --- Trading ---
     @Parameter(name = "Enable trading (OFF for signal-only)")
@@ -318,9 +325,23 @@ public class CorrFadeAutoTradeModule implements
                 + " maxEr=" + maxEr
                 + " fadeMaxWaitSec=" + fadeMaxWaitSec
                 + " volK=" + volMultipleK
+                + " slR=" + slRMultiple
+                + " tpR=" + tpRMultiple
+                + " floor=" + bracketMinPts
+                + " cap=" + bracketMaxPts
                 + " window=" + windowStartUkMin + "-" + windowEndUkMin
                 + " kill=" + killMaxSessionLossPts
-                + " (H29 fade; spec results/EXP-0036_DIG4/TEST_AUTOTRADE_SPEC.md)");
+                + " (H29 fade; vol RR sl1/tp2; spec results/EXP-0036_DIG4/TEST_AUTOTRADE_SPEC.md)");
+    }
+
+    private static final class BracketPts {
+        final double tp;
+        final double sl;
+
+        BracketPts(double tp, double sl) {
+            this.tp = tp;
+            this.sl = sl;
+        }
     }
 
     private void rebuildDetector(String via) {
@@ -585,14 +606,23 @@ public class CorrFadeAutoTradeModule implements
         return new Eval(true, "ok");
     }
 
-    private double resolveBracketPts(long asofNs) {
+    /**
+     * Vol RR brackets matching {@code make_vol_bracket_rr(k, tp_r, sl_r)}:
+     * unit = k × median minute range; SL = clip(slR×unit), TP = clip(tpR×unit).
+     * Defaults: k=1, slR=1, tpR=2, floor=4, cap=40 ({@code CFADE_ASYM_RR}).
+     */
+    private BracketPts resolveBracketPts(long asofNs) {
         int vw = volWindowMin == null ? 30 : Math.max(1, volWindowMin.intValue());
         RegimeTracker.Snapshot sv = regime.snapshot(vw, asofNs);
         double k = volMultipleK == null ? 1.0 : volMultipleK;
-        double floor = bracketMinPts == null ? 6.0 : bracketMinPts;
-        double cap = bracketMaxPts == null ? 30.0 : bracketMaxPts;
-        double raw = k * Math.max(sv.medianMinuteRange, 0.25);
-        return Math.max(floor, Math.min(cap, raw));
+        double slR = slRMultiple == null ? 1.0 : slRMultiple;
+        double tpR = tpRMultiple == null ? 2.0 : tpRMultiple;
+        double floor = bracketMinPts == null ? 4.0 : bracketMinPts;
+        double cap = bracketMaxPts == null ? 40.0 : bracketMaxPts;
+        double unit = k * Math.max(sv.medianMinuteRange, 0.25);
+        double sl = Math.max(floor, Math.min(cap, slR * unit));
+        double tp = Math.max(floor, Math.min(cap, tpR * unit));
+        return new BracketPts(tp, sl);
     }
 
     private void fireSignal(FadeEvent e, double chartPx, RegimeTracker.Snapshot sr) {
@@ -609,14 +639,14 @@ public class CorrFadeAutoTradeModule implements
             shortMarker.addPoint(chartPx);
             longMarker.addPoint(Double.NaN);
         }
-        double brkt = resolveBracketPts(e.stampNs);
+        BracketPts brkt = resolveBracketPts(e.stampNs);
         boolean wantTrade = Boolean.TRUE.equals(enableTrading);
         boolean willTrade = wantTrade && realtimeStarted && api != null && !tradingHalted;
         Log.info(String.format(
-                "CFADE SIGNAL %s @%.2f time=%s tsNs=%d wait_ms=%.0f es_imb_x=%.2f er60=%.3f brkt=%.1f "
-                        + "trading=%s realtime=%s halted=%s pos=%d account=%s sessionNet=%.2f",
+                "CFADE SIGNAL %s @%.2f time=%s tsNs=%d wait_ms=%.0f es_imb_x=%.2f er60=%.3f "
+                        + "tp=%.1f sl=%.1f trading=%s realtime=%s halted=%s pos=%d account=%s sessionNet=%.2f",
                 side > 0 ? "LONG" : "SHORT", chartPx, formatTime(e.stampNs), e.stampNs, e.waitMs, e.esImbX,
-                sr.efficiencyRatio, brkt, wantTrade, realtimeStarted, tradingHalted,
+                sr.efficiencyRatio, brkt.tp, brkt.sl, wantTrade, realtimeStarted, tradingHalted,
                 flatCheckPosition(), tradingAccountId == null ? "null" : tradingAccountId, sessionNetPts));
         if (willTrade) {
             sendBracketOrder(side > 0, chartPx, brkt);
@@ -654,11 +684,11 @@ public class CorrFadeAutoTradeModule implements
         return position != 0 ? position : netFills;
     }
 
-    private void sendBracketOrder(boolean isBuy, double entryPricePoints, double bracketPts) {
+    private void sendBracketOrder(boolean isBuy, double entryPricePoints, BracketPts brkt) {
         int size = Math.max(1, orderSize == null ? 1 : orderSize.intValue());
         double pip = pips > 0 ? pips : 0.25;
-        int tpTicks = Math.max(1, (int) Math.round(bracketPts / pip));
-        int slTicks = tpTicks;
+        int tpTicks = Math.max(1, (int) Math.round(brkt.tp / pip));
+        int slTicks = Math.max(1, (int) Math.round(brkt.sl / pip));
 
         if (Boolean.TRUE.equals(flatOnly) && (flatCheckPosition() != 0 || flatLocked)) {
             Log.info("CFADE ORDER blocked flat-only pos=" + position
@@ -679,8 +709,9 @@ public class CorrFadeAutoTradeModule implements
             openSide = isBuy ? 1 : -1;
             entryFillPx = entryPricePoints;
             Log.info(String.format(
-                    "CFADE ORDER sent %s size=%d entry~%.2f tp=sl=%d ticks (~%.2f pts) account=%s time=%s",
-                    isBuy ? "BUY" : "SELL", size, entryPricePoints, tpTicks, bracketPts,
+                    "CFADE ORDER sent %s size=%d entry~%.2f tp=%d ticks (~%.2f pts) sl=%d ticks (~%.2f pts) "
+                            + "account=%s time=%s",
+                    isBuy ? "BUY" : "SELL", size, entryPricePoints, tpTicks, brkt.tp, slTicks, brkt.sl,
                     tradingAccountId == null ? "null(primary)" : tradingAccountId, formatTime(nowNs)));
         } catch (Throwable t) {
             flatLocked = false;
@@ -832,7 +863,7 @@ public class CorrFadeAutoTradeModule implements
             entryFillPx = 0;
             return;
         }
-        // Guard: max bracket is 30 pts; abs(pnl)≫ that means a price-unit bug.
+        // Guard: max TP/SL cap is 40 pts; abs(pnl)≫ that means a price-unit bug.
         if (Math.abs(pnl) > 100.0) {
             Log.info(String.format(
                     "CFADE TRADE CLOSED ignored absurd pnl=%.2f entry=%.2f exit=%.2f via=%s "

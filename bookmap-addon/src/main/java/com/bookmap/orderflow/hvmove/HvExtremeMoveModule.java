@@ -49,20 +49,19 @@ import velox.api.layer1.simplified.TimeListener;
 import velox.api.layer1.simplified.TradeDataListener;
 
 /**
- * HV Extreme Move AutoTrade: HV tip → clean Move pts leg → signal at tip;
- * optional market entry with fixed or vol-scaled asymmetric TP/SL brackets.
+ * HV Extreme Move AutoTrade: HV tip → clean Move pts leg → optional retest entry.
  *
  * <p>LONG after HV trough + clean move up; SHORT after HV peak + clean move down.
  * Default: signals only ({@code Enable trading} off).
  *
- * <p>Vol brackets (when enabled): {@code unit = k × max(medR30, 0.25)};
- * {@code SL = clip(slR×unit, floor, cap)}, {@code TP = clip(tpR×unit, floor, cap)}
- * — same formula as {@code research.backtest.mat_sim.make_vol_bracket_rr}.
+ * <p>EXP-0038 freeze (retest entry): panel Move20/Confirm10/Band5/HV2/pb5,
+ * enter on pullback within {@code Retest pts} of tip within timeout; stop beyond
+ * tip; TP = {@code Retest TP mult} × risk. Extension entry when retest mode off.
  */
 @Layer1SimpleAttachable
 @Layer1TradingStrategy
 @Layer1MultiAccountTradingSupported
-@Layer1StrategyName("HV Extreme Move AutoTrade")
+@Layer1StrategyName("HV Extreme Move AutoTrade v2")
 @Layer1ApiVersion(Layer1ApiVersionValue.VERSION2)
 public class HvExtremeMoveModule implements
         CustomModule,
@@ -74,16 +73,15 @@ public class HvExtremeMoveModule implements
         PositionListener,
         OrdersListener {
 
-    // --- Signal (tuned defaults from live panel) ---
-    // Defaults = EXP-0037 frozen (parked — final test failed ship threshold)
+    // --- Signal (EXP-0038 panel defaults) ---
     @Parameter(name = "Move pts", step = 0.25)
     Double movePts = 20.0;
 
     @Parameter(name = "Confirm pts", step = 0.25)
-    Double confirmPts = 15.0;
+    Double confirmPts = 10.0;
 
     @Parameter(name = "Peak band pts", step = 0.25)
-    Double peakBandPts = 2.0;
+    Double peakBandPts = 5.0;
 
     @Parameter(name = "High vol mult", step = 0.1)
     Double highVolMult = 2.0;
@@ -95,13 +93,43 @@ public class HvExtremeMoveModule implements
     Double maxPullbackPts = 5.0;
 
     @Parameter(name = "Max leg sec (0=off)", step = 1.0)
-    Double maxLegSec = 60.0;
+    Double maxLegSec = 0.0;
+
+    /**
+     * Quiet-leg Gate B: legVol (outside Peak band) must be
+     * &lt; this × avgVolPerTick × (moveTicks − bandHalf). 0 = off.
+     */
+    @Parameter(name = "Max leg vol vs avg (0=off)", step = 0.05)
+    Double maxLegVolVsAvg = 0.0;
+
+    /**
+     * Quiet-leg Gate A: legVol (outside Peak band) must be
+     * &lt; this × tip extremeVol. 0 = off.
+     */
+    @Parameter(name = "Max leg vol vs tip (0=off)", step = 0.05)
+    Double maxLegVolVsTip = 0.0;
 
     @Parameter(name = "Profile lookback min", step = 1.0)
     Double lookbackMin = 15.0;
 
     @Parameter(name = "Cooldown sec", step = 5.0)
     Double cooldownSec = 30.0;
+
+    // --- Retest entry (EXP-0038 freeze: R10 / 300s / sb2 / x3) ---
+    @Parameter(name = "Retest entry mode")
+    Boolean retestEntry = true;
+
+    @Parameter(name = "Retest pts", step = 0.25)
+    Double retestPts = 10.0;
+
+    @Parameter(name = "Retest timeout sec", step = 10.0)
+    Double retestTimeoutSec = 300.0;
+
+    @Parameter(name = "Retest stop beyond pts", step = 0.25)
+    Double retestStopBeyondPts = 2.0;
+
+    @Parameter(name = "Retest TP mult", step = 0.25)
+    Double retestTpMult = 3.0;
 
     // --- Display ---
     @Parameter(name = "Show longs", step = 1.0)
@@ -135,10 +163,10 @@ public class HvExtremeMoveModule implements
     @Parameter(name = "Order size", step = 1.0)
     Double orderSize = 1.0;
 
-    @Parameter(name = "Take profit pts", step = 0.25)
+    @Parameter(name = "Take profit pts (extension)", step = 0.25)
     Double takeProfitPts = 30.0;
 
-    @Parameter(name = "Stop loss pts", step = 0.25)
+    @Parameter(name = "Stop loss pts (extension)", step = 0.25)
     Double stopLossPts = 10.0;
 
     @Parameter(name = "Vol-scaled brackets")
@@ -203,6 +231,12 @@ public class HvExtremeMoveModule implements
     private Layer1ApiProvider provider;
     private Layer1ApiAdminAdapter adminListener;
 
+    /** Armed after HV fire when retest entry mode is on. */
+    private boolean retestArmed;
+    private Side retestSide = Side.NONE;
+    private int retestTipTick;
+    private long retestDeadlineNs;
+
     @Override
     public void initialize(String alias, InstrumentInfo info, Api api, InitialState initialState) {
         this.api = api;
@@ -216,6 +250,10 @@ public class HvExtremeMoveModule implements
         entryFillPx = 0;
         filledByOrderId.clear();
         tradingAccountId = null;
+        retestArmed = false;
+        retestSide = Side.NONE;
+        retestTipTick = 0;
+        retestDeadlineNs = 0;
         tracker = buildTracker();
         regime = new RegimeTracker();
 
@@ -255,7 +293,9 @@ public class HvExtremeMoveModule implements
 
         Log.info(String.format(
                 "HVEXT AT init alias=%s pips=%.4f move=%.1f confirm=%.1f band=%.1f highMult=%.1f "
-                        + "minEff=%.2f maxPull=%.1f maxLeg=%.0f trading=%s fixedTp=%.1f fixedSl=%.1f "
+                        + "minEff=%.2f maxPull=%.1f maxLeg=%.0f maxLegVolVsAvg=%.2f maxLegVolVsTip=%.2f "
+                        + "retest=%s R=%.1f timeout=%.0f stopBeyond=%.1f tpMult=%.1f "
+                        + "trading=%s fixedTp=%.1f fixedSl=%.1f "
                         + "volScaled=%s k=%.1f slR=%.2f tpR=%.2f floor=%.0f cap=%.0f size=%.0f",
                 alias,
                 pips,
@@ -266,6 +306,13 @@ public class HvExtremeMoveModule implements
                 minPathEfficiency,
                 maxPullbackPts,
                 maxLegSec,
+                maxLegVolVsAvg,
+                maxLegVolVsTip,
+                Boolean.TRUE.equals(retestEntry),
+                retestPts,
+                retestTimeoutSec,
+                retestStopBeyondPts,
+                retestTpMult,
                 Boolean.TRUE.equals(enableTrading),
                 takeProfitPts,
                 stopLossPts,
@@ -292,8 +339,24 @@ public class HvExtremeMoveModule implements
         long maxLegNs = maxLegSec == null || maxLegSec <= 0
                 ? 0L
                 : (long) (maxLegSec * 1_000_000_000L);
+        double maxLegVol = maxLegVolVsAvg == null || maxLegVolVsAvg <= 0
+                ? 0.0
+                : maxLegVolVsAvg;
+        double maxVsTip = maxLegVolVsTip == null || maxLegVolVsTip <= 0
+                ? 0.0
+                : maxLegVolVsTip;
         return new HvExtremeMoveTracker(
-                move, confirm, band, mult, lookbackNs, coolNs, minEff, maxPull, maxLegNs);
+                move,
+                confirm,
+                band,
+                mult,
+                lookbackNs,
+                coolNs,
+                minEff,
+                maxPull,
+                maxLegNs,
+                maxLegVol,
+                maxVsTip);
     }
 
     private int ptsToTicks(double pts) {
@@ -331,6 +394,9 @@ public class HvExtremeMoveModule implements
         Signal sig = tracker.pollSignal();
         if (sig != null) {
             onFire(sig);
+        }
+        if (retestArmed) {
+            maybeFillRetest(t, tick);
         }
     }
 
@@ -382,7 +448,6 @@ public class HvExtremeMoveModule implements
 
         double tipChart = PriceTicks.toChartPoints(sig.extremeTick, pips);
         double entryChart = PriceTicks.toChartPoints(sig.triggerTick, pips);
-        BracketPts brkt = resolveBracketPts();
         lastSignalSide = sig.side == Side.LONG ? 1 : -1;
         signalHold = 20;
         if (sig.side == Side.LONG) {
@@ -393,14 +458,10 @@ public class HvExtremeMoveModule implements
             lastFireLong = Double.NaN;
         }
 
-        boolean wantTrade = Boolean.TRUE.equals(enableTrading);
-        boolean willTrade = wantTrade && realtimeStarted && api != null;
-
         Log.info(String.format(
-                "HV EXT FIRE %s extreme=%d tipChart=%.2f entry~%.2f trigger=%d move=%d "
+                "HV EXT FIRE %s extreme=%d tipChart=%.2f triggerChart=%.2f trigger=%d move=%d "
                         + "vol=%.0f ratio=%.2f eff=%.2f pullbackTicks=%d legSec=%.2f "
-                        + "tp=%.2f sl=%.2f medR30=%.2f volScaled=%s "
-                        + "trading=%s realtime=%s pos=%d",
+                        + "legVol=%.0f legVolRatio=%.2f legVolVsTip=%.2f retestMode=%s",
                 sig.side,
                 sig.extremeTick,
                 tipChart,
@@ -412,18 +473,107 @@ public class HvExtremeMoveModule implements
                 sig.pathEfficiency,
                 sig.maxPullbackTicks,
                 sig.legSec,
-                brkt.tpPts,
-                brkt.slPts,
-                brkt.medR30,
-                brkt.volScaled,
-                wantTrade,
-                realtimeStarted,
-                flatCheckPosition()));
+                sig.legVol,
+                sig.legVolRatio,
+                sig.legVolVsTip,
+                Boolean.TRUE.equals(retestEntry)));
 
+        if (Boolean.TRUE.equals(retestEntry)) {
+            armRetest(sig);
+            return;
+        }
+
+        BracketPts brkt = resolveBracketPts();
+        boolean wantTrade = Boolean.TRUE.equals(enableTrading);
+        boolean willTrade = wantTrade && realtimeStarted && api != null;
+        Log.info(String.format(
+                "HV EXT ENTRY extension %s tp=%.2f sl=%.2f trading=%s realtime=%s pos=%d",
+                sig.side, brkt.tpPts, brkt.slPts, wantTrade, realtimeStarted, flatCheckPosition()));
         if (willTrade) {
             sendBracketOrder(sig.side == Side.LONG, entryChart, brkt);
         } else if (wantTrade && !realtimeStarted) {
             Log.info("HVEXT AT ORDER skipped (catchup/history — waiting for realtime)");
+        }
+    }
+
+    private void armRetest(Signal sig) {
+        retestArmed = true;
+        retestSide = sig.side;
+        retestTipTick = sig.extremeTick;
+        double timeout = retestTimeoutSec == null ? 300.0 : retestTimeoutSec;
+        long t = nowNs > 0 ? nowNs : System.nanoTime();
+        retestDeadlineNs = t + (long) (timeout * 1_000_000_000L);
+        Log.info(String.format(
+                "HV EXT RETEST ARMED %s tip=%d R=%.1f timeout=%.0fs stopBeyond=%.1f tpMult=%.1f",
+                sig.side,
+                sig.extremeTick,
+                retestPts == null ? 10.0 : retestPts,
+                timeout,
+                retestStopBeyondPts == null ? 2.0 : retestStopBeyondPts,
+                retestTpMult == null ? 3.0 : retestTpMult));
+    }
+
+    private void clearRetest() {
+        retestArmed = false;
+        retestSide = Side.NONE;
+        retestTipTick = 0;
+        retestDeadlineNs = 0;
+    }
+
+    private void maybeFillRetest(long tNs, int tick) {
+        if (!retestArmed || retestSide == Side.NONE) {
+            return;
+        }
+        if (tNs > retestDeadlineNs) {
+            Log.info("HV EXT RETEST timeout tip=" + retestTipTick);
+            clearRetest();
+            return;
+        }
+        // Invalidate if trade through tip
+        if (retestSide == Side.SHORT && tick > retestTipTick) {
+            Log.info("HV EXT RETEST invalidate through tip SHORT tip=" + retestTipTick + " tick=" + tick);
+            clearRetest();
+            return;
+        }
+        if (retestSide == Side.LONG && tick < retestTipTick) {
+            Log.info("HV EXT RETEST invalidate through tip LONG tip=" + retestTipTick + " tick=" + tick);
+            clearRetest();
+            return;
+        }
+        int rTicks = Math.max(1, ptsToTicks(retestPts == null ? 10.0 : retestPts));
+        if (Math.abs(tick - retestTipTick) > rTicks) {
+            return;
+        }
+        // Fill
+        int stopBeyond = Math.max(1, ptsToTicks(retestStopBeyondPts == null ? 2.0 : retestStopBeyondPts));
+        double riskPts;
+        if (retestSide == Side.SHORT) {
+            riskPts = Math.abs((tick - (retestTipTick + stopBeyond)) * pips);
+        } else {
+            riskPts = Math.abs((tick - (retestTipTick - stopBeyond)) * pips);
+        }
+        if (riskPts < pips) {
+            riskPts = pips;
+        }
+        double tpMult = retestTpMult == null ? 3.0 : retestTpMult;
+        double tpPts = tpMult * riskPts;
+        double slPts = riskPts;
+        double entryChart = PriceTicks.toChartPoints(tick, pips);
+        BracketPts brkt = new BracketPts(tpPts, slPts, Double.NaN, false);
+
+        Log.info(String.format(
+                "HV EXT RETEST FILL %s tip=%d entryTick=%d entryChart=%.2f risk=%.2f tp=%.2f sl=%.2f",
+                retestSide, retestTipTick, tick, entryChart, riskPts, tpPts, slPts));
+
+        Side side = retestSide;
+        clearRetest();
+
+        boolean wantTrade = Boolean.TRUE.equals(enableTrading);
+        boolean willTrade = wantTrade && realtimeStarted && api != null;
+        if (willTrade) {
+            sendBracketOrder(side == Side.LONG, entryChart, brkt);
+        } else if (wantTrade && !realtimeStarted) {
+            Log.info("HVEXT AT RETEST ORDER skipped (catchup/history)");
         }
     }
 

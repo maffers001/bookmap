@@ -5,6 +5,11 @@ config are in **chart points**; they are converted to ticks via
 ``pts_per_tick`` (NQ = 0.25 → 20 pts = 80 ticks).
 
 Side: +1 LONG (HV trough → move up), −1 SHORT (HV peak → move down).
+
+Quiet-leg gates (0 = off):
+  Gate B: ``leg_vol / (avg_vol_per_tick × outside_ticks) < max_leg_vol_vs_avg``
+          where ``outside_ticks = max(1, move_ticks − band_half)``.
+  Gate A: ``leg_vol / extreme_vol < max_leg_vol_vs_tip``.
 """
 from __future__ import annotations
 
@@ -27,6 +32,8 @@ class HvExtremeConfig:
     min_path_efficiency: float = 0.0  # 0 = off
     max_pullback_pts: float = 5.0  # 0 = off
     max_leg_sec: float = 0.0  # 0 = off
+    max_leg_vol_vs_avg: float = 0.0  # 0 = off; Gate B
+    max_leg_vol_vs_tip: float = 0.0  # 0 = off; Gate A
     lookback_min: float = 15.0
     cooldown_sec: float = 30.0
     pts_per_tick: float = 0.25
@@ -80,6 +87,8 @@ class HvExtremeMoveTracker:
         self.min_path_efficiency = max(0.0, cfg.min_path_efficiency)
         self.max_pullback_ticks_allowed = cfg.max_pullback_ticks()
         self.max_leg_ns = cfg.max_leg_ns()
+        self.max_leg_vol_vs_avg = max(0.0, cfg.max_leg_vol_vs_avg)
+        self.max_leg_vol_vs_tip = max(0.0, cfg.max_leg_vol_vs_tip)
 
         self.prints: Deque[_Print] = deque()
         self.vol_by_tick: dict[int, float] = {}
@@ -100,6 +109,7 @@ class HvExtremeMoveTracker:
         self.path_length_ticks = 0
         self.max_pullback_ticks = 0
         self.favor_tick = 0
+        self.leg_vol = 0.0
 
         self.last_signal_ns = -(10**18)
         self.pending: dict | None = None
@@ -120,30 +130,34 @@ class HvExtremeMoveTracker:
             self.run_lo_ns = t_ns
 
         if self.watching == self.NONE:
-            self._try_watch(t_ns, tick)
+            self._try_watch(t_ns, tick, size)
         else:
-            self._update_watch(t_ns, tick, prev)
+            if self._is_outside_peak_band(tick):
+                self.leg_vol += size
+            self._update_watch(t_ns, tick, prev, size)
 
     def poll_signal(self) -> dict | None:
         s = self.pending
         self.pending = None
         return s
 
-    def _try_watch(self, t_ns: int, tick: int) -> None:
+    def _try_watch(self, t_ns: int, tick: int, size: float) -> None:
         if t_ns - self.last_signal_ns < self.cooldown_ns:
             return
         if self.run_hi - tick >= self.confirm_ticks:
-            if self._arm_if_high_vol(self.SHORT, self.run_hi, t_ns, tick):
+            if self._arm_if_high_vol(self.SHORT, self.run_hi, t_ns, tick, size):
                 return
             self.run_hi = tick
             self.run_hi_ns = t_ns
         if tick - self.run_lo >= self.confirm_ticks:
-            if self._arm_if_high_vol(self.LONG, self.run_lo, t_ns, tick):
+            if self._arm_if_high_vol(self.LONG, self.run_lo, t_ns, tick, size):
                 return
             self.run_lo = tick
             self.run_lo_ns = t_ns
 
-    def _arm_if_high_vol(self, side: int, extreme: int, t_ns: int, tick: int) -> bool:
+    def _arm_if_high_vol(
+        self, side: int, extreme: int, t_ns: int, tick: int, size: float
+    ) -> bool:
         avg = self._avg_vol_per_tick()
         if avg <= 0:
             return False
@@ -162,9 +176,25 @@ class HvExtremeMoveTracker:
         self.path_length_ticks = abs(tick - extreme)
         self.max_pullback_ticks = 0
         self.favor_tick = tick
+        self.leg_vol = 0.0
+        if self._is_outside_peak_band(tick):
+            self.leg_vol = float(size)
         return True
 
-    def _update_watch(self, t_ns: int, tick: int, prev_tick: int | None) -> None:
+    def _is_outside_peak_band(self, tick: int) -> bool:
+        half = self.extreme_band_ticks
+        if self.watching == self.LONG:
+            return tick > self.extreme_tick + half
+        if self.watching == self.SHORT:
+            return tick < self.extreme_tick - half
+        return False
+
+    def _outside_ticks(self) -> int:
+        return max(1, self.move_ticks - self.extreme_band_ticks)
+
+    def _update_watch(
+        self, t_ns: int, tick: int, prev_tick: int | None, size: float
+    ) -> None:
         if prev_tick is not None and self.path_last_tick is not None:
             self.path_length_ticks += abs(tick - self.path_last_tick)
         self.path_last_tick = tick
@@ -172,7 +202,7 @@ class HvExtremeMoveTracker:
         if self.watching == self.SHORT:
             if tick > self.extreme_tick:
                 self._clear_watch(t_ns, tick)
-                self._try_watch(t_ns, tick)
+                self._try_watch(t_ns, tick, size)
                 return
             if tick < self.favor_tick:
                 self.favor_tick = tick
@@ -193,7 +223,7 @@ class HvExtremeMoveTracker:
         elif self.watching == self.LONG:
             if tick < self.extreme_tick:
                 self._clear_watch(t_ns, tick)
-                self._try_watch(t_ns, tick)
+                self._try_watch(t_ns, tick, size)
                 return
             if tick > self.favor_tick:
                 self.favor_tick = tick
@@ -219,6 +249,18 @@ class HvExtremeMoveTracker:
         if self.min_path_efficiency > 0 and eff < self.min_path_efficiency:
             self._clear_watch(t_ns, tick)
             return
+        avg = self._avg_vol_per_tick()
+        expected = avg * self._outside_ticks()
+        leg_ratio = (self.leg_vol / expected) if expected > 0 else float("inf")
+        if self.max_leg_vol_vs_avg > 0 and not (leg_ratio < self.max_leg_vol_vs_avg):
+            self._clear_watch(t_ns, tick)
+            return
+        vs_tip = (
+            (self.leg_vol / self.extreme_vol) if self.extreme_vol > 0 else float("inf")
+        )
+        if self.max_leg_vol_vs_tip > 0 and not (vs_tip < self.max_leg_vol_vs_tip):
+            self._clear_watch(t_ns, tick)
+            return
         leg_sec = (t_ns - self.arm_ns) / 1_000_000_000.0
         self.pending = {
             "event_ts_ns": t_ns,
@@ -226,12 +268,15 @@ class HvExtremeMoveTracker:
             "extreme_tick": int(self.extreme_tick),
             "trigger_tick": int(tick),
             "extreme_vol": float(self.extreme_vol),
-            "avg_vol_per_tick": float(self._avg_vol_per_tick()),
+            "avg_vol_per_tick": float(avg),
             "vol_ratio": float(self.extreme_vol_ratio),
             "move_ticks": int(self.move_ticks),
             "path_eff": float(eff),
             "max_pullback_ticks": int(self.max_pullback_ticks),
             "leg_sec": float(leg_sec),
+            "leg_vol": float(self.leg_vol),
+            "leg_vol_ratio": float(leg_ratio),
+            "leg_vol_vs_tip": float(vs_tip),
         }
         self.last_signal_ns = t_ns
         self.watching = self.NONE
@@ -256,6 +301,7 @@ class HvExtremeMoveTracker:
         self.favor_tick = 0
         self.arm_ns = 0
         self.extreme_vol_ratio = 0.0
+        self.leg_vol = 0.0
 
     def _avg_vol_per_tick(self) -> float:
         if not self.vol_by_tick or self.total_vol <= 0:
@@ -267,7 +313,6 @@ class HvExtremeMoveTracker:
     def _volume_in_range(self, lo: int, hi: int) -> float:
         if hi < lo:
             lo, hi = hi, lo
-        # Band is small (tens of ticks); probe keys directly.
         get = self.vol_by_tick.get
         return float(sum(get(k, 0.0) for k in range(lo, hi + 1)))
 
@@ -310,7 +355,6 @@ def hv_extreme_events(
         return _empty_events()
 
     ts = trades.column("ts_ns").to_numpy().astype(np.int64)
-    # parquet price is already tick units
     px = np.round(trades.column("price").to_numpy().astype(np.float64)).astype(np.int64)
     sz = trades.column("size").to_numpy().astype(np.float64)
     order = np.argsort(ts, kind="stable")
@@ -369,6 +413,9 @@ def hv_extreme_events(
             [r["max_pullback_ticks"] for r in rows], type=pa.int32()
         ),
         "leg_sec": pa.array([r["leg_sec"] for r in rows], type=pa.float64()),
+        "leg_vol": pa.array([r["leg_vol"] for r in rows], type=pa.float64()),
+        "leg_vol_ratio": pa.array([r["leg_vol_ratio"] for r in rows], type=pa.float64()),
+        "leg_vol_vs_tip": pa.array([r["leg_vol_vs_tip"] for r in rows], type=pa.float64()),
         "med_r30": pa.array([r["med_r30"] for r in rows], type=pa.float64()),
         "event_type": pa.array(["hv_extreme"] * len(rows), type=pa.string()),
     }
@@ -389,6 +436,9 @@ def _empty_events() -> pa.Table:
             "path_eff": pa.array([], type=pa.float64()),
             "max_pullback_ticks": pa.array([], type=pa.int32()),
             "leg_sec": pa.array([], type=pa.float64()),
+            "leg_vol": pa.array([], type=pa.float64()),
+            "leg_vol_ratio": pa.array([], type=pa.float64()),
+            "leg_vol_vs_tip": pa.array([], type=pa.float64()),
             "med_r30": pa.array([], type=pa.float64()),
             "event_type": pa.array([], type=pa.string()),
         }

@@ -46,6 +46,7 @@
 | EXP-0035 | H28 correlated absorption fade (per-market adaptive thresholds) | ran — **reject** | 23d UK 14:30–17:00 (depth 15d) | dual hit10 .32–.36 ≈ NQ-only ≪ 0008 .45; ES adds nothing; train P&L negative |
 | EXP-0036 | H29 correlated exhaustion (exit + fade) | exit **reject**; fade **FROZEN test-autotrade** (DIG4) | 23d UK 14:30–17:00 | m04+`skip_er0.3` +355; neighbour 0.25 also clears; spec in DIG4 |
 | EXP-0037 | H30 HV Extreme Move + vol/fixed brackets | ran — **park** (final test fail) | 23d UK 14:30–17:00 | freeze m20/c15/b2/hv2/pb5/leg60 + fixed 10/30; test −214; reserve untouched |
+| EXP-0038 | H30 redesign (retest entry + ablations) | ran — freeze retest | Sep+Oct full | `ret|retest_R10_t300_sb2_x3.0|none` both=454.5; see `results/EXP-0038/summary.md` |
 
 ## Run notes
 
@@ -124,8 +125,13 @@
 - Results: `results/EXP-0036_DIG4/`. Runner `correlated_exhaust_fade_freeze`. Pre-registered: each ER neighbour must clear train∧hold∧new>0, days+≥14, top3≤0.55, LOO_neg≤2; freeze only if **0.30 and ≥1 neighbour** clear.
 - **Neighbours (1-tick):** ungated +479 train−4 (fails); `skip_er0.25` n=80 **+311** train+20/hold+146/new+145 **cleared**; `skip_er0.3` n=91 **+355** train+6/hold+123/new+226 **cleared**; `skip_er0.35` n=97 +387 train−13 **fails**. LOO_neg=0 on all gated; top3 ~0.45–0.49.
 - **2-tick slip on 0.3:** net +332 but train −1 → does not clear ship bar; live fill quality is the main risk.
-- **Decision: FREEZE for TEST_AUTOTRADE.** Spec: `results/EXP-0036_DIG4/TEST_AUTOTRADE_SPEC.md` — against_m04 fade, ER≤0.30, UK 14:30–17:00, vol k=1, 1 contract, kill −150 / 3 losing sessions. No further param search on these 23d.
+- **Decision: FREEZE for TEST_AUTOTRADE.** Spec: `results/EXP-0036_DIG4/TEST_AUTOTRADE_SPEC.md` — against_m04 fade, ER≤0.30, UK 14:30–17:00, vol k=1 (DIG4 sample used symmetric TP=SL; live default later moved to asym SL1R/TP2R — see 2026-10-20 note), 1 contract, kill −150 / 3 losing sessions. No further param search on these 23d.
 - **Add-on shipped (same day):** `Correlated Fade AutoTrade (ES+NQ)` — `bookmap-addon/.../trade/CorrFadeAutoTradeModule.java` over Bookmap-free `core/CorrFadeDetector.java` (+ `core/TapeBarSeries.java`); JAR `build/libs/bookmap-orderflow-cfade.jar`. Separate book from MAT (no shared side filter). Defaults = frozen spec; trading OFF. Pairing is by bar **stamp** with short burst histories on both legs — Bookmap bars close lazily, and the clock-based MAT-style pending/expiry dropped 2 of 132 research confirms before the fix. **Offline parity on all 23 sessions: 132/132 fades exact** (stamp/side/es_imb_x/wait/close) and identical er60 + bracket at every fade. Replay reference: `python -m research.export_cfade_ref --session <sid>` → `results/CFADE_REF_<sid>.md`. Not automated: 17:00 flatten, 3-losing-sessions stop.
+
+### 2026-10-20 — CFADE live defaults → vol RR SL 1R / TP 2R
+
+- Backtest: `results/CFADE_ASYM_RR/` (`make_vol_bracket_rr`). Best practical cell **sl1/tp2** (same stop as DIG4 sym k=1, wider target); lifts Oct/Sep/Aug vs symmetric.
+- **Live defaults updated:** panel `SL R multiple=1`, `TP R multiple=2`, bracket clip **4–40**; JAR `bookmap-orderflow-cfade-v4.jar` (+ overwritten `bookmap-orderflow-cfade.jar` when unlocked). Spec/README/`export_cfade_ref` aligned. Signal rule unchanged.
 
 ### 2026-10-19 — Audit: ideas discounted vs EXP-0008
 
@@ -359,3 +365,13 @@ Same mistake pattern as the first EXP-0036 fade close: treating continuation hit
 - Research scaffold + Session Extractor + Parquet converter + EXP-0002 CLI shipped.
 - Feeds inventory: 335 `.bmf` files (~142 GB) under `C:\Bookmap\Feeds`.
 - Synthetic smoke validated the pipeline.
+
+### 2026-10-20 — EXP-0038 HV Extreme redesign series
+
+- Package: `research/hvext/redesign/` (enrich + runner + stages P1–P8).
+- **Freeze:** `ret|retest_R10_t300_sb2_x3.0|none` Sep n=83 net=65.5 / Oct n=142 net=389.0 / both=454.5 (pass).
+- **Neighbour:** `ret|retest_R8_t300_sb4_x3.0|none` both=426.75.
+- Key finding: extension entry stays negative; **retest entry** (pullback to tip) clears both months. Loud-leg / tip-order gates help extension but thin when stacked on retest.
+- Java: retest mode defaults in `HvExtremeMoveModule`; jar `bookmap-orderflow-hvext-v2.jar`.
+- Results: `results/EXP-0038/`.
+

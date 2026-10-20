@@ -7,8 +7,8 @@ Usage:
 Writes results/CFADE_REF_<sid>.md / .csv with:
   - every exhaustion-fade candidate (what the add-on logs as ``CFADE FADE PASS|REJECT``)
     with er60 and the ER-gate verdict, and
-  - the expected trades under the frozen rule (ER ≤ max_er, flat-only, 5 s cooldown,
-    vol k=1 brackets, 0 slip) — what ``CFADE SIGNAL`` should show.
+  - the expected trades under the live defaults (ER ≤ max_er, flat-only, 5 s cooldown,
+    vol RR SL 1R / TP 2R, 0 slip) — what ``CFADE SIGNAL`` should show.
 
 Frozen rule: results/EXP-0036_DIG4/TEST_AUTOTRADE_SPEC.md.
 """
@@ -24,7 +24,7 @@ import numpy as np
 from research.backtest.mat_sim import (
     MatSimConfig,
     make_daytype_skip,
-    make_vol_bracket,
+    make_vol_bracket_rr,
     simulate_session,
 )
 from research.config import load_config
@@ -47,6 +47,8 @@ def main() -> None:
     ap.add_argument("--max-er", type=float, default=0.30)
     ap.add_argument("--es-imb-max", type=float, default=-0.4)
     ap.add_argument("--k", type=float, default=1.0)
+    ap.add_argument("--sl-r", type=float, default=1.0)
+    ap.add_argument("--tp-r", type=float, default=2.0)
     args = ap.parse_args()
     sid = args.session
     cfg = load_config()
@@ -73,13 +75,16 @@ def main() -> None:
         sv = lookup_regime(bars, bar_ts, cum_pv, cum_v, ev_ts, window_min=30, **kw)
         for i in range(fades.num_rows):
             r = {k: fades.column(k)[i].as_py() for k in fades.column_names}
-            brk = float(np.clip(args.k * max(sv[i].median_minute_range, 0.25), 6, 30))
+            unit = args.k * max(sv[i].median_minute_range, 0.25)
+            sl = float(np.clip(args.sl_r * unit, 4, 40))
+            tp = float(np.clip(args.tp_r * unit, 4, 40))
             rows.append({
                 **r,
                 "px": r["nq_close_ticks"] * 0.25,
                 "er60": sr[i].efficiency_ratio,
                 "n60": sr[i].n_bars,
-                "brkt": brk,
+                "sl": sl,
+                "tp": tp,
                 "er_ok": sr[i].efficiency_ratio <= args.max_er,
             })
 
@@ -87,7 +92,7 @@ def main() -> None:
     summary = simulate_session(
         sid, pair.nq, pair.es, sim_cfg,
         gate=make_daytype_skip(max_er=args.max_er),
-        bracket_fn=make_vol_bracket(args.k),
+        bracket_fn=make_vol_bracket_rr(args.k, tp_r=args.tp_r, sl_r=args.sl_r),
         vwap_from_ns=pair.vwap_from_ns,
         events=fades if fades.num_rows else None,
     ) if fades.num_rows else None
@@ -110,7 +115,7 @@ def main() -> None:
         f"- Fade: max wait 5 s; NQ still imb ≥ 0.55 / vol ≥ 25 / trades ≥ 6; **ES against ≤ {args.es_imb_max}**",
         f"- **Max efficiency ratio = {args.max_er}** (regime 60 min, resets at window open)",
         "- Window UK 14:30–17:00; flat-only; signal cooldown 5 s; longs + shorts",
-        f"- Brackets: vol k={args.k} clip 6–30 (TP = SL)",
+        f"- Brackets: vol k={args.k}, SL {args.sl_r:g}R / TP {args.tp_r:g}R, clip 4–40",
         "",
         f"Confirm bursts: **{bursts.num_rows}** · fade candidates: **{len(rows)}** · "
         f"ER-pass: **{sum(1 for r in rows if r['er_ok'])}** · "
@@ -122,37 +127,37 @@ def main() -> None:
         "",
         "## All fade candidates (`CFADE FADE …`)",
         "",
-        "| # | UK time | side | px | burst | wait_ms | es_imb_x | er60 | n60 | brkt | ER verdict | ts_ns |",
-        "|--:|---|---|--:|--:|--:|--:|--:|--:|--:|---|--:|",
+        "| # | UK time | side | px | burst | wait_ms | es_imb_x | er60 | n60 | sl | tp | ER verdict | ts_ns |",
+        "|--:|---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|--:|",
     ]
-    csv = ["n,uk_time,side,px,burst_side,wait_ms,es_imb_x,nq_imb_x,er60,n60,brkt,er_ok,ts_ns"]
+    csv = ["n,uk_time,side,px,burst_side,wait_ms,es_imb_x,nq_imb_x,er60,n60,sl,tp,er_ok,ts_ns"]
     for i, r in enumerate(rows, 1):
         side = "LONG" if r["side"] > 0 else "SHORT"
         verdict = "PASS" if r["er_ok"] else "REJECT regime_er_skip"
         lines.append(
             f"| {i} | {fmt(r['event_ts_ns'])} | {side} | {r['px']:.2f} | {r['burst_side']:+d} | "
             f"{r['wait_ms']:.0f} | {r['es_imb_x']:.2f} | {r['er60']:.3f} | {r['n60']} | "
-            f"{r['brkt']:.1f} | {verdict} | {r['event_ts_ns']} |"
+            f"{r['sl']:.1f} | {r['tp']:.1f} | {verdict} | {r['event_ts_ns']} |"
         )
         csv.append(
             f"{i},{fmt(r['event_ts_ns'])},{side},{r['px']:.2f},{r['burst_side']},{r['wait_ms']:.0f},"
-            f"{r['es_imb_x']:.4f},{r['nq_imb_x']:.4f},{r['er60']:.6f},{r['n60']},{r['brkt']:.2f},"
-            f"{int(r['er_ok'])},{r['event_ts_ns']}"
+            f"{r['es_imb_x']:.4f},{r['nq_imb_x']:.4f},{r['er60']:.6f},{r['n60']},{r['sl']:.2f},"
+            f"{r['tp']:.2f},{int(r['er_ok'])},{r['event_ts_ns']}"
         )
 
     lines += [
         "",
         "## Expected trades (`CFADE SIGNAL` → order when trading enabled)",
         "",
-        "| # | UK time | side | entry_px | tp=sl | er60 | pnl (0 slip) | exit | ts_ns |",
-        "|--:|---|---|--:|--:|--:|--:|---|--:|",
+        "| # | UK time | side | entry_px | sl | tp | er60 | pnl (0 slip) | exit | ts_ns |",
+        "|--:|---|---|--:|--:|--:|--:|--:|---|--:|",
     ]
     if summary:
         for i, tr in enumerate(summary.trades, 1):
             side = "LONG" if tr.side > 0 else "SHORT"
             lines.append(
-                f"| {i} | {fmt(tr.entry_ts_ns)} | {side} | {tr.entry_px:.2f} | {tr.tp_pts:.1f} | "
-                f"{tr.er60:.3f} | {tr.pnl:+.2f} | {tr.reason} | {tr.entry_ts_ns} |"
+                f"| {i} | {fmt(tr.entry_ts_ns)} | {side} | {tr.entry_px:.2f} | {tr.sl_pts:.1f} | "
+                f"{tr.tp_pts:.1f} | {tr.er60:.3f} | {tr.pnl:+.2f} | {tr.reason} | {tr.entry_ts_ns} |"
             )
     lines += [
         "",

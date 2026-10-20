@@ -7,7 +7,7 @@ import java.util.TreeMap;
 
 /**
  * High-volume local peak/trough, then mark when price moves N ticks away on a
- * <b>clean</b> leg (optional efficiency / max pullback / max time gates).
+ * <b>clean</b> leg (optional efficiency / max pullback / max time / quiet-leg gates).
  *
  * <ol>
  *   <li>Track volume by price tick over a rolling lookback.</li>
@@ -15,13 +15,20 @@ import java.util.TreeMap;
  *       extreme is a candidate peak/trough.</li>
  *   <li>Keep it if volume in a small band around the extreme ≥
  *       {@code highVolMult × avgVolPerTick × bandWidth}.</li>
- *   <li>While watching, accumulate path length and max giveback toward the tip.</li>
+ *   <li>While watching, accumulate path length, max giveback, and volume on
+ *       prints <b>outside</b> the peak band (leg away from the tip).</li>
  *   <li>When price is {@code moveTicks} away, fire only if the leg passes clean
- *       gates (min efficiency, max pullback, max time). Cancel on a new extreme.</li>
+ *       gates. Cancel on a new extreme or failed gate.</li>
  * </ol>
  *
+ * Quiet-leg gates (either {@code 0} = off):
+ * <ul>
+ *   <li>Gate B: {@code legVol / (avgVolPerTick × outsideTicks) < maxLegVolVsAvg}
+ *       where {@code outsideTicks = max(1, moveTicks − bandHalf)}.</li>
+ *   <li>Gate A: {@code legVol / extremeVol < maxLegVolVsTip}.</li>
+ * </ul>
+ * Efficiency / pullback / time / leg-vol gates: {@code 0} disables that gate.
  * All distances are in <b>ticks</b> (API price units on this install).
- * Efficiency / pullback / time gates: {@code 0} disables that gate.
  */
 public final class HvExtremeMoveTracker {
 
@@ -42,6 +49,12 @@ public final class HvExtremeMoveTracker {
         public final double pathEfficiency;
         public final int maxPullbackTicks;
         public final double legSec;
+        /** Volume on prints outside the peak band during the arm→fire leg. */
+        public final double legVol;
+        /** {@code legVol / (avgVolPerTick × outsideTicks)}. */
+        public final double legVolRatio;
+        /** {@code legVol / extremeVol}. */
+        public final double legVolVsTip;
 
         public Signal(
                 Side side,
@@ -53,7 +66,10 @@ public final class HvExtremeMoveTracker {
                 int moveTicks,
                 double pathEfficiency,
                 int maxPullbackTicks,
-                double legSec) {
+                double legSec,
+                double legVol,
+                double legVolRatio,
+                double legVolVsTip) {
             this.side = side;
             this.extremeTick = extremeTick;
             this.triggerTick = triggerTick;
@@ -64,6 +80,9 @@ public final class HvExtremeMoveTracker {
             this.pathEfficiency = pathEfficiency;
             this.maxPullbackTicks = maxPullbackTicks;
             this.legSec = legSec;
+            this.legVol = legVol;
+            this.legVolRatio = legVolRatio;
+            this.legVolVsTip = legVolVsTip;
         }
     }
 
@@ -79,6 +98,16 @@ public final class HvExtremeMoveTracker {
     private final int maxPullbackTicksAllowed;
     /** Max time from arm to fire; 0 = off. */
     private final long maxLegNs;
+    /**
+     * Max allowed {@code legVol / (avgVolPerTick × outsideTicks)}; 0 = off.
+     * Fire only when the ratio is strictly below this threshold.
+     */
+    private final double maxLegVolVsAvg;
+    /**
+     * Max allowed {@code legVol / extremeVol}; 0 = off.
+     * Fire only when the ratio is strictly below this threshold.
+     */
+    private final double maxLegVolVsTip;
 
     private final Deque<Print> prints = new ArrayDeque<>();
     private final TreeMap<Integer, Double> volByTick = new TreeMap<>();
@@ -100,6 +129,8 @@ public final class HvExtremeMoveTracker {
     private int maxPullbackTicks;
     /** Favorable watermark since arm (high for LONG, low for SHORT). */
     private int favorTick;
+    /** Volume outside peak band while armed. */
+    private double legVol;
 
     private long lastSignalNs = Long.MIN_VALUE / 4;
     private Signal pending;
@@ -125,7 +156,9 @@ public final class HvExtremeMoveTracker {
             long cooldownNs,
             double minPathEfficiency,
             int maxPullbackTicksAllowed,
-            long maxLegNs) {
+            long maxLegNs,
+            double maxLegVolVsAvg,
+            double maxLegVolVsTip) {
         this.moveTicks = Math.max(1, moveTicks);
         this.confirmTicks = Math.max(1, confirmTicks);
         this.extremeBandTicks = Math.max(0, extremeBandTicks);
@@ -135,6 +168,13 @@ public final class HvExtremeMoveTracker {
         this.minPathEfficiency = Math.max(0.0, minPathEfficiency);
         this.maxPullbackTicksAllowed = Math.max(0, maxPullbackTicksAllowed);
         this.maxLegNs = Math.max(0L, maxLegNs);
+        this.maxLegVolVsAvg = Math.max(0.0, maxLegVolVsAvg);
+        this.maxLegVolVsTip = Math.max(0.0, maxLegVolVsTip);
+    }
+
+    /** Ticks of the move that lie outside the peak half-band. */
+    private int outsideTicks() {
+        return Math.max(1, moveTicks - extremeBandTicks);
     }
 
     public void onTrade(long tNs, int tick, int size) {
@@ -156,9 +196,12 @@ public final class HvExtremeMoveTracker {
         }
 
         if (watching == Side.NONE) {
-            tryWatch(tNs, tick);
+            tryWatch(tNs, tick, size);
         } else {
-            updateWatch(tNs, tick, prev);
+            if (isOutsidePeakBand(tick)) {
+                legVol += size;
+            }
+            updateWatch(tNs, tick, prev, size);
         }
     }
 
@@ -198,13 +241,25 @@ public final class HvExtremeMoveTracker {
         return watching == Side.NONE ? 0 : maxPullbackTicks;
     }
 
-    private void tryWatch(long tNs, int tick) {
+    /** Live Gate-B ratio while armed; 0 when idle. */
+    public double currentLegVolRatio() {
+        if (watching == Side.NONE) {
+            return 0;
+        }
+        double avg = avgVolPerTick();
+        if (avg <= 0) {
+            return 0;
+        }
+        return legVol / (avg * outsideTicks());
+    }
+
+    private void tryWatch(long tNs, int tick, int size) {
         if (tNs - lastSignalNs < cooldownNs) {
             return;
         }
         // Peak confirmed: dropped confirmTicks from run high
         if (runHi - tick >= confirmTicks) {
-            if (armIfHighVol(Side.SHORT, runHi, tNs, tick)) {
+            if (armIfHighVol(Side.SHORT, runHi, tNs, tick, size)) {
                 return;
             }
             // Failed HV check — reset high so we don't re-test forever
@@ -213,7 +268,7 @@ public final class HvExtremeMoveTracker {
         }
         // Trough confirmed: rose confirmTicks from run low
         if (tick - runLo >= confirmTicks) {
-            if (armIfHighVol(Side.LONG, runLo, tNs, tick)) {
+            if (armIfHighVol(Side.LONG, runLo, tNs, tick, size)) {
                 return;
             }
             runLo = tick;
@@ -221,7 +276,7 @@ public final class HvExtremeMoveTracker {
         }
     }
 
-    private boolean armIfHighVol(Side side, int extreme, long tNs, int tick) {
+    private boolean armIfHighVol(Side side, int extreme, long tNs, int tick, int size) {
         double avg = avgVolPerTick();
         if (avg <= 0) {
             return false;
@@ -242,10 +297,26 @@ public final class HvExtremeMoveTracker {
         pathLengthTicks = Math.abs(tick - extreme);
         maxPullbackTicks = 0;
         favorTick = tick;
+        legVol = 0;
+        // Arming print counts if already outside the peak band.
+        if (isOutsidePeakBand(tick)) {
+            legVol = size;
+        }
         return true;
     }
 
-    private void updateWatch(long tNs, int tick, int prevTick) {
+    private boolean isOutsidePeakBand(int tick) {
+        int half = extremeBandTicks;
+        if (watching == Side.LONG) {
+            return tick > extremeTick + half;
+        }
+        if (watching == Side.SHORT) {
+            return tick < extremeTick - half;
+        }
+        return false;
+    }
+
+    private void updateWatch(long tNs, int tick, int prevTick, int size) {
         if (prevTick != Integer.MIN_VALUE) {
             pathLengthTicks += Math.abs(tick - pathLastTick);
         }
@@ -254,7 +325,7 @@ public final class HvExtremeMoveTracker {
         if (watching == Side.SHORT) {
             if (tick > extremeTick) {
                 clearWatch(tNs, tick);
-                tryWatch(tNs, tick);
+                tryWatch(tNs, tick, size);
                 return;
             }
             if (tick < favorTick) {
@@ -278,7 +349,7 @@ public final class HvExtremeMoveTracker {
         } else if (watching == Side.LONG) {
             if (tick < extremeTick) {
                 clearWatch(tNs, tick);
-                tryWatch(tNs, tick);
+                tryWatch(tNs, tick, size);
                 return;
             }
             if (tick > favorTick) {
@@ -310,18 +381,33 @@ public final class HvExtremeMoveTracker {
             clearWatch(tNs, tick);
             return;
         }
+        double avg = avgVolPerTick();
+        double expected = avg * outsideTicks();
+        double legRatio = expected > 0 ? legVol / expected : Double.POSITIVE_INFINITY;
+        if (maxLegVolVsAvg > 0 && !(legRatio < maxLegVolVsAvg)) {
+            clearWatch(tNs, tick);
+            return;
+        }
+        double vsTip = extremeVol > 0 ? legVol / extremeVol : Double.POSITIVE_INFINITY;
+        if (maxLegVolVsTip > 0 && !(vsTip < maxLegVolVsTip)) {
+            clearWatch(tNs, tick);
+            return;
+        }
         double legSec = (tNs - armNs) / 1_000_000_000.0;
         pending = new Signal(
                 watching,
                 extremeTick,
                 tick,
                 extremeVol,
-                avgVolPerTick(),
+                avg,
                 extremeVolRatio,
                 moveTicks,
                 eff,
                 maxPullbackTicks,
-                legSec);
+                legSec,
+                legVol,
+                legRatio,
+                vsTip);
         lastSignalNs = tNs;
         watching = Side.NONE;
         runHi = tick;
@@ -347,6 +433,7 @@ public final class HvExtremeMoveTracker {
         favorTick = 0;
         armNs = 0;
         extremeVolRatio = 0;
+        legVol = 0;
     }
 
     private double avgVolPerTick() {

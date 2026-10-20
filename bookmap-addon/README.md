@@ -12,7 +12,7 @@ Custom Bookmap Layer 1 add-ons for NQ scalping with ES confirmation:
 | **ES/NQ Flow Confirm** | Normalized ES vs NQ flow agreement (attach on NQ; keep ES open) |
 | **Momentum AutoTrade (ES+NQ)** | v1 — EXP-0008 tape momentum signals (+ optional CD pullback); optional bracket orders |
 | **Momentum AutoTrade v2 (ES+NQ)** | v1 + regime/trend/VWAP gates + vol-scaled brackets (EXP-0034); leave v1 unchanged |
-| **Correlated Fade AutoTrade (ES+NQ)** | H29 / EXP-0036_DIG4 frozen test auto-trade: fade an ES+NQ burst when NQ keeps pushing but ES flips against it; ER ≤ 0.30 gate; vol k=1 brackets |
+| **Correlated Fade AutoTrade (ES+NQ)** | H29 / EXP-0036_DIG4 frozen test auto-trade: fade an ES+NQ burst when NQ keeps pushing but ES flips against it; ER ≤ 0.30 gate; vol RR brackets SL 1R / TP 2R |
 | **MAT Hotkeys** | Classic companion: keyboard shortcuts for MAT long/short side filter |
 | **Pitch and Catch** | High-vol peak/trough (“pitch”) then low-vol move away (“catch”); chart markers |
 | **HV Extreme Move AutoTrade** | HV tip → clean Move pts leg → tip markers; optional market + TP/SL brackets |
@@ -203,7 +203,7 @@ JAR: `bookmap-addon/build/libs/bookmap-orderflow-cfade.jar` (contains every add-
 
 **Gates:** UK **14:30–17:00**; **Max efficiency ratio 0.30** on the 60-min regime (`|net| / path` over completed minutes; tracker resets at window open so the first hour matches research); flat-only; 5 s cooldown from the last *taken* signal; Allow longs/shorts. **No** trend/VWAP gate — DIG3 showed those hurt the fade.
 
-**Brackets:** TP = SL = clip(k × median 30-min 1-minute range, 6, 30), **k = 1**, sent as Bookmap tick-offset brackets with a market entry.
+**Brackets (default after CFADE_ASYM_RR):** `unit = k × median 30-min 1-minute range` (**k = 1**); **SL = clip(1R × unit, 4, 40)**, **TP = clip(2R × unit, 4, 40)** — same formula as `make_vol_bracket_rr`. Panel: Vol multiple k, SL R / TP R multiples, Bracket min/max pts.
 
 | Panel | Meaning |
 |---|---|
@@ -271,7 +271,7 @@ HV tip → **Move pts** leg (optional clean gates) → tip markers. Optional **m
 
 **Signal defaults (EXP-0037 frozen, parked):** Move `20`, Confirm `15`, Peak band `2`, High vol mult `2`, Min path efficiency `0` (off), Max pullback `5`, Max leg sec `60`, Lookback `15`, Cooldown `30`. Final-test ship threshold **not** met — see `results/EXP-0037/summary.md`.
 
-**Clean-leg gates:** Min path efficiency (`disp / path length`, `0`=off), Max pullback pts, Max leg sec. Fail → cancel (no fire).
+**Clean-leg gates:** Min path efficiency (`disp / path length`, `0`=off), Max pullback pts, Max leg sec, quiet-leg volume (prints *outside* Peak band): **Max leg vol vs avg** (Gate B: `< thr × avgVolPerTick × (moveTicks − bandHalf)`, default `1.0`) and **Max leg vol vs tip** (Gate A: `< thr × tip extremeVol`, default `0`=off). Fail → cancel watch (no fire).
 
 **Brackets:**
 - Fixed (default — **Vol-scaled brackets** off): **Take profit pts** `30`, **Stop loss pts** `10` (EXP-0037 freeze).

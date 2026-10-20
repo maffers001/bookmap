@@ -88,6 +88,8 @@ class SignalCell:
     min_path_efficiency: float = 0.0
     max_pullback_pts: float = 5.0
     max_leg_sec: float = 0.0
+    max_leg_vol_vs_avg: float = 0.0  # 0 = off; Gate B
+    max_leg_vol_vs_tip: float = 0.0  # 0 = off; Gate A
     lookback_min: float = 15.0
     cooldown_sec: float = 30.0
 
@@ -100,6 +102,7 @@ class SignalCell:
             f"m{self.move_pts:g}_c{self.confirm_pts:g}_b{self.peak_band_pts:g}"
             f"_hv{self.high_vol_mult:g}_eff{self.min_path_efficiency:g}"
             f"_pb{self.max_pullback_pts:g}_leg{self.max_leg_sec:g}"
+            f"_lv{self.max_leg_vol_vs_avg:g}_tip{self.max_leg_vol_vs_tip:g}"
         )
 
     def to_cfg(self) -> HvExtremeConfig:
@@ -111,6 +114,8 @@ class SignalCell:
             min_path_efficiency=self.min_path_efficiency,
             max_pullback_pts=self.max_pullback_pts,
             max_leg_sec=self.max_leg_sec,
+            max_leg_vol_vs_avg=self.max_leg_vol_vs_avg,
+            max_leg_vol_vs_tip=self.max_leg_vol_vs_tip,
             lookback_min=self.lookback_min,
             cooldown_sec=self.cooldown_sec,
         )
