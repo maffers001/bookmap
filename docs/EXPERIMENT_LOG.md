@@ -45,8 +45,21 @@
 | EXP-0034 | H4 MAT gates | ran | 14d US RTH | trend+VWAP lift; see results/EXP-0034 |
 | EXP-0035 | H28 correlated absorption fade (per-market adaptive thresholds) | ran — **reject** | 23d UK 14:30–17:00 (depth 15d) | dual hit10 .32–.36 ≈ NQ-only ≪ 0008 .45; ES adds nothing; train P&L negative |
 | EXP-0036 | H29 correlated exhaustion (exit + fade) | exit **reject**; fade **FROZEN test-autotrade** (DIG4) | 23d UK 14:30–17:00 | m04+`skip_er0.3` +355; neighbour 0.25 also clears; spec in DIG4 |
+| EXP-0037 | H30 HV Extreme Move + vol/fixed brackets | ran — **park** (final test fail) | 23d UK 14:30–17:00 | freeze m20/c15/b2/hv2/pb5/leg60 + fixed 10/30; test −214; reserve untouched |
 
 ## Run notes
+
+### 2026-10-20 — EXP-0037 HV Extreme Move (vol brackets + staged backtest)
+
+- **Java:** `RegimeTracker` + vol-RR brackets in `HvExtremeMoveModule` (`bookmap-orderflow-hvext-vol.jar`). After freeze: defaults updated, `bookmap-orderflow-hvext-frozen.jar`.
+- **Python:** `research/features/hv_extreme.py` (tracker port); `research/hvext/{parity_hvext,run_hvext_sweep,run_hvext_validate}.py`; `EXP-0037.yaml` + `hv_extreme` dispatch.
+- **Parity (191026):** extracted trades; panel Move20/Confirm10/Band5/HV2/pb5 — **15/15** Python fires matched Bookmap `HV EXT FIRE` tipChart lines (in-extract price range; log extras = other settings/replays/live). Report: `results/EXP-0037/parity_report.md`.
+- **Cohorts:** train 9 / validate 5 / final-test 9; **reserve** (untouched): `191026, 250926, 280926, 010926, 020926, 040926, 080926, 100926, 150926`.
+- **Stage 1:** 54-cell shape grid (gates off for cache). High-n cells mostly negative on fixed 12.5/30; HV=3 lottery cells n≪20.
+- **Stage 1b:** post-filter triage then exact in-loop shortlist; preferred n≥20/40.
+- **Stage 2–3:** brackets on n≥40 cells. **Frozen:** Move20 Confirm15 Band2 HV2 pb5 leg60 + **fixed SL10/TP30**. Train n=64 net **+24** PF 1.09; validate n=47 net **+38** PF 1.15 (val_ok). Backup neighbour: same signal pb=0 + fixed 10/30.
+- **Stage 4 (once):** final-test n=95 net **−214** PF 0.75 days+ 3/9; slip+1 −248; null control +179. Event-study: hit+10 0.42 / hit+30 0.23; MFE med 15.8 vs MAE 20; @60s −3.5. **Ship threshold failed → park.** Vol-RR did not beat fixed on the high-n shortlist.
+- **Decision: park.** Do not autotrade defaults live; jar defaults mirror freeze for replay comparison only. Reserve sessions left for a later OOS if the construction is revisited (e.g. fade-toward-tip instead of continuation, or evening window).
 
 ### 2026-10-19 — EXP-0036 correlated exhaustion (first of the correlated series)
 

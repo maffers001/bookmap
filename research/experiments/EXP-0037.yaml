@@ -1,0 +1,73 @@
+name: EXP-0037
+hypothesis: H30
+title: HV Extreme Move — clean tip rotation + vol-scaled asymmetric brackets
+description: >
+  Port of Bookmap HV Extreme Move AutoTrade. Detect HV tip → Move pts clean
+  leg → enter with fixed or vol-RR brackets. Staged train / validate / final-test
+  cohorts. Primary window UK 14:30–17:00.
+
+detector: hv_extreme
+pts_per_tick: 0.25
+tick_size: 1.0
+signal_cooldown_sec: 30
+commission_pts_rt: 0.25
+slip_ticks: 0
+flat_only: true
+vol_window_min: 30
+# Frozen after staged sweep (parked — final test failed ship threshold)
+status: parked
+move_pts: 20
+confirm_pts: 15
+peak_band_pts: 2
+high_vol_mult: 2.0
+min_path_efficiency: 0.0
+max_pullback_pts: 5.0
+max_leg_sec: 60.0
+lookback_min: 15
+# Frozen fixed brackets (vol-scaled off)
+tp_pts: 30
+sl_pts: 10
+vol_scaled: false
+# Vol-RR reference defaults (not frozen)
+vol_k: 1.0
+sl_r: 1.0
+tp_r: 2.5
+bracket_floor: 4.0
+bracket_cap: 40.0
+window: uk_rth
+train_sessions:
+  - "260326"
+  - "030826"
+  - "040826"
+  - "050826"
+  - "160926"
+  - "170926"
+  - "180926"
+  - "210926"
+  - "220926"
+validate_sessions:
+  - "011026"
+  - "021026"
+  - "051026"
+  - "061026"
+  - "071026"
+final_test_sessions:
+  - "081026"
+  - "091026"
+  - "121026"
+  - "131026"
+  - "141026"
+  - "151026"
+  - "161026"
+  - "290926"
+  - "300926"
+reserve_sessions:
+  - "191026"
+  - "250926"
+  - "280926"
+  - "010926"
+  - "020926"
+  - "040926"
+  - "080926"
+  - "100926"
+  - "150926"

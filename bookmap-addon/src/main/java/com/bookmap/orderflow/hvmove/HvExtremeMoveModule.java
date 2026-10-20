@@ -10,6 +10,7 @@ import com.bookmap.orderflow.core.HvExtremeMoveTracker;
 import com.bookmap.orderflow.core.HvExtremeMoveTracker.Side;
 import com.bookmap.orderflow.core.HvExtremeMoveTracker.Signal;
 import com.bookmap.orderflow.core.PriceTicks;
+import com.bookmap.orderflow.core.RegimeTracker;
 
 import velox.api.layer1.Layer1ApiAdminAdapter;
 import velox.api.layer1.Layer1ApiProvider;
@@ -49,10 +50,14 @@ import velox.api.layer1.simplified.TradeDataListener;
 
 /**
  * HV Extreme Move AutoTrade: HV tip → clean Move pts leg → signal at tip;
- * optional market entry with fixed TP/SL brackets.
+ * optional market entry with fixed or vol-scaled asymmetric TP/SL brackets.
  *
  * <p>LONG after HV trough + clean move up; SHORT after HV peak + clean move down.
  * Default: signals only ({@code Enable trading} off).
+ *
+ * <p>Vol brackets (when enabled): {@code unit = k × max(medR30, 0.25)};
+ * {@code SL = clip(slR×unit, floor, cap)}, {@code TP = clip(tpR×unit, floor, cap)}
+ * — same formula as {@code research.backtest.mat_sim.make_vol_bracket_rr}.
  */
 @Layer1SimpleAttachable
 @Layer1TradingStrategy
@@ -70,14 +75,15 @@ public class HvExtremeMoveModule implements
         OrdersListener {
 
     // --- Signal (tuned defaults from live panel) ---
+    // Defaults = EXP-0037 frozen (parked — final test failed ship threshold)
     @Parameter(name = "Move pts", step = 0.25)
     Double movePts = 20.0;
 
     @Parameter(name = "Confirm pts", step = 0.25)
-    Double confirmPts = 10.0;
+    Double confirmPts = 15.0;
 
     @Parameter(name = "Peak band pts", step = 0.25)
-    Double peakBandPts = 5.0;
+    Double peakBandPts = 2.0;
 
     @Parameter(name = "High vol mult", step = 0.1)
     Double highVolMult = 2.0;
@@ -89,7 +95,7 @@ public class HvExtremeMoveModule implements
     Double maxPullbackPts = 5.0;
 
     @Parameter(name = "Max leg sec (0=off)", step = 1.0)
-    Double maxLegSec = 0.0;
+    Double maxLegSec = 60.0;
 
     @Parameter(name = "Profile lookback min", step = 1.0)
     Double lookbackMin = 15.0;
@@ -130,10 +136,31 @@ public class HvExtremeMoveModule implements
     Double orderSize = 1.0;
 
     @Parameter(name = "Take profit pts", step = 0.25)
-    Double takeProfitPts = 10.0;
+    Double takeProfitPts = 30.0;
 
     @Parameter(name = "Stop loss pts", step = 0.25)
     Double stopLossPts = 10.0;
+
+    @Parameter(name = "Vol-scaled brackets")
+    Boolean volScaledBrackets = false;
+
+    @Parameter(name = "Vol multiple k", step = 0.5)
+    Double volMultipleK = 1.0;
+
+    @Parameter(name = "Vol window min", step = 1.0)
+    Double volWindowMin = 30.0;
+
+    @Parameter(name = "SL R multiple", step = 0.25)
+    Double slRMultiple = 1.0;
+
+    @Parameter(name = "TP R multiple", step = 0.25)
+    Double tpRMultiple = 2.5;
+
+    @Parameter(name = "Bracket min pts", step = 1.0)
+    Double bracketMinPts = 4.0;
+
+    @Parameter(name = "Bracket max pts", step = 1.0)
+    Double bracketMaxPts = 40.0;
 
     @Parameter(name = "Use brackets")
     Boolean useBrackets = true;
@@ -146,6 +173,7 @@ public class HvExtremeMoveModule implements
     private String primaryAlias;
     private Api api;
     private HvExtremeMoveTracker tracker;
+    private RegimeTracker regime;
 
     private Indicator signalIndicator;
     private Indicator armedIndicator;
@@ -189,6 +217,7 @@ public class HvExtremeMoveModule implements
         filledByOrderId.clear();
         tradingAccountId = null;
         tracker = buildTracker();
+        regime = new RegimeTracker();
 
         signalIndicator = api.registerIndicator("HV Ext Signal", GraphType.BOTTOM);
         armedIndicator = api.registerIndicator("HV Ext Armed", GraphType.BOTTOM);
@@ -226,7 +255,8 @@ public class HvExtremeMoveModule implements
 
         Log.info(String.format(
                 "HVEXT AT init alias=%s pips=%.4f move=%.1f confirm=%.1f band=%.1f highMult=%.1f "
-                        + "minEff=%.2f maxPull=%.1f maxLeg=%.0f trading=%s tp=%.1f sl=%.1f size=%.0f",
+                        + "minEff=%.2f maxPull=%.1f maxLeg=%.0f trading=%s fixedTp=%.1f fixedSl=%.1f "
+                        + "volScaled=%s k=%.1f slR=%.2f tpR=%.2f floor=%.0f cap=%.0f size=%.0f",
                 alias,
                 pips,
                 movePts,
@@ -239,6 +269,12 @@ public class HvExtremeMoveModule implements
                 Boolean.TRUE.equals(enableTrading),
                 takeProfitPts,
                 stopLossPts,
+                Boolean.TRUE.equals(volScaledBrackets),
+                volMultipleK,
+                slRMultiple,
+                tpRMultiple,
+                bracketMinPts,
+                bracketMaxPts,
                 orderSize));
     }
 
@@ -286,12 +322,55 @@ public class HvExtremeMoveModule implements
         }
         int tick = PriceTicks.apiPriceToTick(price, pips);
         long t = nowNs > 0 ? nowNs : System.nanoTime();
+        double chartPx = PriceTicks.toChartPoints(price, pips);
+        if (regime != null) {
+            regime.onTrade(t, chartPx, size);
+        }
         tracker.onTrade(t, tick, size);
 
         Signal sig = tracker.pollSignal();
         if (sig != null) {
             onFire(sig);
         }
+    }
+
+    private static final class BracketPts {
+        final double tpPts;
+        final double slPts;
+        final double medR30;
+        final boolean volScaled;
+
+        BracketPts(double tpPts, double slPts, double medR30, boolean volScaled) {
+            this.tpPts = tpPts;
+            this.slPts = slPts;
+            this.medR30 = medR30;
+            this.volScaled = volScaled;
+        }
+    }
+
+    /** Resolve TP/SL: vol-scaled RR when enabled, else fixed panel pts. */
+    private BracketPts resolveBracketPts() {
+        double fixedTp = takeProfitPts == null ? 30.0 : takeProfitPts;
+        double fixedSl = stopLossPts == null ? 12.5 : stopLossPts;
+        if (!Boolean.TRUE.equals(volScaledBrackets) || regime == null) {
+            return new BracketPts(fixedTp, fixedSl, Double.NaN, false);
+        }
+        int vw = volWindowMin == null ? 30 : Math.max(1, volWindowMin.intValue());
+        long asof = nowNs > 0 ? nowNs : 0;
+        RegimeTracker.Snapshot sv = asof > 0 ? regime.snapshot(vw, asof) : regime.snapshot(vw);
+        double med = sv.medianMinuteRange;
+        if (!(med > 0) || sv.nBars < 1) {
+            return new BracketPts(fixedTp, fixedSl, med, false);
+        }
+        double k = volMultipleK == null ? 1.0 : volMultipleK;
+        double slR = slRMultiple == null ? 1.0 : slRMultiple;
+        double tpR = tpRMultiple == null ? 2.5 : tpRMultiple;
+        double floor = bracketMinPts == null ? 4.0 : bracketMinPts;
+        double cap = bracketMaxPts == null ? 40.0 : bracketMaxPts;
+        double unit = k * Math.max(med, 0.25);
+        double sl = Math.max(floor, Math.min(cap, slR * unit));
+        double tp = Math.max(floor, Math.min(cap, tpR * unit));
+        return new BracketPts(tp, sl, med, true);
     }
 
     private void onFire(Signal sig) {
@@ -303,6 +382,7 @@ public class HvExtremeMoveModule implements
 
         double tipChart = PriceTicks.toChartPoints(sig.extremeTick, pips);
         double entryChart = PriceTicks.toChartPoints(sig.triggerTick, pips);
+        BracketPts brkt = resolveBracketPts();
         lastSignalSide = sig.side == Side.LONG ? 1 : -1;
         signalHold = 20;
         if (sig.side == Side.LONG) {
@@ -319,6 +399,7 @@ public class HvExtremeMoveModule implements
         Log.info(String.format(
                 "HV EXT FIRE %s extreme=%d tipChart=%.2f entry~%.2f trigger=%d move=%d "
                         + "vol=%.0f ratio=%.2f eff=%.2f pullbackTicks=%d legSec=%.2f "
+                        + "tp=%.2f sl=%.2f medR30=%.2f volScaled=%s "
                         + "trading=%s realtime=%s pos=%d",
                 sig.side,
                 sig.extremeTick,
@@ -331,12 +412,16 @@ public class HvExtremeMoveModule implements
                 sig.pathEfficiency,
                 sig.maxPullbackTicks,
                 sig.legSec,
+                brkt.tpPts,
+                brkt.slPts,
+                brkt.medR30,
+                brkt.volScaled,
                 wantTrade,
                 realtimeStarted,
                 flatCheckPosition()));
 
         if (willTrade) {
-            sendBracketOrder(sig.side == Side.LONG, entryChart);
+            sendBracketOrder(sig.side == Side.LONG, entryChart, brkt);
         } else if (wantTrade && !realtimeStarted) {
             Log.info("HVEXT AT ORDER skipped (catchup/history — waiting for realtime)");
         }
@@ -346,10 +431,10 @@ public class HvExtremeMoveModule implements
         return position != 0 ? position : netFills;
     }
 
-    private void sendBracketOrder(boolean isBuy, double entryPricePoints) {
+    private void sendBracketOrder(boolean isBuy, double entryPricePoints, BracketPts brkt) {
         int size = Math.max(1, orderSize == null ? 1 : orderSize.intValue());
-        double tpPts = takeProfitPts == null ? 10.0 : takeProfitPts;
-        double slPts = stopLossPts == null ? 10.0 : stopLossPts;
+        double tpPts = brkt.tpPts;
+        double slPts = brkt.slPts;
         double pip = pips > 0 ? pips : 0.25;
         boolean brackets = Boolean.TRUE.equals(useBrackets);
         int tpTicks = brackets ? Math.max(1, (int) Math.round(tpPts / pip)) : 0;
@@ -385,7 +470,7 @@ public class HvExtremeMoveModule implements
             entryFillPx = entryPricePoints;
             Log.info(String.format(
                     "HVEXT AT ORDER sent %s size=%d entry~%.2f tp=%d ticks (~%.2f pts) "
-                            + "sl=%d ticks (~%.2f pts) account=%s",
+                            + "sl=%d ticks (~%.2f pts) medR30=%.2f volScaled=%s account=%s",
                     isBuy ? "BUY" : "SELL",
                     size,
                     entryPricePoints,
@@ -393,6 +478,8 @@ public class HvExtremeMoveModule implements
                     tpPts,
                     slTicks,
                     slPts,
+                    brkt.medR30,
+                    brkt.volScaled,
                     tradingAccountId == null ? "null(primary)" : tradingAccountId));
         } catch (Throwable t) {
             flatLocked = false;

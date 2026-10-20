@@ -259,7 +259,7 @@ Two-swing trapped-size fade: **high-volume** extreme (peak1), then a **lower-vol
 **Suggested start (NQ):** Confirm `5`, Peak band `2`, Min pullback `5`, Break `4`, High vol mult `1.5`, Max retest frac `0.60`. Tighten Max retest frac (e.g. `0.45`) for quieter second peaks only.
 
 ### HV Extreme Move AutoTrade
-HV tip → **Move pts** leg (optional clean gates) → tip markers. Optional **market entry** with fixed **Take profit pts** / **Stop loss pts** brackets (same pattern as MAT). Strategy name in Bookmap: **HV Extreme Move AutoTrade**. Default: signals only (`Enable trading` off).
+HV tip → **Move pts** leg (optional clean gates) → tip markers. Optional **market entry** with fixed or **vol-scaled asymmetric** TP/SL brackets. Strategy name: **HV Extreme Move AutoTrade**. Default: signals only (`Enable trading` off).
 
 | Panel | Meaning |
 |---|---|
@@ -269,13 +269,17 @@ HV tip → **Move pts** leg (optional clean gates) → tip markers. Optional **m
 | **HV Ext Signal** | Brief `±1` fire pulse |
 | **HV Ext Path ER** | Live path efficiency while armed |
 
-**Signal defaults (NQ-tuned):** Move `20`, Confirm `10`, Peak band `5`, High vol mult `2`, Min path efficiency `0` (off), Max pullback `5`, Max leg sec `0` (off), Lookback `15`, Cooldown `30`.
+**Signal defaults (EXP-0037 frozen, parked):** Move `20`, Confirm `15`, Peak band `2`, High vol mult `2`, Min path efficiency `0` (off), Max pullback `5`, Max leg sec `60`, Lookback `15`, Cooldown `30`. Final-test ship threshold **not** met — see `results/EXP-0037/summary.md`.
 
 **Clean-leg gates:** Min path efficiency (`disp / path length`, `0`=off), Max pullback pts, Max leg sec. Fail → cancel (no fire).
 
-**Trading params:** Enable trading (default **off**), Use selected account, Order size, **Take profit pts** (default 10), **Stop loss pts** (default 10), Use brackets, Flat-only. Orders only after realtime (not during replay catchup). LONG after HV trough + move up; SHORT after HV peak + move down.
+**Brackets:**
+- Fixed (default — **Vol-scaled brackets** off): **Take profit pts** `30`, **Stop loss pts** `10` (EXP-0037 freeze).
+- Vol-scaled (optional): `unit = k × max(median 1-min range over Vol window min, 0.25)`; `SL = clip(SL R × unit, min, max)`, `TP = clip(TP R × unit, min, max)`. Defaults: k=`1`, SL R=`1`, TP R=`2.5`, floor=`4`, cap=`40` (matches `make_vol_bracket_rr`).
 
-Logs: `HVEXT AT init`, `HV EXT FIRE … trading=`, `HVEXT AT ORDER sent …`, `HVEXT AT TRADE CLOSED …`.
+**Trading params:** Enable trading (default **off**), Use selected account, Order size, Use brackets, Flat-only. Orders only after realtime. LONG after HV trough + move up; SHORT after HV peak + move down.
+
+Logs: `HVEXT AT init`, `HV EXT FIRE … tp= sl= medR30= volScaled=`, `HVEXT AT ORDER sent …`, `HVEXT AT TRADE CLOSED …`.
 
 ## Project layout
 

@@ -4400,6 +4400,18 @@ def main(argv: list[str] | None = None) -> int:
         result = run_exp_simultaneous_flow(cfg, exp, session_ids)
     elif exp.get("detector") == "mat_gates" or exp_name == "EXP-0034":
         result = run_exp_mat_gates(cfg, exp, session_ids)
+    elif exp.get("detector") == "hv_extreme" or exp_name == "EXP-0037":
+        from research.hvext.run_hvext_sweep import main as hvext_main
+
+        # Staged sweep writes results/EXP-0037/*; return a stub summary for the CLI.
+        rc = hvext_main(["--stage", "all"])
+        result = {
+            "summary": {
+                "status": "ok" if rc == 0 else "failed",
+                "results_dir": str(Path(cfg["results_dir"]) / "EXP-0037"),
+                "note": "See results/EXP-0037/summary.md (staged train/validate/test)",
+            }
+        }
     elif str(exp.get("detector", "")).startswith("correlated_"):
         from research.correlated.run import run_correlated  # lazy: avoids import cycle
 
