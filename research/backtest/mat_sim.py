@@ -329,6 +329,18 @@ def simulate_session(
     ev_ts = events.column("event_ts_ns").to_numpy().astype(np.int64)
     sides = events.column("side").to_numpy().astype(int)
 
+    # Optional per-event brackets (override bracket_fn / cfg when present & finite)
+    ev_tp = (
+        events.column("tp_pts").to_numpy().astype(np.float64)
+        if "tp_pts" in events.column_names
+        else None
+    )
+    ev_sl = (
+        events.column("sl_pts").to_numpy().astype(np.float64)
+        if "sl_pts" in events.column_names
+        else None
+    )
+
     # Precompute regime at each event for both windows (completed minutes only)
     kw = dict(
         vwap_from_ns=vwap_from_ns,
@@ -387,7 +399,16 @@ def simulate_session(
         if entry_i >= len(ts):
             continue
 
-        if bracket_fn is not None:
+        if (
+            ev_tp is not None
+            and ev_sl is not None
+            and np.isfinite(ev_tp[i])
+            and np.isfinite(ev_sl[i])
+            and ev_tp[i] > 0
+            and ev_sl[i] > 0
+        ):
+            tp_pts, sl_pts = float(ev_tp[i]), float(ev_sl[i])
+        elif bracket_fn is not None:
             tp_pts, sl_pts = bracket_fn(sv)
         else:
             tp_pts, sl_pts = cfg.tp_pts, cfg.sl_pts

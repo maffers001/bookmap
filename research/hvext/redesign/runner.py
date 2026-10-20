@@ -151,8 +151,11 @@ def in_uk_skip(ts_ns: int) -> bool:
 
 # ---- event cache ----
 
+# Bump when enrich schema / tip-window semantics change so caches invalidate.
+_ENRICH_VER = 4
 _CACHE: dict[tuple, pa.Table] = {}
 _TRADE_CACHE: dict[tuple[str, str], pa.Table] = {}
+_MBO_CACHE: dict[tuple[str, str], pa.Table] = {}
 
 
 def load_nq(sid: str, pdir: Path | None = None) -> pa.Table:
@@ -188,15 +191,34 @@ def cfg_key(cfg: HvExtremeConfig) -> tuple:
     )
 
 
-def cached_events(sid: str, cfg: HvExtremeConfig, *, enrich: bool = True) -> pa.Table:
-    key = (sid, cfg_key(cfg), enrich)
+def cached_events(
+    sid: str,
+    cfg: HvExtremeConfig,
+    *,
+    enrich: bool = True,
+    with_mbo: bool = False,
+) -> pa.Table:
+    key = (sid, cfg_key(cfg), enrich, with_mbo, _ENRICH_VER)
     if key in _CACHE:
         return _CACHE[key]
     nq = load_nq(sid)
     if nq.num_rows == 0:
         ev = pa.table({})
     elif enrich:
-        ev = enriched_hv_events(nq, cfg, attach_med_r30=True)
+        from research.features.hv_extreme import hv_extreme_events
+        from research.hvext.redesign.enrich import enrich_events, load_mbo_nq
+
+        base = hv_extreme_events(nq, cfg, attach_med_r30=True)
+        mbo = None
+        if with_mbo and base.num_rows > 0:
+            # Approximate arm times from fire − leg_sec for MBO window
+            fire = base.column("event_ts_ns").to_numpy().astype(np.int64)
+            leg = base.column("leg_sec").to_numpy().astype(np.float64)
+            arms = fire - (np.maximum(leg, 0.0) * 1e9).astype(np.int64)
+            lo = int(arms.min() - 60_000_000_000)
+            hi = int(arms.max())
+            mbo = load_mbo_nq(parquet_dir(), sid, ts_lo=lo, ts_hi=hi)
+        ev = enrich_events(nq, base, cfg, mbo=mbo)
     else:
         from research.features.hv_extreme import hv_extreme_events
 
@@ -207,6 +229,7 @@ def cached_events(sid: str, cfg: HvExtremeConfig, *, enrich: bool = True) -> pa.
 
 def clear_cache() -> None:
     _CACHE.clear()
+    _MBO_CACHE.clear()
 
 
 # ---- retest entry ----
@@ -270,13 +293,15 @@ def find_retest_entries(
             in_band = abs(tick - tip) <= r_ticks
             if in_band:
                 retest_vol += float(sz[j])
-                if half >= 0 and abs(tick - tip) <= half:
-                    pass
                 if rp.weak_retest_frac > 0 and tip_vol > 0:
-                    # accumulate until we decide; check at first touch of R
+                    # max-vol mode: abort if retest vol exceeds frac × tip
                     if retest_vol > rp.weak_retest_frac * tip_vol:
                         break
-                # enter on first print within R of tip
+                if rp.weak_retest_frac < 0 and tip_vol > 0:
+                    # min-vol mode: wait until retest vol reaches |frac| × tip
+                    if retest_vol < (-rp.weak_retest_frac) * tip_vol:
+                        continue
+                # enter on first print within R of tip (or after min-vol met)
                 entry_ns = int(ts[j])
                 # stop beyond tip
                 if side < 0:
@@ -297,7 +322,11 @@ def find_retest_entries(
                 row["retest_risk_pts"] = risk_pts
                 row["retest_tp_pts"] = tp_pts
                 row["retest_sl_pts"] = sl_pts
+                # per-event brackets consumed by simulate_session
+                row["tp_pts"] = tp_pts
+                row["sl_pts"] = sl_pts
                 row["retest_vol"] = retest_vol
+                row["fill_delay_sec"] = (entry_ns - t0) / 1e9
                 rows.append(row)
                 filled = True
                 break
@@ -336,12 +365,20 @@ def run_month(
     bracket_fn=None,
     enrich: bool = True,
     pdir: Path | None = None,
+    with_mbo: bool = False,
+    augment=None,
+    fill_filter=None,
+    events_out: list | None = None,
 ) -> tuple[dict, list]:
     """Returns (pack dict, trade list).
 
     For ``entry="retest"``: if ``bracket_fn`` is passed, it overrides tip-risk
-    TP/SL (used for fixed/vol asymmetric sweeps). If omitted, TP/SL come from
-    ``RetestParams`` (risk ≈ retest_pts + stop_beyond, TP = tp_mult × risk).
+    TP/SL. If omitted, each fill uses its own ``retest_tp_pts`` /
+    ``retest_sl_pts`` from tip distance (matches Java per-fill risk).
+
+    ``augment(sid, ev) -> ev`` runs on raw fires before ``post_filter`` (e.g.
+    attach ES columns). ``fill_filter(ev) -> mask`` runs on retest fills (fill-
+    time features). ``events_out`` collects ``(sid, events_simulated)``.
     """
     pdir = pdir or parquet_dir()
     sim_cfg = sim_cfg or default_sim()
@@ -349,18 +386,22 @@ def run_month(
     bracket_fn = bracket_fn or fixed_bracket
     all_trades = []
     n_fires = 0
+    n_fires_gated = 0
     n_entries = 0
     for sid in sessions:
         nq = load_nq(sid, pdir)
         if nq.num_rows == 0:
             continue
-        ev = cached_events(sid, cfg, enrich=enrich)
+        ev = cached_events(sid, cfg, enrich=enrich, with_mbo=with_mbo)
         n_fires += ev.num_rows
         if ev.num_rows == 0:
             continue
+        if augment is not None:
+            ev = augment(sid, ev)
         if post_filter is not None:
             mask = post_filter(ev)
             ev = filter_events(ev, mask)
+        n_fires_gated += ev.num_rows
         if ev.num_rows == 0:
             continue
         if entry == "retest":
@@ -368,14 +409,20 @@ def run_month(
             ev = find_retest_entries(nq, ev, rp, cfg)
             if ev.num_rows == 0:
                 continue
+            if fill_filter is not None:
+                ev = filter_events(ev, fill_filter(ev))
+                if ev.num_rows == 0:
+                    continue
+            if events_out is not None:
+                events_out.append((sid, ev))
             if user_bracket is not None:
+                # Override: drop per-event tp/sl so bracket_fn applies
+                ev = ev.drop_columns([c for c in ("tp_pts", "sl_pts") if c in ev.column_names])
                 bfn = user_bracket
             else:
-                # Tip-risk brackets from RetestParams
-                risk = rp.retest_pts + rp.stop_beyond_pts
-                tp = rp.tp_mult * risk if rp.tp_mult > 0 else rp.fixed_tp
-                sl = risk
-                bfn = lambda _sv, tp=tp, sl=sl: (tp, sl)
+                # Per-row tip-distance risk via tp_pts/sl_pts columns —
+                # single sim call keeps flat-only + cooldown intact
+                bfn = None
             s = simulate_session(
                 sid,
                 nq,
@@ -390,6 +437,8 @@ def run_month(
             continue
 
         n_entries += ev.num_rows
+        if events_out is not None:
+            events_out.append((sid, ev))
         s = simulate_session(
             sid,
             nq,
@@ -402,9 +451,10 @@ def run_month(
         all_trades.extend(s.trades)
     summary = pack(all_trades)
     summary["n_fires"] = n_fires
+    summary["n_fires_gated"] = n_fires_gated
     summary["n_entries"] = n_entries
-    if entry == "retest" and n_fires > 0:
-        summary["fill_rate"] = n_entries / n_fires
+    if entry == "retest" and n_fires_gated > 0:
+        summary["fill_rate"] = n_entries / n_fires_gated
     return summary, all_trades
 
 
@@ -460,6 +510,141 @@ def null_month(sessions: list[str], n_per: int, seed: int = 42) -> dict:
         )
         all_trades.extend(s.trades)
     return pack(all_trades)
+
+
+def random_null_retest_events(
+    nq: pa.Table,
+    n: int,
+    cfg: HvExtremeConfig,
+    *,
+    seed: int = 42,
+) -> pa.Table:
+    """Random "fires" shaped like HV fires so ``find_retest_entries`` applies.
+
+    Each null fire gets a random RTH print time, random side, and a synthetic
+    tip ``move_pts`` against the side from the fire price (a real fire sits
+    ~``move_pts`` past its tip). ``extreme_vol`` is NaN (weak-retest off).
+    """
+    base = _random_null_events(nq, n, seed=seed)
+    if base.num_rows == 0:
+        return base
+    ts = nq.column("ts_ns").to_numpy().astype(np.int64)
+    px = np.round(nq.column("price").to_numpy().astype(np.float64)).astype(np.int64)
+    order = np.argsort(ts, kind="stable")
+    ts, px = ts[order], px[order]
+    ev_ts = base.column("event_ts_ns").to_numpy().astype(np.int64)
+    sides = base.column("side").to_numpy().astype(np.int8)
+    idx = np.clip(np.searchsorted(ts, ev_ts, side="right") - 1, 0, len(ts) - 1)
+    fire_px = px[idx]
+    # SHORT (side<0): tip is a peak above; LONG: tip is a trough below
+    tip = fire_px - sides.astype(np.int64) * cfg.move_ticks()
+    return pa.table({
+        "event_ts_ns": ev_ts,
+        "side": sides,
+        "event_type": ["null_random_retest"] * len(ev_ts),
+        "extreme_tick": tip.astype(np.int64),
+        "extreme_vol": np.full(len(ev_ts), np.nan),
+        "arm_ns": ev_ts,
+    })
+
+
+def null_retest_month(
+    sessions: list[str],
+    n_per: int,
+    rp: RetestParams,
+    cfg: HvExtremeConfig | None = None,
+    *,
+    seed: int = 42,
+    sim_cfg: MatSimConfig | None = None,
+    bracket_fn=None,
+    fill_filter=None,
+) -> dict:
+    """Null control for a retest cell: same fill rule + per-event risk on
+    random fires. ``bracket_fn`` overrides per-event TP/SL when given.
+    ``fill_filter`` is applied to null fills when it can evaluate on them."""
+    cfg = cfg or PANEL
+    sim_cfg = sim_cfg or default_sim()
+    rng = np.random.default_rng(seed)
+    all_trades = []
+    n_fires = n_entries = 0
+    for sid in sessions:
+        nq = load_nq(sid)
+        if nq.num_rows == 0:
+            continue
+        fires = random_null_retest_events(
+            nq, n_per, cfg, seed=int(rng.integers(0, 1_000_000))
+        )
+        n_fires += fires.num_rows
+        ev = find_retest_entries(nq, fires, rp, cfg)
+        if ev.num_rows == 0:
+            continue
+        if fill_filter is not None:
+            try:
+                ev = filter_events(ev, fill_filter(ev))
+            except (KeyError, pa.ArrowInvalid):
+                pass
+            if ev.num_rows == 0:
+                continue
+        if bracket_fn is not None:
+            ev = ev.drop_columns([c for c in ("tp_pts", "sl_pts") if c in ev.column_names])
+        n_entries += ev.num_rows
+        s = simulate_session(
+            sid, nq, pa.table({}), sim_cfg, bracket_fn=bracket_fn, events=ev,
+            vol_window_min=30,
+        )
+        all_trades.extend(s.trades)
+    out = pack(all_trades)
+    out["n_fires"] = n_fires
+    out["n_entries"] = n_entries
+    out["fill_rate"] = (n_entries / n_fires) if n_fires else None
+    return out
+
+
+def null_retest_paired(
+    sessions: list[str],
+    cell: dict,
+    rp: RetestParams,
+    cfg: HvExtremeConfig | None = None,
+    *,
+    n_seeds: int = 5,
+    seed: int = 42,
+    bracket_fn=None,
+    fill_filter=None,
+) -> dict:
+    """Pair a retest cell (a ``run_month`` pack) with a null of the same
+    (gated) fire count per session, averaged over ``n_seeds`` seeds."""
+    n_fires = int(cell.get("n_fires_gated", cell.get("n_fires")) or 0)
+    n_per = max(5, int(np.ceil(n_fires / max(1, len(sessions)))))
+    runs = [
+        null_retest_month(
+            sessions, n_per, rp, cfg, seed=seed + k, bracket_fn=bracket_fn,
+            fill_filter=fill_filter,
+        )
+        for k in range(n_seeds)
+    ]
+    nets = np.array([r.get("net") or 0.0 for r in runs], dtype=float)
+    ns = np.array([r.get("n") or 0 for r in runs], dtype=float)
+    wrs = np.array([r.get("wr") if r.get("wr") is not None else np.nan for r in runs], dtype=float)
+    frs = np.array([r.get("fill_rate") if r.get("fill_rate") is not None else np.nan for r in runs], dtype=float)
+    cell_net = cell.get("net") or 0.0
+    sd = float(nets.std()) if len(nets) > 1 else 0.0
+    return {
+        "n_per_session": n_per,
+        "net_sd": sd,
+        "z": float((cell_net - nets.mean()) / sd) if sd > 0 else None,
+        "frac_null_ge_cell": float(np.mean(nets >= cell_net)),
+        "n_seeds": n_seeds,
+        "net_mean": float(nets.mean()),
+        "net_min": float(nets.min()),
+        "net_max": float(nets.max()),
+        "n_mean": float(ns.mean()),
+        "wr_mean": float(np.nanmean(wrs)) if np.isfinite(wrs).any() else None,
+        "fill_rate_mean": float(np.nanmean(frs)) if np.isfinite(frs).any() else None,
+        "cell_net": cell_net,
+        "cell_minus_null_mean": float(cell_net - nets.mean()),
+        "beats_null_max": bool(cell_net > nets.max()),
+        "runs": runs,
+    }
 
 
 def apply_overlays(trades: list) -> dict:
