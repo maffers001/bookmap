@@ -64,11 +64,10 @@ import velox.api.layer1.simplified.TradeDataListener;
  * Leave v1 ({@code Momentum AutoTrade (ES+NQ)}) unchanged; do not enable trading
  * on both at once (they share {@link MatSideFilter}).
  *
- * Defaults from EXP-0034: Trend mode = with-trend (1), Require VWAP side = true,
- * Max ES lag = 250. Regime range gate defaults OFF — stacking range&gt;80 with
- * trend+VWAP left almost no trades on many sessions (median 60m range ≫ 80).
- * Vol multiple k defaults to <b>1</b> (OOS 2026-10-18). Optional
- * {@code ES confirm mode=1} holds NQ-first bursts until ES confirms within max lag.
+ * Frozen research defaults (OOS 2026-10-18): Trend mode = with-trend (1),
+ * Require VWAP side = true, Max ES lag = 250, <b>Vol-scaled brackets ON</b> with
+ * k=1 (clip 6–30). Regime range gate OFF. Optional {@code ES confirm mode=1}
+ * holds NQ-first bursts until ES confirms within max lag.
  *
  * Attach on NQ with ES also open. Default: signals only (enableTrading=false).
  */
@@ -222,10 +221,11 @@ public class MomentumAutoTradeV2Module implements
     @Parameter(name = "Require VWAP side")
     Boolean requireVwapSide = true;
 
+    /** Frozen base: TP=SL = clip(k × median 1-min range, min, max). */
     @Parameter(name = "Vol-scaled brackets")
-    Boolean volScaledBrackets = false;
+    Boolean volScaledBrackets = true;
 
-    /** Recommended default from OOS (2026-10-18): k=1 symmetric clip 6–30. */
+    /** Frozen base from OOS (2026-10-18): k=1 symmetric clip 6–30. */
     @Parameter(name = "Vol multiple k", step = 0.5)
     Double volMultipleK = 1.0;
 

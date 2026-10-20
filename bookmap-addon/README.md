@@ -177,14 +177,14 @@ JAR: `bookmap-addon/build/libs/bookmap-orderflow-mat-v2.jar` (contains both v1 a
 | **Trend window min** | 30 | Net lookback for trend mode |
 | **Trend mode (0=off 1=with 2=against)** | **1** (with) | Require burst with rolling net |
 | **Require VWAP side** | **true** | Long only ≥ session VWAP; short only ≤ |
-| **Vol-scaled brackets** | false | TP=SL = k × median 1-min range (floor/cap) |
-| **Vol multiple k** / **Vol window min** / **Bracket min/max pts** | **1** / 30 / 6–30 | **Recommended k=1** (OOS 2026-10-18); clip 6–30 |
+| **Vol-scaled brackets** | **true** | TP=SL = k × median 1-min range (floor/cap) — frozen base |
+| **Vol multiple k** / **Vol window min** / **Bracket min/max pts** | **1** / 30 / 6–30 | **k=1** (OOS 2026-10-18); clip 6–30 |
 | **ES confirm mode (0=causal 1=confirm)** | 0 | 1 = NQ-first: pending NQ burst fires when ES confirms within Max ES lag |
 | **VWAP session open UK min-of-day** | 870 | UK 14:30 |
 
 Logs: `MAT2 SIGNAL …`, `MAT2 SIGNAL(confirm) nqTs=… esTs=… lagMs=…`, `MAT2 REJECT regime_hot_skip|trend_mode_fail|vwap_side_fail …`.
 
-Defaults are **with-trend + VWAP** (range gate off). Trend uses **completed 1-minute bars only** (no intra-minute hindsight). VWAP is a running trade VWAP. Frozen research base = **vol k=1** symmetric brackets (enable Vol-scaled + k=1).
+Defaults are **with-trend + VWAP + vol-scaled k=1** (range gate off). Trend uses **completed 1-minute bars only** (no intra-minute hindsight). VWAP is a running trade VWAP.
 
 **Replay check vs offline reference:**  
 `python -m research.export_mat2_ref --session 021026 --stamp confirm --bracket vol_k1`  
