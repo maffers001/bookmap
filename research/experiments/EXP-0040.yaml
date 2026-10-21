@@ -1,0 +1,24 @@
+name: EXP-0040
+hypothesis: H31
+title: MAT bounce at significant S/R (pullaway pivots)
+description: >
+  Opposite of EXP-0039: does frozen MAT (vol k=1, causal, trend+VWAP,
+  UK 14:30-17:00) perform better when it fires as a push away from support
+  (long off swing LOW) or resistance (short off swing HIGH)? Primary =
+  stratify by bounce/at/none. Secondary = touch-first + MAT confirm.
+  May 2026 held out.
+
+detector: mat_sr_bounce
+lookback_sec: 600
+pullaway_pts: 20
+cluster_tol_pts: 5
+buffers_pts: [0.0, 2.5, 5.0]
+bounce_windows_sec: [30, 60, 120, 300]
+primary_bounce_window_sec: 60
+at_tol_pts: 2.5
+rth_uk_only: true
+commission_pts_rt: 0.25
+slip_ticks: 1.0
+es_stamp: causal
+max_es_lag_ms: 250
+sync_ms: 1500

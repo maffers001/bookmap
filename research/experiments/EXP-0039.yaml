@@ -1,0 +1,24 @@
+name: EXP-0039
+hypothesis: H19
+title: MAT at significant swing highs/lows (pullaway confirm)
+description: >
+  Does frozen MAT (vol k=1, causal, trend+VWAP, UK 14:30-17:00) perform
+  better when it fires at a significant swing high (long) or low (short)?
+  Pivots confirmed by 20pt pullaway (not 20s time). Primary = stratify MAT
+  signals by level_state (through/at/none). Secondary = level-first break +
+  MAT confirm. May 2026 held out.
+
+detector: mat_at_significant_swing
+lookback_sec: 600
+pullaway_pts: 20
+cluster_tol_pts: 5
+buffers_pts: [0.0, 2.5, 5.0]
+break_windows_sec: [30, 60, 120, 300]
+primary_break_window_sec: 60
+at_tol_pts: 2.5
+rth_uk_only: true
+commission_pts_rt: 0.25
+slip_ticks: 1.0
+es_stamp: causal
+max_es_lag_ms: 250
+sync_ms: 1500

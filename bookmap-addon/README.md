@@ -17,6 +17,7 @@ Custom Bookmap Layer 1 add-ons for NQ scalping with ES confirmation:
 | **Pitch and Catch** | High-vol peak/trough (“pitch”) then low-vol move away (“catch”); chart markers |
 | **HV Extreme Move AutoTrade** | HV tip → clean Move pts leg → tip markers; optional market + TP/SL brackets |
 | **Trapped Retest** | HV peak → weak lower-vol retest → fire on break beyond 2nd swing |
+| **Stop Run** | Inferred stop-run fingerprint beyond swing/session/overnight levels (EXP-0041 / H32); visual markers only — no auto-trade |
 
 ## Prerequisites
 
@@ -242,6 +243,27 @@ Warns when a **high-volume** rotation peak/trough is followed by a **low-volume*
 Peak uses volume in **Peak band pts** around the extreme; catch uses the **Catch pts** price span away from it.
 
 **Suggested start (NQ):** Catch pts `20`, Peak band `2`, Confirm `5`, High vol mult `1.5`, Low vol frac `0.70`. Tighten Low vol frac (e.g. `0.50`) for quieter catches only. Toggle **Show in-play lines** off if the pitch/target lines clutter the chart.
+
+### Stop Run
+- **SR Level High / Low**: nearest live unpierced reference level (pullaway swing, locked session H/L, overnight H/L)
+- **SR Run Long / Short**: fire marker when the 2s fingerprint scores ≥ min score after a pierce (continuation side)
+- **SR Fade Long / Short**: reclaim (stall) marker within reclaim seconds — informational only
+- **SR Score** / **SR Signal**: last score 0–4 and brief +/-1 on fire
+- Attach on NQ with ES open for ES-burst confirm. MBO pull used when the feed provides MBO.
+- Frozen defaults from EXP-0041 / H32 — **visual only, no auto-trade**
+- Logs: `SR RUN …`, `SR RESOLVE stall|continue …`
+
+### Stop Run
+Inferred stop-run fingerprint beyond swing / session / overnight levels (EXP-0041 / H32). **Visual only — no auto-trade.** Attach on NQ with ES open.
+
+| Panel | Meaning |
+|---|---|
+| **SR Level High / Low** | Nearest live unpierced reference level |
+| **SR Run Long / Short** | Fire marker after pierce + 2s fingerprint (score ≥ min) |
+| **SR Fade Long / Short** | Reclaim (stall) marker within reclaim seconds |
+| **SR Score** / **SR Signal** | Last score 0–4 / brief `±1` on fire |
+
+Logs: `SR RUN …`, `SR RESOLVE stall|continue …`. Replay parity: `python -m research.stop_run.dump_session_events --session <sid>`.
 
 ### Trapped Retest
 Two-swing trapped-size fade: **high-volume** extreme (peak1), then a **lower-volume** failed retest (peak2), then fire when price breaks **Break pts** beyond peak2.

@@ -3,6 +3,8 @@
 Frozen base: trend+VWAP, causal ES, 1-tick slip, 0.25 pt/RT, vol k=1.
 Per day: n, WR, gross, net, equity_high (peak of running day P&L), end equity.
 Writes results/MAT2_MAY2026_VOLK1/.
+
+Tape: primary alias only (excludes NQM6@TV when dual-feed extracts exist).
 """
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ from research.backtest.mat_sim import (
     simulate_session,
 )
 from research.config import load_config
+from research.correlated.harness import _prefer_single_feed
 from research.run_experiment import _load_trades
 
 UK = ZoneInfo("Europe/London")
@@ -92,8 +95,8 @@ def main() -> None:
         if not (pq / f"session_id={sid}" / "trades.parquet").exists():
             missing.append(sid)
             continue
-        nq = filt(_load_trades(pq, sid, "NQ"))
-        es0 = _load_trades(pq, sid, "ES")
+        nq = filt(_prefer_single_feed(_load_trades(pq, sid, "NQ"), pq, sid, "NQ"))
+        es0 = _prefer_single_feed(_load_trades(pq, sid, "ES"), pq, sid, "ES")
         es = filt(es0) if es0.num_rows else es0
         if nq.num_rows == 0:
             rows.append({
@@ -160,6 +163,8 @@ def main() -> None:
         "",
         "Frozen base: **vol k=1**, causal ES, trend=1 + VWAP, UK **14:30–17:00**, "
         f"1-tick slip, commission {COMMISSION} pt/RT.",
+        "",
+        "**Tape:** primary alias only (excludes `NQM6@TV` dual-feed contamination).",
         "",
         f"**equity_high** = peak of running day P&L (from flat at 14:30) within that session's trades.",
         "",

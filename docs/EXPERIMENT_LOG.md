@@ -47,8 +47,48 @@
 | EXP-0036 | H29 correlated exhaustion (exit + fade) | exit **reject**; fade **FROZEN test-autotrade** (DIG4) | 23d UK 14:30–17:00 | m04+`skip_er0.3` +355; neighbour 0.25 also clears; spec in DIG4 |
 | EXP-0037 | H30 HV Extreme Move + vol/fixed brackets | ran — **park** (final test fail) | 23d UK 14:30–17:00 | freeze m20/c15/b2/hv2/pb5/leg60 + fixed 10/30; test −214; reserve untouched |
 | EXP-0038 | H30 redesign (retest entry + ablations) | ran — freeze retest | Sep+Oct full | `ret|retest_R10_t300_sb2_x3.0|none` both=454.5; see `results/EXP-0038/summary.md` |
+| EXP-0039 | H19 MAT × significant swing (pullaway) | ran — **reject / park** | 32d train + 17d May OOS | gated through_5 worse than none; see notes |
+| EXP-0039_NOGATE | H19 breakout, no trend/VWAP | ran — **train lift / May flip** | 32d + May | through_5 train +0.43 vs none −0.32; May −6.3 vs −1.1 — no ship |
+| EXP-0040 | H31 MAT bounce at significant S/R | ran — **reject / empty** | 32d train + 17d May OOS | gated bounce_5 n=2; see notes |
+| EXP-0040_NOGATE | H31 bounce, no trend/VWAP | ran — **reject / thin** | 32d + May | bounce_5 n=5 train +5.5 / May −20 — no ship |
+| EXP-0041 | H32 stop-run fingerprint | ran — **visual freeze / no auto-trade** | 49d UK 14:30–17:00 (May OOS) | n=44 hit10 0.41≈null 0.39; see notes |
 
 ## Run notes
+
+### 2026-10-21 — EXP-0041 stop-run fingerprint (H32)
+
+- Detector: pierce causal level (pullaway swings + locked session H/L + overnight H/L) by 2 ticks → 2s same-side fingerprint (vol≥25, imb≥0.60, sweeps≥1, aggr≥3, score≥2). Optional MBO pull + ES burst. Stamp at window end.
+- Stage A: continuation hit10 **0.409** ≈ null **0.394** ≪ 0008 **0.451** (n=44). Fade flip hit10 0.30. `outcome_continue` n=24 hit10 0.58 / @60s +6.0; `outcome_stall` n=20 hit10 0.20.
+- Stage B (vol k=1, trend+VWAP, 1-tick slip): continuation n=33 net **+62** (train +21 / May +41) but train loo_neg=4; fade@reclaim gated empty (n=0).
+- **Decision:** freeze default thresholds for visual `Stop Run` Bookmap module; **no auto-trade**. See `results/EXP-0041/summary.md`.
+- **P&L dig** (`results/EXP-0041_PNL/`): join-run gated vol k=1 n=33 net +62 (train +21 / May +41) but loo_neg=4 and hit10≈null; fade@fire −78; fade@reclaim May flips; SWING_HIGH stratum n=16 +129 too thin (May 5/5). **Still no auto-trade.**
+
+### 2026-10-21 — EXP-0039/0040 re-run without trend+VWAP
+
+- S/R is a different paradigm from frozen MAT gates; both arms re-run with `gate=None` (`--no-gates` → `results/EXP-0039_NOGATE`, `EXP-0040_NOGATE`).
+- Ungated base: train n=1131 net **−375**, May n=753 net **−872** (gates were carrying the MAT base).
+- **Breakout:** train `through_5` @60s n=58 avg **+0.43** PF 1.06 vs `none` −0.32 / 0.99; May through **−6.32** vs none −1.07 — train lift, May flips → **no ship**.
+- **Bounce:** train `bounce_5` n=5 (still ≪30) avg +5.5; May n=5 avg −20. Design B still ~empty (sync_ms confirm). **Reject / thin.**
+- Runners: `python -m research.swing_break.run_exp_0039 --no-gates` (same for 0040).
+
+### 2026-10-21 — EXP-0040 MAT bounce at significant S/R
+
+- Opposite of EXP-0039: long off swing LOW / short off swing HIGH; stratify by bounce/at/none after recent hold-side touch.
+- Detector touch stamp + `label_signal_sr` in `research/features/significant_swing.py`. Runner: `research/swing_break/run_exp_0040.py`. Spec: `EXP-0040.yaml`.
+- **Primary A** empty: train `bounce_5` @60s **n=2**. Funnel: unbroken fade level 647/676 but touch-within-60s only 2 (MAT hold median ~143 pts from level). Dig lookback 5m / pullaway 15 → n≤3.
+- **Secondary B:** 574 touches → ≤3 MAT confirms in sync → 0 trades after gates.
+- **Verdict: reject / park (empty construction).** May held out; no retune. Results: `results/EXP-0040/`.
+
+### 2026-10-21 — EXP-0039 MAT at significant swing highs/lows
+
+- Question: does frozen MAT (vol k=1, causal, trend+VWAP, UK 14:30–17:00) perform better when it fires at a **20pt-pullaway** swing HIGH (long) / LOW (short)?
+- Not EXP-0025 (20s time-confirm, tick units). Detector: `research/features/significant_swing.py`. Runner: `research/swing_break/run_exp_0039.py`. Spec: `research/experiments/EXP-0039.yaml`.
+- **Primary A** — stratify every MAT trade by `level_state` (through_B / at / none); buffers 0/2.5/5; break windows 30/60/120/300s (primary 60); single + cluster≥2/3.
+- Headline train `through_5` @60s: n=53 avg **−1.51** PF 0.90 vs `none` n=570 avg **+1.36** PF 1.17. May same direction (through worse). Window sweep: 30/60/120 through also worse; 300s train slight lift vs none but May flips — no retune.
+- Brackets (rr_1_2, rr_1_3, struct_1_2) on through_5 do not rescue vs sym_k1.
+- **Secondary B** (break-first + MAT confirm): single-level B negative; cluster≥2 B train positive but n≤14 and May thin — not a ship bar.
+- **Verdict: reject / park.** Do not gate MAT to swing breaks; May held out, unread until end.
+- Results: `results/EXP-0039/`.
 
 ### 2026-10-21 — May 2026 OOS (vol k=1, UK 14:30–17:00)
 

@@ -1,0 +1,49 @@
+name: EXP-0041
+hypothesis: H32
+title: Stop-run fingerprint at swing / session / overnight levels
+description: >
+  Infer stop runs from the tape fingerprint after price pierces a causal
+  reference level (20pt pullaway swings, locked session H/L, overnight H/L)
+  by pierce_ticks, then a short same-side aggression window. Score components:
+  side vol, imbalance, multi-level sweeps, distinct aggressors. Optional MBO
+  far-side pull and ES same-side burst. Stage A = event study (continue vs
+  fade vs null vs corrected 0008). Stage B = MAT P&L via events override
+  (continuation at window end; fade at reclaim). May 2026 held out.
+
+detector: stop_run
+pierce_ticks: 2
+window_ms: 2000
+min_vol: 25.0
+min_prints: 8
+min_imbalance: 0.60
+min_sweeps: 1
+sweep_min_span_ticks: 2.0
+sweep_min_prints: 3
+min_aggressors: 3
+min_score: 2
+mbo_radius_ticks: 4
+mbo_pre_ms: 1000
+mbo_min_cancels: 5
+mbo_min_pull_ratio: 0.60
+sync_ms: 1500
+cooldown_ms: 5000
+reclaim_sec: 5.0
+lookback_sec: 600.0
+pullaway_pts: 20.0
+cluster_tol_pts: 5.0
+invalidate_beyond_pts: 5.0
+use_cluster: false
+level_kinds:
+  - SWING_HIGH
+  - SWING_LOW
+  - SESSION_HIGH
+  - SESSION_LOW
+  - ON_HIGH
+  - ON_LOW
+rth_uk_only: true
+horizons_ms: [10000, 30000, 60000]
+point_targets: [5, 10, 20]
+commission_pts_rt: 0.25
+slip_ticks: 1.0
+es_stamp: causal
+max_es_lag_ms: 1500

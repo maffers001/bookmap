@@ -139,6 +139,8 @@ direction continues better than the same bursts that do not break a swing.
 
 **Test:** EXP-0025. **Result:** 3m break n=69 hit+10 88% / @10s +11.2 vs all 85% / +9.8; 5m dig stronger (92% / +12.9). Promising overlay on these days — **no ship** without holdout.
 
+**Reopen (significant pullaway, both sides):** EXP-0039 — same idea with **20pt pullaway** pivots (not 20s time), longs vs HIGH / shorts vs LOW, stratify frozen MAT (vol k=1) by through/at/none; May OOS. **Result (trend+VWAP):** `through_5` @60s train avg −1.51 vs `none` +1.36 (n=53/570); May agrees through is worse. **Result (no gates, EXP-0039_NOGATE):** train through_5 +0.43 vs none −0.32 (n=58) but May −6.3 vs −1.1 — flip. **Reject / park** — do not gate MAT to swing breaks.
+
 ## H20 — Failed swing break (stop-run fade)
 
 Price pierces beyond a causal swing by ≥N ticks then reclaims inside within
@@ -271,3 +273,36 @@ train. 2-tick slip still +332 but train −1 — live fills matter.
 **Status:** exit closed; fade **FROZEN for TEST_AUTOTRADE** — see
 `results/EXP-0036_DIG4/TEST_AUTOTRADE_SPEC.md`. No further param search on
 these 23d. Not in MAT JAR yet (separate fade module).
+
+## H31 — MAT bounce at significant S/R
+
+Frozen MAT performs better when it fires as a **push away from support/resistance**
+after a recent hold-side touch of a 20pt-pullaway swing: long off swing LOW,
+short off swing HIGH. Distinct from H19 breakout-through (EXP-0039) and H20
+failed-break fade (pierce then reclaim).
+
+**Test:** EXP-0040 (+ `_NOGATE` without trend/VWAP). **Result:** Still thin —
+gated bounce_5 n=2; ungated n=5 train avg +5.5 but May n=5 avg −20 (flip).
+Dig lookback/pullaway did not reach n≥30. Design B touch→MAT within sync_ms
+stays empty. **Reject / park.** S/R×MAT needs a longer post-touch confirm window
+(or dual ES+NQ S/R arm), not trend/VWAP.
+
+## H32 — Stop-run fingerprint (inferred)
+
+CME never tags stop orders. Infer a stop run when price pierces a causal
+reference level (20pt pullaway swing HIGH/LOW, locked session H/L after
+pullaway, overnight H/L) by ≥`pierce_ticks`, then a short same-side aggression
+window shows enough of: side vol, imbalance, multi-level same-aggressor
+sweeps, distinct aggressor count. Optional MBO far-side pull and ES same-side
+burst raise confidence (score). Post-hoc stall (reclaim inside level) vs
+continue is a stratum only — never part of the signal. Distinct from H20
+(pierce+reclaim fade, pre-fix) and H19 (MAT×swing break).
+
+**Test:** EXP-0041. **Result (49d UK 14:30–17:00):** n=44 events; continuation
+hit10 **0.41** ≈ null **0.39** ≪ corrected 0008 **0.45**. Fade flip worse.
+`outcome_continue` stratum hit10 0.58 / @60s +6.0 (n=24) — identification of
+true follow-through is OK but not a ship filter. Gated MAT P&L continuation
+n=33 net +62 (train +21 / May +41) but event-study bar fails and train
+`loo_neg=4`. **Freeze thresholds for visual Stop-Run Bookmap module; no
+auto-trade.** Defaults: pierce=2, window=2000ms, min_vol=25, min_imb=0.60,
+min_sweeps=1, min_aggr=3, min_score=2.
