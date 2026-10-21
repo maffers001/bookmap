@@ -50,6 +50,12 @@
 
 ## Run notes
 
+### 2026-10-21 — May 2026 OOS (vol k=1, UK 14:30–17:00)
+
+- Converted trades-only for 17 May sessions (`*0526`); ran frozen base (causal, trend+VWAP, vol k=1, 1-tick, 0.25 pt/RT).
+- Results: `results/MAT2_MAY2026_VOLK1/`. n=516 net **−132.8**, days+ 7/17, portfolio high +104 then underwater; end −133. Per-day **equity_high** (peak running P&L from flat at 14:30) in summary.
+- May is a **losing OOS month** on this base — do not retune; keep as holdout evidence.
+
 ### 2026-10-20 — EXP-0037 HV Extreme Move (vol brackets + staged backtest)
 
 - **Java:** `RegimeTracker` + vol-RR brackets in `HvExtremeMoveModule` (`bookmap-orderflow-hvext-vol.jar`). After freeze: defaults updated, `bookmap-orderflow-hvext-frozen.jar`.
@@ -132,6 +138,12 @@
 
 - Backtest: `results/CFADE_ASYM_RR/` (`make_vol_bracket_rr`). Best practical cell **sl1/tp2** (same stop as DIG4 sym k=1, wider target); lifts Oct/Sep/Aug vs symmetric.
 - **Live defaults updated:** panel `SL R multiple=1`, `TP R multiple=2`, bracket clip **4–40**; JAR `bookmap-orderflow-cfade-v4.jar` (+ overwritten `bookmap-orderflow-cfade.jar` when unlocked). Spec/README/`export_cfade_ref` aligned. Signal rule unchanged.
+
+### 2026-10-21 — CFADE May 2026 OOS (sl1/tp2)
+
+- Runner: `python -m research.run_cfade_may` → `results/CFADE_MAY2026_SL1TP2/`.
+- 17 May sessions, UK 14:30–17:00, against_m04 + skip_er0.3, vol RR SL1/TP2, 1-tick + 0.25 pt/RT.
+- n=151 WR=0.46 net **+349.8**; days+ 9/17; portfolio high **+599.1** / end +349.8 / maxDD 249. Worst days: 290526 −172, 180526 −145.
 
 ### 2026-10-19 — Audit: ideas discounted vs EXP-0008
 
