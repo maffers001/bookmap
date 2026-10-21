@@ -335,4 +335,6 @@ AMB 78; sampled 63/51/72. **TakeScore** median gap break−hold **+0.38**
 (cliffs δ 0.30, d 0.53, LOO-stable); **TapeScore** +0.41 (δ 0.20, LOO-stable);
 StackScore weak (+0.16); AttractRepel mostly null (tracker near-BBO). Hold→Amb→Break
 gradient on Take/Tape. Impulse tertiles: Take still separates in low/high;
-Tape collapses in high-impulse. See `results/EXP-0043/`.
+Tape collapses in high-impulse. **Sep OOS blocked:** 7 depth days, BREAK=0
+(HOLD 9 / AMB 18) — cannot confirm separation. See `results/EXP-0043/`,
+`results/EXP-0043_202609/`.

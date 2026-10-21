@@ -53,17 +53,18 @@
 | EXP-0040_NOGATE | H31 bounce, no trend/VWAP | ran — **reject / thin** | 32d + May | bounce_5 n=5 train +5.5 / May −20 — no ship |
 | EXP-0041 | H32 stop-run fingerprint | ran — **visual freeze / no auto-trade** | 49d UK 14:30–17:00 (May OOS) | n=44 hit10 0.41≈null 0.39; see notes |
 | EXP-0042 | H33 IRT dual-level correlated S/R | **dig candidate** (shallow reclaim) | 14d Oct + Sep aligned | shallow vol_k1 +612 Oct / +128 Sep; see notes |
-| EXP-0043 | H34 IRT hold vs break orderflow | **descriptive — Take/Tape lift** | 13d Oct depth+mbo | Take δ0.30 / Tape δ0.20 LOO-stable; see notes |
+| EXP-0043 | H34 IRT hold vs break orderflow | **Oct Take/Tape lift; Sep OOS blocked** | 13d Oct + 7d Sep depth | Take δ0.30 Oct; Sep BREAK=0; see notes |
 
 ## Run notes
 
 ### 2026-10-21 — EXP-0043 IRT hold vs break OF (H34)
 
-- Runner: `python -m research.irt_lvn.run_hold_break_of`. Window UK **14:30–17:00**. NQ-only. Levels frozen at touch (LVN2/3, DOP, 2nd dVPOC); cluster ≤5 pts; 30 pt impulse / 30 pt reject vs continue; pad 3.
+- Runner: `python -m research.irt_lvn.run_hold_break_of [--month YYYY-MM]`. Window UK **14:30–17:00**. NQ-only. Levels frozen at touch (LVN2/3, DOP, 2nd dVPOC); cluster ≤5 pts; 30 pt impulse / 30 pt reject vs continue; pad 3.
 - Sessions: 13 Oct with depth+mbo (exclude `191026`); align gate all ok. Universe HOLD **67** / BREAK **61** / AMB **78**; stratified sample **63/51/72** (cap 12/day).
 - Primary scores on `[-2s,+2s]` only: **TakeScore** med gap +0.38 (δ 0.30, d 0.53, LOO yes); **TapeScore** +0.41 (δ 0.20, LOO yes); StackScore +0.16 weak; AttractRepel ≈0 (few large levels tagged at IRT price). BreakLikeness +0.25 (δ 0.28).
 - Hold→Amb→Break gradient on Take (0.18→0.30→0.56) and Tape (0.30→0.47→0.71). Impulse tertile: Take separates low/high; Tape fails in high-impulse bucket (approach-speed confound).
 - Chart-review lists in `results/EXP-0043/summary.md`. No P&amp;L / no May. Candidate OF features for shallow-reclaim dig: beyond-aggressor + tape intensity at touch.
+- **Sep descriptive OOS** (`results/EXP-0043_202609/`): 7 depth days (`160926`…`300926`; early Sep no depth/mbo). Universe HOLD **9** / BREAK **0** / AMB **18** — **hold-vs-break contrast blocked**. HOLD Take med −0.00 (Oct HOLD 0.18); Tape HOLD ~0.29≈Oct; HOLD→AMB Take still steps (−0.00→0.34). Do not treat Oct Take as OOS-confirmed.
 
 ### 2026-10-21 — EXP-0042 IRT dual-level S/R (H33)
 

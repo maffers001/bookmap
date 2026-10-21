@@ -247,7 +247,12 @@ def impulse_tertile_split(tbl: pa.Table, score: str) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser(description="EXP-0043 IRT hold vs break OF")
     ap.add_argument("--config", default=str(ROOT / "research" / "experiments" / "EXP-0043.yaml"))
-    ap.add_argument("--out", default=str(ROOT / "results" / "EXP-0043"))
+    ap.add_argument(
+        "--month",
+        default=None,
+        help="Calendar month YYYY-MM (default from EXP-0043.yaml month_prefix)",
+    )
+    ap.add_argument("--out", default=None, help="Output dir (default results/EXP-0043[_YYYYMM])")
     ap.add_argument("--smoke", action="store_true")
     ap.add_argument("--max-align-err", type=float, default=None)
     ap.add_argument("--census-only", action="store_true", help="Skip OF scoring")
@@ -257,7 +262,13 @@ def main() -> None:
         exp = yaml.safe_load(f)
     cfg_root = load_config()
     pq_dir = Path(cfg_root["parquet_dir"])
-    out = Path(args.out)
+    month_str = args.month or str(exp.get("month_prefix", "2026-10"))
+    y_sel, m_sel = (int(x) for x in month_str.split("-")[:2])
+    if args.out:
+        out = Path(args.out)
+    else:
+        suffix = "" if (y_sel == 2026 and m_sel == 10) else f"_{y_sel}{m_sel:02d}"
+        out = ROOT / "results" / f"EXP-0043{suffix}"
     out.mkdir(parents=True, exist_ok=True)
 
     max_align = float(
@@ -265,7 +276,6 @@ def main() -> None:
         else exp.get("max_align_err_pts", 25.0)
     )
     exclude = set(exp.get("exclude_sessions", []))
-    month_prefix = str(exp.get("month_prefix", "2026-10"))  # not used directly; Oct via sid
 
     hb_cfg = HoldBreakConfig(
         pad_pts=float(exp.get("pad_pts", 3.0)),
@@ -290,7 +300,7 @@ def main() -> None:
     nq_irt = load_irt_csv(irt_paths["NQ"])
     nq_days = nq_irt.calendar_days()
 
-    # October sessions with parquet, exclude listed, with IRT day
+    # Month sessions with parquet + depth/mbo, exclude listed, with IRT day
     all_sids = list_sessions(pq_dir, exclude=exclude)
     eligible = []
     for sid in all_sids:
@@ -298,7 +308,7 @@ def main() -> None:
             y, m, d = session_id_to_ymd(sid)
         except Exception:
             continue
-        if y != 2026 or m != 10:
+        if y != y_sel or m != m_sel:
             continue
         if (y, m, d) not in nq_days:
             continue
@@ -312,7 +322,7 @@ def main() -> None:
         eligible.append(sid)
     if args.smoke:
         eligible = eligible[:1]
-    print(f"Eligible Oct sessions: {eligible} -> {out}", flush=True)
+    print(f"Eligible {month_str} sessions: {eligible} -> {out}", flush=True)
 
     universe_parts: list[pa.Table] = []
     skipped_align: list[str] = []
@@ -534,6 +544,7 @@ def main() -> None:
     report = {
         "experiment": "EXP-0043",
         "hypothesis": "H34",
+        "month": month_str,
         "window": "14:30-17:00 UK",
         "eligible_sessions": eligible,
         "skipped_align": skipped_align,
@@ -558,7 +569,8 @@ def main() -> None:
     lines = [
         "# EXP-0043 — IRT hold vs break orderflow (H34)",
         "",
-        f"UK **14:30–17:00**, NQ-only, October. Align gate median |IRT−Bookmap| < {max_align} pts.",
+        f"**Month:** {month_str} · UK **14:30–17:00**, NQ-only. "
+        f"Align gate median |IRT−Bookmap| < {max_align} pts.",
         f"Sessions used: `{report['sessions_used']}`. Skipped align: `{skipped_align}`.",
         "",
         "## Universe → sample",
