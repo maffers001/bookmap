@@ -4,6 +4,10 @@ Frozen signal: against_m04 + skip_er0.3 (EXP-0036_DIG4).
 Brackets: make_vol_bracket_rr(k=1, sl_r=1, tp_r=2), clip 4–40.
 1-tick slip, 0.25 pt/RT commission.
 
+Uses ``harness.load_pair`` single-feed filter (meta ``primary_alias``, usually
+Rithmic) so results match Bookmap live/replay. Merging TV+Rithmic aliases
+inflates tape density and is not used.
+
 Per day: n, WR, gross, net, equity_high (peak of running day P&L), end equity.
 Writes results/CFADE_MAY2026_SL1TP2/.
 """

@@ -104,8 +104,55 @@ class Pair:
         return self._path_es
 
 
+def _prefer_single_feed(table: pa.Table, parquet_dir: Path, sid: str, role: str) -> pa.Table:
+    """Keep one alias per role so research matches live (primary chart feed).
+
+    Extracts often record the same contract on two Bookmap aliases (e.g.
+    ``NQM6.CME@RITHMIC`` + ``NQM6@TV``) with *different* timestamps. Merging
+    them doubles tape density and invents fades that a single-feed live replay
+    can never see. Prefer ``meta.primary_alias`` when it matches ``role``, else
+    the densest alias (stable fallback).
+    """
+    if table.num_rows == 0 or "alias" not in table.column_names:
+        return table
+    aliases = table.column("alias").unique().to_pylist()
+    if len(aliases) <= 1:
+        return table
+    pick = None
+    meta_path = parquet_dir / f"session_id={sid}" / "meta.json"
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            meta = {}
+        primary = meta.get("primary_alias")
+        instruments = meta.get("instruments") or []
+        if role == "NQ" and primary in aliases:
+            pick = primary
+        elif role == "ES" and primary:
+            # Same venue/connection family as the NQ primary when present.
+            suffix = ""
+            if "@" in str(primary):
+                suffix = str(primary).split("@", 1)[1]
+            for a in aliases:
+                if suffix and str(a).endswith("@" + suffix):
+                    pick = a
+                    break
+            if pick is None:
+                for inst in instruments:
+                    if inst.get("role") == "ES" and inst.get("alias") in aliases:
+                        pick = inst["alias"]
+                        break
+    if pick is None:
+        # Densest alias.
+        al = table.column("alias").to_pylist()
+        pick = max(aliases, key=lambda a: al.count(a))
+    mask = np.array([a == pick for a in table.column("alias").to_pylist()])
+    return table.take(np.where(mask)[0])
+
+
 def load_pair(parquet_dir: Path, sid: str) -> Pair | None:
-    nq0 = _load_trades(parquet_dir, sid, "NQ")
+    nq0 = _prefer_single_feed(_load_trades(parquet_dir, sid, "NQ"), parquet_dir, sid, "NQ")
     if nq0.num_rows == 0:
         return None
     ts = nq0.column("ts_ns").to_numpy()
@@ -113,7 +160,7 @@ def load_pair(parquet_dir: Path, sid: str) -> Pair | None:
     nq = filter_window(nq0, b)
     if nq.num_rows == 0:
         return None
-    es0 = _load_trades(parquet_dir, sid, "ES")
+    es0 = _prefer_single_feed(_load_trades(parquet_dir, sid, "ES"), parquet_dir, sid, "ES")
     es = filter_window(es0, b) if es0.num_rows else es0
     return Pair(sid, nq, es, b)
 

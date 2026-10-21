@@ -88,6 +88,73 @@ public final class CorrFadeDetector {
         }
     }
 
+    /** Summary when a confirm expires without finding an NQ-still + ES-against bar. */
+    public static final class ExpireDetail {
+        public final int burstSide;
+        public final long stampNs;
+        public final int slotsChecked;
+        public final int nqStillHits;
+        public final int esAgainstHits;
+        public final int esPrintSlots;
+        public final int nqPrintSlots;
+        /** Lowest {@code burstSide × es_imb} among ES slots with volume (NaN if none). */
+        public final double bestEsSideImb;
+        /** Highest {@code burstSide × nq_imb} among NQ slots that met vol/trades (NaN if none). */
+        public final double bestNqSideImb;
+
+        ExpireDetail(PendingFade p) {
+            this.burstSide = p.burstSide;
+            this.stampNs = p.stampNs;
+            this.slotsChecked = p.slotsChecked;
+            this.nqStillHits = p.nqStillHits;
+            this.esAgainstHits = p.esAgainstHits;
+            this.esPrintSlots = p.esPrintSlots;
+            this.nqPrintSlots = p.nqPrintSlots;
+            this.bestEsSideImb = p.bestEsSideImb;
+            this.bestNqSideImb = p.bestNqSideImb;
+        }
+    }
+
+    /**
+     * One wall-clock slot while a confirm is pending. Fired only for partial
+     * matches (NQ-still without ES-against, or ES-against without NQ-still) so
+     * verbose replay logs stay readable.
+     */
+    public static final class SlotProbe {
+        public final long confirmStampNs;
+        public final long slotNs;
+        public final int burstSide;
+        public final boolean nqStill;
+        public final boolean esAgainst;
+        public final boolean nqPresent;
+        public final boolean esPresent;
+        public final double nqImb;
+        public final double nqVol;
+        public final int nqTrades;
+        public final double esImb;
+        public final double esVol;
+        public final double sideEsImb;
+        public final double sideNqImb;
+
+        SlotProbe(PendingFade p, long slotNs, TapeBarSeries.Bar nb, TapeBarSeries.Bar eb,
+                  boolean nqStill, boolean esAgainst) {
+            this.confirmStampNs = p.stampNs;
+            this.slotNs = slotNs;
+            this.burstSide = p.burstSide;
+            this.nqStill = nqStill;
+            this.esAgainst = esAgainst;
+            this.nqPresent = nb != null;
+            this.esPresent = eb != null && eb.totalVol() > 0;
+            this.nqImb = nb != null ? nb.imbalance() : Double.NaN;
+            this.nqVol = nb != null ? nb.totalVol() : 0.0;
+            this.nqTrades = nb != null ? nb.nTrades : 0;
+            this.esImb = this.esPresent ? eb.imbalance() : Double.NaN;
+            this.esVol = this.esPresent ? eb.totalVol() : 0.0;
+            this.sideEsImb = this.esPresent ? p.burstSide * eb.imbalance() : Double.NaN;
+            this.sideNqImb = nb != null ? p.burstSide * nb.imbalance() : Double.NaN;
+        }
+    }
+
     public interface Listener {
         default void onNqBurst(Burst b, boolean pendingEs) {}
 
@@ -95,7 +162,16 @@ public final class CorrFadeDetector {
 
         default void onConfirm(int side, long stampNs, long nqTsNs, long esTsNs, long lagMs) {}
 
+        /** @deprecated prefer {@link #onExpire(ExpireDetail)} */
+        @Deprecated
         default void onExpire(int burstSide, long stampNs) {}
+
+        default void onExpire(ExpireDetail d) {
+            onExpire(d.burstSide, d.stampNs);
+        }
+
+        /** Partial match while waiting for fade (verbose diagnostics). */
+        default void onSlotProbe(SlotProbe p) {}
 
         void onFade(FadeEvent e);
     }
@@ -109,6 +185,14 @@ public final class CorrFadeDetector {
         final double burstVol;
         final double burstImb;
         long nextSlotNs;
+        int slotsChecked;
+        int nqStillHits;
+        int esAgainstHits;
+        int esPrintSlots;
+        int nqPrintSlots;
+        int probesEmitted;
+        double bestEsSideImb = Double.NaN;
+        double bestNqSideImb = Double.NaN;
 
         PendingFade(int burstSide, long stampNs, long nqTsNs, long esTsNs, long lagMs, Burst nq) {
             this.burstSide = burstSide;
@@ -144,6 +228,18 @@ public final class CorrFadeDetector {
     private final ArrayDeque<PendingFade> pending = new ArrayDeque<>();
     private long lastFadeStampNs = -1;
 
+    /**
+     * Per-leg exchange-time watermarks. Multi-instrument replay can deliver an
+     * ES print that advances {@code nowNs} past a slot end before the NQ prints
+     * for that same slot arrive — evaluating then sees an empty/partial NQ bar
+     * and never revisits it (research builds bars from a fully sorted tape).
+     * A slot is only fade-ready once both watermarks (or a one-bar grace) clear
+     * the boundary.
+     */
+    private long nqWatermarkNs = -1;
+    private long esWatermarkNs = -1;
+    private final long slotReadyGraceNs;
+
     private long nqBurstCount;
     private long esBurstCount;
     private long confirmCount;
@@ -164,6 +260,8 @@ public final class CorrFadeDetector {
         this.syncNs = (long) (cfg.syncMs * 1_000_000.0);
         this.maxLagNs = cfg.maxEsLagMs > 0 ? (long) (cfg.maxEsLagMs * 1_000_000.0) : syncNs;
         this.waitNs = (long) (cfg.fadeMaxWaitSec * 1_000_000_000.0);
+        // One bar of grace for the quiet / late leg after the slot end.
+        this.slotReadyGraceNs = barNs;
     }
 
     public long nqBurstCount() {
@@ -199,6 +297,8 @@ public final class CorrFadeDetector {
         nqUnconfirmed.clear();
         pending.clear();
         lastFadeStampNs = -1;
+        nqWatermarkNs = -1;
+        esWatermarkNs = -1;
     }
 
     /** Burst.tsNs is slot end − 1 ns; research stamps at the slot boundary. */
@@ -206,7 +306,28 @@ public final class CorrFadeDetector {
         return burstTsNs + 1;
     }
 
+    /**
+     * Slot ready for fade check: wall clock past the end, and each leg has either
+     * printed past the end or been quiet long enough that late same-slot prints
+     * are unlikely (see watermark note above).
+     */
+    private boolean slotReady(long slotNs, long nowNs) {
+        long end = slotNs + barNs;
+        if (nowNs < end) {
+            return false;
+        }
+        boolean nqReady = nqWatermarkNs >= end || nowNs >= end + slotReadyGraceNs;
+        boolean esReady = esWatermarkNs >= end || nowNs >= end + slotReadyGraceNs;
+        return nqReady && esReady;
+    }
+
     public void onNqTrade(long tsNs, double price, int size, boolean buyAggressor) {
+        if (size <= 0) {
+            return;
+        }
+        if (tsNs > nqWatermarkNs) {
+            nqWatermarkNs = tsNs;
+        }
         nqBars.onTrade(tsNs, price, size, buyAggressor);
         Burst b = nqBurst.onTrade(tsNs, price, size, buyAggressor);
         if (b != null) {
@@ -217,6 +338,12 @@ public final class CorrFadeDetector {
     }
 
     public void onEsTrade(long tsNs, double price, int size, boolean buyAggressor) {
+        if (size <= 0) {
+            return;
+        }
+        if (tsNs > esWatermarkNs) {
+            esWatermarkNs = tsNs;
+        }
         esBars.onTrade(tsNs, price, size, buyAggressor);
         Burst b = esBurst.onTrade(tsNs, price, size, buyAggressor);
         if (b != null) {
@@ -310,15 +437,33 @@ public final class CorrFadeDetector {
         Iterator<PendingFade> it = pending.iterator();
         while (it.hasNext()) {
             PendingFade p = it.next();
-            while (nqBars.isComplete(p.nextSlotNs, nowNs)) {
+            while (slotReady(p.nextSlotNs, nowNs)) {
                 long slot = p.nextSlotNs;
                 if (waitNs > 0 && slot - p.stampNs > waitNs) {
                     it.remove();
-                    listener.onExpire(p.burstSide, p.stampNs);
+                    listener.onExpire(new ExpireDetail(p));
                     break;
                 }
                 TapeBarSeries.Bar nb = nqBars.get(slot);
                 TapeBarSeries.Bar eb = esBars.get(slot);
+                p.slotsChecked++;
+                if (nb != null) {
+                    p.nqPrintSlots++;
+                    double sideNq = p.burstSide * nb.imbalance();
+                    if (nb.nTrades >= cfg.nqStillMinTrades
+                            && (cfg.nqStillMinVol <= 0 || nb.totalVol() >= cfg.nqStillMinVol)) {
+                        if (Double.isNaN(p.bestNqSideImb) || sideNq > p.bestNqSideImb) {
+                            p.bestNqSideImb = sideNq;
+                        }
+                    }
+                }
+                if (eb != null && eb.totalVol() > 0) {
+                    p.esPrintSlots++;
+                    double sideEs = p.burstSide * eb.imbalance();
+                    if (Double.isNaN(p.bestEsSideImb) || sideEs < p.bestEsSideImb) {
+                        p.bestEsSideImb = sideEs;
+                    }
+                }
                 boolean nqStill = nb != null
                         && p.burstSide * nb.imbalance() >= cfg.nqStillMinImb
                         && (cfg.nqStillMinVol <= 0 || nb.totalVol() >= cfg.nqStillMinVol)
@@ -327,6 +472,12 @@ public final class CorrFadeDetector {
                         && eb.totalVol() > 0
                         && (cfg.esAgainstMinVol <= 0 || eb.totalVol() >= cfg.esAgainstMinVol)
                         && p.burstSide * eb.imbalance() <= cfg.esAgainstImbMax;
+                if (nqStill) {
+                    p.nqStillHits++;
+                }
+                if (esAgainst) {
+                    p.esAgainstHits++;
+                }
                 if (nqStill && esAgainst) {
                     long fadeStamp = slot + barNs;
                     it.remove();
@@ -336,6 +487,11 @@ public final class CorrFadeDetector {
                         listener.onFade(new FadeEvent(p, fadeStamp, nb, eb, nowNs));
                     }
                     break;
+                }
+                // Partial match → probe (cap per pending confirm to limit log volume).
+                if ((nqStill || esAgainst) && p.probesEmitted < 8) {
+                    p.probesEmitted++;
+                    listener.onSlotProbe(new SlotProbe(p, slot, nb, eb, nqStill, esAgainst));
                 }
                 p.nextSlotNs = slot + barNs;
             }

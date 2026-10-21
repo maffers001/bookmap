@@ -214,7 +214,9 @@ JAR: `bookmap-addon/build/libs/bookmap-orderflow-cfade.jar` (contains every add-
 
 **Trading / ops params:** Enable trading (default **off**), Use selected account, Order size (default 1), **Kill switch: max session loss pts** (default 150 — no more orders that UK day once realised net ≤ −150; signals still plot), Verbose log.
 
-Logs: `CFADE CONFIRM#…`, `CFADE FADE PASS|REJECT reason=… wait_ms= es_imb_x= er60= detectDelayMs=`, `CFADE SIGNAL …`, `CFADE ORDER …`, `CFADE TRADE CLOSED … pnl= session net=`, `CFADE KILL SWITCH`. Reject reasons: `outside_window`, `regime_er_skip`, `signal_cooldown`, `not_flat(...)`, `longs_disabled` / `shorts_disabled`.
+Logs: `CFADE CONFIRM#…`, `CFADE PROBE …` (partial NQ-still / ES-against while waiting), `CFADE EXPIRE …` (slot counts + best `side*esImb` / `side*nqImb`), `CFADE AGG sample …` (first tape prints after realtime — aggressor polarity), `CFADE FADE PASS|REJECT …`, `CFADE SIGNAL …`, `CFADE ORDER …`, `CFADE TRADE CLOSED …`, `CFADE KILL SWITCH`. Reject reasons: `outside_window`, `regime_er_skip`, `signal_cooldown`, `not_flat(...)`, `longs_disabled` / `shorts_disabled`.
+
+**Replay parity note:** fade slots wait for both NQ and ES watermarks (or +1 bar grace) before evaluating — otherwise an ES print can close a 100 ms slot before NQ prints for that slot arrive, and the confirm expires with `nqStillHits=0` while research (sorted full tape) still has the fade.
 
 **Offline parity (2026-10-19):** `CorrFadeDetector` + `RegimeTracker` replayed on the 23 research sessions reproduce the research fade list **132 / 132** exactly (stamp, side, `es_imb_x`, `wait_ms`, close) and identical `er60` / bracket at every fade.
 

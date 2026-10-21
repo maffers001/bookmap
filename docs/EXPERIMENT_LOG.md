@@ -143,7 +143,7 @@
 
 - Runner: `python -m research.run_cfade_may` → `results/CFADE_MAY2026_SL1TP2/`.
 - 17 May sessions, UK 14:30–17:00, against_m04 + skip_er0.3, vol RR SL1/TP2, 1-tick + 0.25 pt/RT.
-- n=151 WR=0.46 net **+349.8**; days+ 9/17; portfolio high **+599.1** / end +349.8 / maxDD 249. Worst days: 290526 −172, 180526 −145.
+- **Feed fix:** extracts often have both `NQM6@TV` + `NQM6.CME@RITHMIC` with non-aligned timestamps; merging invented fades. `harness.load_pair` now keeps **primary alias only** (matches live/replay). Re-run: n=95 net **+335.1**; **210526 n=6 net −45.9** (matches Bookmap replay trade count). Prior merged figure n=151 / +349.8 was inflated.
 
 ### 2026-10-19 — Audit: ideas discounted vs EXP-0008
 

@@ -220,6 +220,10 @@ public class CorrFadeAutoTradeModule implements
     private double pips = 0.25;
     private double esPips = 0.25;
     private volatile boolean realtimeStarted;
+    /** First few tape prints after realtime — verify aggressor polarity vs extract. */
+    private int aggressorSampleLeft = 8;
+    /** Warn once if a secondary NQ alias prints (research/live both use primary only). */
+    private boolean warnedSecondaryNq;
 
     private final Map<String, InstrumentState> byAlias = new HashMap<>();
     private CorrFadeDetector detector;
@@ -392,11 +396,39 @@ public class CorrFadeAutoTradeModule implements
             }
 
             @Override
-            public void onExpire(int burstSide, long stampNs) {
-                if (Boolean.TRUE.equals(verboseLog)) {
-                    Log.info(String.format("CFADE confirm side=%d %s expired (no ES-against bar)",
-                            burstSide, formatTime(stampNs)));
+            public void onExpire(CorrFadeDetector.ExpireDetail d) {
+                if (!Boolean.TRUE.equals(verboseLog)) {
+                    return;
                 }
+                Log.info(String.format(
+                        "CFADE EXPIRE side=%d stamp=%s slots=%d nqPrint=%d esPrint=%d "
+                                + "nqStillHits=%d esAgainstHits=%d bestSide*nqImb=%s bestSide*esImb=%s "
+                                + "(need nqStill>=%.2f and side*esImb<=%.2f)",
+                        d.burstSide, formatTime(d.stampNs), d.slotsChecked, d.nqPrintSlots, d.esPrintSlots,
+                        d.nqStillHits, d.esAgainstHits,
+                        fmtOpt(d.bestNqSideImb), fmtOpt(d.bestEsSideImb),
+                        c.nqStillMinImb, c.esAgainstImbMax));
+            }
+
+            @Override
+            public void onSlotProbe(CorrFadeDetector.SlotProbe p) {
+                if (!Boolean.TRUE.equals(verboseLog)) {
+                    return;
+                }
+                // nqStill without esAgainst is the usual miss; also log the reverse.
+                String why = p.nqStill && !p.esAgainst
+                        ? (p.esPresent
+                        ? String.format("ES_not_against side*esImb=%.2f (need<=%.2f)", p.sideEsImb, c.esAgainstImbMax)
+                        : "ES_no_prints")
+                        : String.format("NQ_not_still side*nqImb=%s n=%d vol=%.0f",
+                        fmtOpt(p.sideNqImb), p.nqTrades, p.nqVol);
+                Log.info(String.format(
+                        "CFADE PROBE confirm=%s slot=%s burstSide=%+d %s | "
+                                + "nqStill=%s nq_imb=%s nq_vol=%.0f nq_n=%d | "
+                                + "esAgainst=%s es_imb=%s es_vol=%.0f",
+                        formatTime(p.confirmStampNs), formatTime(p.slotNs), p.burstSide, why,
+                        p.nqStill, fmtOpt(p.nqImb), p.nqVol, p.nqTrades,
+                        p.esAgainst, fmtOpt(p.esImb), p.esVol));
             }
 
             @Override
@@ -404,8 +436,21 @@ public class CorrFadeAutoTradeModule implements
                 onFadeEvent(e);
             }
         });
-        Log.info(String.format("CFADE detector built (%s) bar=%dms nqProg=%.2f esProg=%.2f esImbMax=%.2f wait=%.1fs",
+        Log.info(String.format(
+                "CFADE detector built (%s) bar=%dms nqProg=%.2f esProg=%.2f esImbMax=%.2f wait=%.1fs "
+                        + "slotReady=dualWatermark+1barGrace",
                 via, c.barMs, c.nqMinProgress, c.esMinProgress, c.esAgainstImbMax, c.fadeMaxWaitSec));
+        double floor = bracketMinPts == null ? 4.0 : bracketMinPts;
+        double cap = bracketMaxPts == null ? 40.0 : bracketMaxPts;
+        if (floor != 4.0 || cap != 40.0) {
+            Log.info(String.format(
+                    "CFADE WARN bracket clip floor=%.1f cap=%.1f (live default / backtest sl1tp2 uses 4–40)",
+                    floor, cap));
+        }
+    }
+
+    private static String fmtOpt(double v) {
+        return Double.isNaN(v) ? "na" : String.format("%.2f", v);
     }
 
     @Override
@@ -458,6 +503,7 @@ public class CorrFadeAutoTradeModule implements
         realtimeStarted = true;
         lastSignalNs = 0;
         flatLocked = false;
+        aggressorSampleLeft = 8;
         refreshTradingAccountId("realtime");
         Log.info(String.format(
                 "CFADE realtime start — orders %s account=%s pos=%d halted=%s sessionNet=%.2f",
@@ -491,10 +537,31 @@ public class CorrFadeAutoTradeModule implements
         InstrumentState state = byAlias.computeIfAbsent(currentAlias, a -> new InstrumentState());
         state.lastPrice = price;
         long ts = nowNs > 0 ? nowNs : System.nanoTime();
+        // Bookmap: isBidAggressor true ⇒ aggressive buy (matches SessionExtractor is_buy_aggressor).
         boolean buyAgg = tradeInfo.isBidAggressor;
+
+        if (realtimeStarted && aggressorSampleLeft > 0
+                && ("ES".equals(state.role) || isPrimaryNq(state))) {
+            aggressorSampleLeft--;
+            double chartPx = PriceTicks.toChartPoints(price, state.instrumentPips);
+            Log.info(String.format(
+                    "CFADE AGG sample role=%s isBidAggressor=%s → buyAgg=%s pxApi=%.2f pxChart=%.2f sz=%d time=%s",
+                    state.role, tradeInfo.isBidAggressor, buyAgg, price, chartPx, size, formatTime(ts)));
+        }
 
         if ("ES".equals(state.role)) {
             detector.onEsTrade(ts, price, size, buyAgg);
+            return;
+        }
+        if ("NQ".equals(state.role) && currentAlias != null && primaryAlias != null
+                && !currentAlias.equals(primaryAlias)) {
+            if (!warnedSecondaryNq) {
+                warnedSecondaryNq = true;
+                Log.info(String.format(
+                        "CFADE NQ secondary alias ignored alias=%s primary=%s "
+                                + "(single-feed parity with research; do not merge TV+Rithmic tape)",
+                        currentAlias, primaryAlias));
+            }
             return;
         }
         if (!isPrimaryNq(state)) {
