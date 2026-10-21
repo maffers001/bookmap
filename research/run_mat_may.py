@@ -1,13 +1,15 @@
 """MAT vol k=1 OOS on May 2026 sessions (UK 14:30–17:00).
 
 Frozen base: trend+VWAP, causal ES, 1-tick slip, 0.25 pt/RT, vol k=1.
+Optional risk overlay: --skip-range 175 (make_daytype_skip max_range).
 Per day: n, WR, gross, net, equity_high (peak of running day P&L), end equity.
-Writes results/MAT2_MAY2026_VOLK1/.
+Writes results/MAT2_MAY2026_VOLK1/ or ..._SKIP_RANGE{R}/.
 
 Tape: primary alias only (excludes NQM6@TV when dual-feed extracts exist).
 """
 from __future__ import annotations
 
+import argparse
 import json
 from datetime import datetime, time, timezone
 from pathlib import Path
@@ -19,6 +21,7 @@ import pyarrow as pa
 from research.backtest.mat_sim import (
     MatSimConfig,
     combine_gates,
+    make_daytype_skip,
     make_trend_mode,
     make_vol_bracket,
     make_vwap_side,
@@ -79,12 +82,42 @@ def day_equity_stats(trades, commission: float) -> dict:
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--skip-range",
+        type=float,
+        default=0.0,
+        help="If >0, add make_daytype_skip(max_range=R) on top of trend+VWAP "
+        "(e.g. 175). Writes to MAT2_MAY2026_VOLK1_SKIP_RANGE{R}/.",
+    )
+    args = ap.parse_args()
+
     cfg = load_config()
     pq = Path(cfg["parquet_dir"])
-    out = Path(cfg["results_dir"]) / "MAT2_MAY2026_VOLK1"
+    if args.skip_range > 0:
+        tag = f"SKIP_RANGE{int(args.skip_range)}" if args.skip_range == int(args.skip_range) else f"SKIP_RANGE{args.skip_range:g}"
+        out = Path(cfg["results_dir"]) / f"MAT2_MAY2026_VOLK1_{tag}"
+        base_label = f"vol_k1 causal trend+VWAP skip_range{args.skip_range:g} 1-tick commission 0.25"
+        title = f"# MAT2 May 2026 OOS — vol k=1 + skip_range{args.skip_range:g}"
+        base_md = (
+            f"Frozen base + **skip_range{args.skip_range:g}** "
+            f"(`make_daytype_skip(max_range={args.skip_range:g})`): "
+            f"**vol k=1**, causal ES, trend=1 + VWAP, UK **14:30–17:00**, "
+            f"1-tick slip, commission {COMMISSION} pt/RT."
+        )
+    else:
+        out = Path(cfg["results_dir"]) / "MAT2_MAY2026_VOLK1"
+        base_label = "vol_k1 causal trend+VWAP 1-tick commission 0.25"
+        title = "# MAT2 May 2026 OOS — vol k=1"
+        base_md = (
+            "Frozen base: **vol k=1**, causal ES, trend=1 + VWAP, UK **14:30–17:00**, "
+            f"1-tick slip, commission {COMMISSION} pt/RT."
+        )
     out.mkdir(parents=True, exist_ok=True)
 
     gate = combine_gates(make_trend_mode("with"), make_vwap_side(True))
+    if args.skip_range > 0:
+        gate = combine_gates(gate, make_daytype_skip(max_range=float(args.skip_range)))
     br = make_vol_bracket(1.0)
     sim_cfg = MatSimConfig(slip_ticks=1.0, commission_pts_rt=COMMISSION, es_stamp="causal")
 
@@ -142,7 +175,8 @@ def main() -> None:
     days_pos = sum(1 for r in rows if (r.get("net") or 0) > 0)
     report = {
         "window": "UK 14:30-17:00",
-        "base": "vol_k1 causal trend+VWAP 1-tick commission 0.25",
+        "base": base_label,
+        "skip_range": args.skip_range if args.skip_range > 0 else None,
         "sessions_requested": MAY,
         "missing_parquet": missing,
         "summary": {
@@ -159,10 +193,9 @@ def main() -> None:
     }
 
     md = [
-        "# MAT2 May 2026 OOS — vol k=1",
+        title,
         "",
-        "Frozen base: **vol k=1**, causal ES, trend=1 + VWAP, UK **14:30–17:00**, "
-        f"1-tick slip, commission {COMMISSION} pt/RT.",
+        base_md,
         "",
         "**Tape:** primary alias only (excludes `NQM6@TV` dual-feed contamination).",
         "",

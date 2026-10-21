@@ -52,8 +52,26 @@
 | EXP-0040 | H31 MAT bounce at significant S/R | ran — **reject / empty** | 32d train + 17d May OOS | gated bounce_5 n=2; see notes |
 | EXP-0040_NOGATE | H31 bounce, no trend/VWAP | ran — **reject / thin** | 32d + May | bounce_5 n=5 train +5.5 / May −20 — no ship |
 | EXP-0041 | H32 stop-run fingerprint | ran — **visual freeze / no auto-trade** | 49d UK 14:30–17:00 (May OOS) | n=44 hit10 0.41≈null 0.39; see notes |
+| EXP-0042 | H33 IRT dual-level correlated S/R | **dig candidate** (shallow reclaim) | 14d Oct + Sep aligned | shallow vol_k1 +612 Oct / +128 Sep; see notes |
 
 ## Run notes
+
+### 2026-10-21 — EXP-0042 IRT dual-level S/R (H33)
+
+- Levels from `data/irt/`: LVN2/3, `HW_MT_DOP_NY`, 2nd `dVPOC`. Cross-kind dual (any×any). Window UK **14:30–21:00**. ES: `ESZ6_ALL.csv`. Runner: `python -m research.irt_lvn.run_exp_0042`.
+- Converted raw `201026` → parquet. Oct now **14d** (`011026`…`201026`).
+- **Oct P&L:** reclaim vol_k1 n=102 net **+364** / fixed 12.5/30 **+264**; **shallow&lt;8** vol_k1 n=66 net **+612** (11/13 days+, tpd 5.1, maxDD 60) / fixed **+348**; touch fade vol_k1 **−434**.
+- **Kind-pair P&L (shallow vol_k1):** `LVN×LVN` n=36 **+374**; `LVN×DOP` n=10 **+141**; `DOP×LVN` n=7 **+87**; `DOP×DOP` n=9 +23. NQ-kind shallow: LVN +495 / DOP +111 / dVPOC +16.
+- **Sep aligned** (`150926`–`300926`; early Sep skip ~297pt roll): shallow vol_k1 n=41 net **+128** (6/8); fixed shallow also reported in `EXP-0042_202609`. Soft confirm vs Oct.
+- **Decision: dig candidate** (shallow reclaim). CD/orderflow still deferred. May untouched. Results: `results/EXP-0042/`, `results/EXP-0042_202609/`.
+
+### 2026-10-21 — EXP-0042 shallow bracket dig (HVN TP)
+
+- Runner: `python -m research.irt_lvn.run_shallow_dig --month YYYY-MM`. Same shallow reclaim entry; exit variants.
+- **HVN algo:** TP = nearest NQ HVN in profit direction − 2pt (cap 80), only if gap ≥ min_gap; SL = fixed 10/12/15 or beyond-level+8 or half-gap.
+- **Oct:** baselines win — `vol_rr3` +695 / `vol_rr2` +644 / `vol_k1` +612 (maxDD 60). Best HVN `hvn_g30_sl15` n=30 **+255** (weaker). Median HVN gap ~53pt.
+- **Sep aligned:** `vol_k1` +128 still best; all HVN arms **negative** (best −72). HVN targeting does **not** confirm OOS.
+- Results: `results/EXP-0042_SHALLOW_DIG_202610/`, `…_202609/`.
 
 ### 2026-10-21 — EXP-0041 stop-run fingerprint (H32)
 
@@ -90,10 +108,17 @@
 - **Verdict: reject / park.** Do not gate MAT to swing breaks; May held out, unread until end.
 - Results: `results/EXP-0039/`.
 
+### 2026-10-21 — May 2026 OOS + skip_range175 risk overlay
+
+- Same frozen base as May OOS (causal, trend+VWAP, vol k=1) plus `make_daytype_skip(max_range=175)` — the 23d overlay that looked best by DD/days+ (`MAT2_OVERLAYS_VOLK1`).
+- Runner: `python -m research.run_mat_may --skip-range 175` → `results/MAT2_MAY2026_VOLK1_SKIP_RANGE175/`.
+- **vs ungated May** (`MAT2_MAY2026_VOLK1`): n 457→**247** (−46%); net **−264 → −186** (+78 pts); days+ 7→**9**/17; port maxDD 528→**466**; port high +104→+64 (never recovered as far).
+- Still a **losing month**. Gate cuts exposure and softens the loss but does **not** flip May; do not ship as a May rescue. Matches the EDGE_RANKING pre-registered expectation (DD/exposure cut, not a sign flip).
+
 ### 2026-10-21 — May 2026 OOS (vol k=1, UK 14:30–17:00)
 
 - Converted trades-only for 17 May sessions (`*0526`); ran frozen base (causal, trend+VWAP, vol k=1, 1-tick, 0.25 pt/RT).
-- Results: `results/MAT2_MAY2026_VOLK1/`. n=516 net **−132.8**, days+ 7/17, portfolio high +104 then underwater; end −133. Per-day **equity_high** (peak running P&L from flat at 14:30) in summary.
+- Results: `results/MAT2_MAY2026_VOLK1/`. n=457 net **−263.9**, days+ 7/17, portfolio high +104 then underwater; end −264. Per-day **equity_high** (peak running P&L from flat at 14:30) in summary.
 - May is a **losing OOS month** on this base — do not retune; keep as holdout evidence.
 
 ### 2026-10-20 — EXP-0037 HV Extreme Move (vol brackets + staged backtest)

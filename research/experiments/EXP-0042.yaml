@@ -1,0 +1,36 @@
+name: EXP-0042
+hypothesis: H33
+title: IRT dual-level correlated S/R (LVN / DOP / dVPOC)
+description: >
+  Investor/RT established levels (LVN2/3, HW_MT_DOP_NY, 2nd dVPOC) as
+  correlated ES+NQ S/R. Cross-kind dual sync allowed. Phase 1 diagnostic
+  (hold vs fail by pierce depth) plus reclaim-fade P&L on NQ. UK 14:30–21:00.
+  October discovery sample; May held out / unused. No CD MA or orderflow in v1.
+
+detector: irt_dual_level
+irt_dir: data/irt
+# ES prefers ESZ6_ALL.csv; NQ prefers @NQ#_ALL.csv (see load_irt.default_irt_paths)
+month_prefix: "2026-10"
+sync_ms_sweep: [2000, 5000, 10000]
+sync_ms_primary: 5000
+touch_cooldown_ms: 8000
+decision_horizon_ms: 120000
+nq_pierce_typical: 12.0
+nq_pierce_fail: 35.0
+nq_reject_away: 15.0
+nq_pad_pts: 3.0
+es_pierce_typical: 4.0
+es_pierce_fail: 12.0
+es_reject_away: 5.0
+es_pad_pts: 1.25
+window_start: "14:30"
+window_end: "21:00"
+horizons_ms: [10000, 30000, 60000]
+point_targets: [5, 10, 20]
+commission_pts_rt: 0.25
+slip_ticks: 1.0
+signal_cooldown_sec: 5.0
+# Exploratory fixed bracket alongside vol k=1 (MAT yardstick)
+fixed_tp_pts: 12.5
+fixed_sl_pts: 30.0
+shallow_pierce_max: 8.0

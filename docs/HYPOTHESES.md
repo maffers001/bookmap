@@ -306,3 +306,17 @@ n=33 net +62 (train +21 / May +41) but event-study bar fails and train
 `loo_neg=4`. **Freeze thresholds for visual Stop-Run Bookmap module; no
 auto-trade.** Defaults: pierce=2, window=2000ms, min_vol=25, min_imb=0.60,
 min_sweeps=1, min_aggr=3, min_score=2.
+
+## H33 — IRT dual-level correlated S/R
+
+When NQ and ES both approach any Investor/RT established level (LVN2/3,
+`HW_MT_DOP_NY` daily open, developing POC / 2nd `dVPOC`) within a short sync
+window, short-horizon **hold / reject** on NQ beats null and NQ-only. Level
+kinds need not match (e.g. NQ DOP × ES LVN). Distinct from H7 (Bookmap causal
+session LVNs). Phase 1: diagnostic pierce hold/fail + reclaim-fade P&L; CD MA
+and orderflow deferred.
+
+**Test:** EXP-0042. **Result (14d Oct incl. `201026`):** reclaim vol_k1 +364 /
+fixed12.5/30 +264; **shallow&lt;8** vol_k1 n=66 net **+612** (11/13 days+).
+Kind-pair shallow: `LVN×LVN` +374, `LVN×DOP` +141. **Sep aligned** shallow
++128 (6/8) — soft confirm. Dig candidate; CD/orderflow deferred. May untouched.
