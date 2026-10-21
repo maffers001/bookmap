@@ -320,3 +320,19 @@ and orderflow deferred.
 fixed12.5/30 +264; **shallow&lt;8** vol_k1 n=66 net **+612** (11/13 days+).
 Kind-pair shallow: `LVN×LVN` +374, `LVN×DOP` +141. **Sep aligned** shallow
 +128 (6/8) — soft confirm. Dig candidate; CD/orderflow deferred. May untouched.
+
+## H34 — IRT level hold vs break orderflow
+
+At NQ IRT key levels (LVN2/3, DOP, 2nd dVPOC), after a ≥30 pt approach
+impulse in UK 14:30–17:00, **orderflow in the ±2s around first touch** differs
+between path holds (≥30 pt reject, pierce &lt;15) and breaks (≥15 pierce + ≥30
+extension). Pre-registered scores: Take, Stack, Tape, Attract/Repel — oriented
+beyond vs hold-side so resistance and support share one scale. Descriptive
+only; not a P&amp;L book.
+
+**Test:** EXP-0043. **Result (13d Oct depth+mbo):** universe HOLD 67 / BREAK 61 /
+AMB 78; sampled 63/51/72. **TakeScore** median gap break−hold **+0.38**
+(cliffs δ 0.30, d 0.53, LOO-stable); **TapeScore** +0.41 (δ 0.20, LOO-stable);
+StackScore weak (+0.16); AttractRepel mostly null (tracker near-BBO). Hold→Amb→Break
+gradient on Take/Tape. Impulse tertiles: Take still separates in low/high;
+Tape collapses in high-impulse. See `results/EXP-0043/`.

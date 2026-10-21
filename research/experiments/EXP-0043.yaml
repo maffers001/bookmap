@@ -1,0 +1,34 @@
+name: EXP-0043
+hypothesis: H34
+title: IRT level hold vs break orderflow
+description: >
+  October NQ sample of IRT key-level holds vs breaks (30pt impulse in,
+  30pt reject vs 30pt continue). Score orderflow (take, stack, tape,
+  attract/repel) in pre/at-touch windows. Descriptive only — no P&L.
+
+detector: irt_hold_break_of
+month_prefix: "2026-10"
+window_start: "14:30"
+window_end: "17:00"
+pad_pts: 3.0
+impulse_pts: 30.0
+impulse_lookback_ms: 60000
+decision_horizon_ms: 120000
+reject_pts: 30.0
+pierce_max_hold: 15.0
+pierce_min_break: 15.0
+extension_break_pts: 30.0
+cluster_tol_pts: 5.0
+cooldown_ms: 30000
+max_align_err_pts: 25.0
+sample_n_per_class: 100
+sample_min_per_class: 50
+sample_seed: 42
+max_per_session: 12
+large_size: 50
+large_size_footnote: 100
+tick_radius: 8
+far_band_ticks: 20
+z_lookback_ms: 1800000
+exclude_sessions:
+  - "191026"  # no depth/mbo parquet
