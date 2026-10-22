@@ -1,0 +1,76 @@
+name: EXP-0044
+hypothesis: H35
+title: Dwell + intact break-side wall (optional dual take trigger)
+description: >
+  After an IRT key-level touch (same detector as EXP-0043), require a vol-scaled
+  pierce or touch-only dwell near the level for ≥15 s (deadline 90 s) with the
+  break-side stack still largely intact. Arm A fades at first eligibility;
+  Arm B waits for a hold-side large take on NQ or ES. Protective post-pierce
+  stacking is a dig gate selected on Oct+Sep only. May is the OOS holdout.
+  Does not retune EXP-0043 StackConsume.
+
+# Universe inherited from EXP-0043
+parent_config: EXP-0043.yaml
+month_prefix: "2026-10"
+window_start: "14:30"
+window_end: "17:00"
+pad_pts: 3.0
+impulse_pts: 30.0
+impulse_lookback_ms: 60000
+decision_horizon_ms: 120000
+reject_pts: 30.0
+pierce_max_hold: 15.0
+pierce_min_break: 15.0
+extension_break_pts: 30.0
+cluster_tol_pts: 5.0
+cooldown_ms: 30000
+dop_exclude_first_min: 5.0
+max_align_err_pts: 25.0
+basis_shift_mad_max_pts: 2.0
+placebo_shift_pts: 40.0
+sample_n_per_class: 100
+sample_min_per_class: 50
+sample_seed: 42
+max_per_session: 12
+exclude_sessions: []
+
+# Depth / large size (same as EXP-0043)
+large_size_pct: 99.9
+large_size_min: 15
+tick_radius: 8
+far_band_ticks: 20
+z_lookback_ms: 1800000
+
+# Vol unit = median NQ minute-range over prior vol_lookback_min RTH minutes
+vol_lookback_min: 30
+pierce_min_k: 1.0
+pierce_min_floor: 6.0
+pierce_min_cap: 20.0
+pierce_max_k: 2.0
+pierce_max_floor: 12.0
+pierce_max_cap: 30.0
+band_k: 0.75
+band_floor: 6.0
+band_cap: 18.0
+
+# Dwell
+min_dwell_ms: 15000
+max_dwell_ms: 90000
+consume_max: 0.25
+stack_remain_min: 0.5
+protect_consume_max: 0.2
+
+# Arm B large-take
+es_large_pct: 99.0
+large_take_sync_ms: 2000
+
+# Bracket (frozen)
+tp_pts: 30.0
+sl_pts: 15.0
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+horizon_ms: 120000
+
+# Evaluation
+oos_month: "2026-05"
+train_months: ["2026-10", "2026-09"]

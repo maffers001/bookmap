@@ -370,3 +370,24 @@ on May, < 1 SE → not adopted. Baseline-grid fix in the same pass moved the
 frozen numbers slightly: Oct +406 / Sep +142 / **May +160** (n 192, 8/17,
 maxDD 277). **Status unchanged: soft confirm; nothing found that cuts the
 AMB/BREAK false fades.**
+
+## H35 — Dwell + intact break-side wall (optional dual take)
+
+After an IRT key-level first touch (same universe as H34), a **vol-scaled**
+pierce (or touch-only) followed by **≥15 s** of price staying near the level
+with the **break-side resting stack still largely intact** predicts a fade.
+Deeper pierces (often 10–15 pt on LVNs) are allowed within a vol cap. Optional
+entry: first **hold-side large take** on NQ or ES after eligibility. Dig:
+post-pierce **protective stacking** (new hold-side MBO adds inside the pierce
+extreme that do not fill). Primary claim: *longer* unbroken dwell → higher
+hold rate / better fade P&L.
+
+**Test:** EXP-0044. Runner: `python -m research.irt_lvn.run_dwell_hold`
+then `--dig`. Train Oct+Sep; May OOS.
+**Result:** Duration claim **fails on train** (hold_rate flat ~0.30 across
+15/20/30/45 s survival; avg not monotone). Arm A May net +241 (beats placebo
+−64) but Oct Arm A ≪ placebo (+2.5 vs +252) — not level-specific on train.
+Arm B thin (n≤4/month) and not adopted; protect-stack not selected (train avg
+worse than Arm A). **Status: reject / park** the longer-dwell theory as stated.
+The short +2 s StackConsume fade (H34) remains the better dig. See
+`results/EXP-0044_DWELL/`.

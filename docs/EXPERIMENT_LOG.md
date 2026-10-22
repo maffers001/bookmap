@@ -56,6 +56,7 @@
 | EXP-0043 | H34 IRT hold vs break orderflow | **null pre-touch; StackConsume fade soft-confirms May** | 14d Oct + 15d Sep + 17d May depth | freeze fade StackConsume≤−0.25 tp30/sl15: +406/+142/+160 (post grid fix); AMB dilutes; see notes |
 | EXP-0043_STACK_FADE | H34 frozen dig (May OOS) | **soft confirm** | 17d May OOS (Oct/Sep context) | n=192 net **+160** (8/17, maxDD 277; was +131 pre grid fix); HOLD +1475 / BREAK −788 / AMB −527; see notes |
 | EXP-0043_CONFIRM_DIG | H34 follow-ups (b) approach-leg book, (a) confirm sweep + 2nd filter | **null (b); (a) robust to k, no filter adopted** | Oct+Sep train, May frozen | StackTrend_pre ≈ placebo; fade +ve 12/12 k×month; `after 15 min` Δavg +0.29 < 1 SE on May; see notes |
+| EXP-0044 | H35 dwell + intact break-side wall | **reject / park** | 14d Oct + 14d Sep + 17d May | duration claim fails train; Arm A May +241 but Oct ≪ placebo; Arm B/protect null; see notes |
 
 ## Run notes
 
@@ -111,6 +112,15 @@
 - **(a) Confirmation-time sweep** (fade when `StackConsume_{k}s ≤ −0.25`, matching consume window, TP30/SL15): net Oct / Sep / May — 1 s: 373 / 219 / 96; **2 s (frozen): 406 / 142 / 160**; 3 s: 333 / 47 / 67; 5 s: 390 / 53 / 177. **12/12 cells positive**, best k differs by month (2 / 1 / 5 s) → the fade is robust to confirmation time; 2 s stays frozen, no retune.
 - **(a) Second filter on the +2 s fade — selected on Oct+Sep pooled only, May read once:** 12 candidates (thr −0.5, px on hold side, pierce ≤ 2 / = 0, Take_at ≤ 0, near_sum_z ≥ 0, consume_frac = 0, StackTrend_pre ≤ 0, time-of-day, level kind). Best train avg with n ≥ 60: `after 15 min` 3.40 vs base 2.98 (n 113). **May:** n 157 net 176 avg **1.12 ± 1.63** vs base 192 / 160 / **0.84 ± 1.46**; maxDD 225 vs 277; days+ 8/16 vs 8/17. Δavg +0.29 pt < 1 SE → **not adopted**. Appendix (not for selection): on May `pierce_at_tc == 0` (+265, maxDD 153) and `consume_frac == 0` (+268) look best but ranked 9th/12th on train — a May-only pick would be selection on OOS. `near_sum_z ≥ 0` is −72 on train, +137 on May: the "real wall" filter is unstable.
 - **Decision: both follow-ups null for the pre-touch question; the StackConsume-intact fade stays a soft confirm with no second filter.** Nothing in the book over the approach leg or in a longer/shorter confirmation window cuts the AMB/BREAK false fades out-of-sample. Next steps that do not retune on May: forward paper on new depth days; dual-ES context as a filter (outside this experiment's data). Runner: `python -m research.irt_lvn.run_confirm_dig` (reads the three months' `events.parquet`). Results: `results/EXP-0043_CONFIRM_DIG/`.
+
+### 2026-10-22 — EXP-0044 dwell + intact break-side wall (H35)
+
+- **Design:** same IRT hold/break universe as EXP-0043. Vol unit `u` = median NQ minute-range (prior 30 RTH min). Pierce min `clip(1·u,6,20)`, pierce max eligible `clip(2·u,12,30)`, dwell band `clip(0.75·u,6,18)`. Strata touch_dwell / pierce_dwell (pierce pocket allows beyond-side up to max pierce). Break-side intact: consume ≤0.25 of reference stack and remaining ≥0.5×. Arm A: fade at first ≥15 s eligibility (deadline 90 s). Arm B: + hold-side large take NQ or ES. Protect dig: post-extreme hold-side MBO net add with consume ≤0.2. Bracket TP30/SL15. Placebo ±40. Duration claim = survival at 15/20/30/45 s (enter if still intact). Train Oct+Sep; May OOS. Runner: `python -m research.irt_lvn.run_dwell_hold [--month] [--dig]`.
+- **Arm A:** Oct n=28 net **+2.5** (7/11, maxDD 126) vs placebo **+252**; Sep n=22 net **+53** vs placebo +25; May OOS n=38 net **+241** (8/14, maxDD 64) vs placebo **−64**. May looks good and level-specific; Oct is the opposite (real ≪ placebo).
+- **Duration claim (train):** hold_rate 0.30 / 0.30 / 0.30 / 0.29 at 15/20/30/45 s; avg 1.11 / 2.92 / −2.43 / 3.61 — **not monotone**. May survival also fails longer→better (hold 0.40→0.25 at 45 s).
+- **Arm B:** n=4/3/4 by month; May avg −11 vs Arm A +6.3 — **not adopted**. Protect gate train n=7 avg −8.1 < Arm A — **not selected**.
+- **vs StackConsume +2 s fade:** Oct/Sep Arm A much weaker; May Arm A +241 vs StackConsume +160 (different entry set — not a retune of H34).
+- **Decision: reject / park H35.** The registered “longer intact dwell → more hold” claim fails on train; Arm A is not stably level-specific across months. Keep H34 StackConsume-intact fade as the dig. Results: `results/EXP-0044/`, `…_202609/`, `…_202605/`, `results/EXP-0044_DWELL/`.
 
 ### 2026-10-21 — EXP-0042 IRT dual-level S/R (H33)
 
