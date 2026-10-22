@@ -52,8 +52,8 @@
 | EXP-0040 | H31 MAT bounce at significant S/R | ran — **reject / empty** | 32d train + 17d May OOS | gated bounce_5 n=2; see notes |
 | EXP-0040_NOGATE | H31 bounce, no trend/VWAP | ran — **reject / thin** | 32d + May | bounce_5 n=5 train +5.5 / May −20 — no ship |
 | EXP-0041 | H32 stop-run fingerprint | ran — **visual freeze / no auto-trade** | 49d UK 14:30–17:00 (May OOS) | n=44 hit10 0.41≈null 0.39; see notes |
-| EXP-0042 | H33 IRT dual-level correlated S/R | **dig candidate** (shallow reclaim) | 14d Oct + Sep aligned | shallow vol_k1 +612 Oct / +128 Sep; see notes |
-| EXP-0043 | H34 IRT hold vs break orderflow | **Oct Take/Tape lift; Sep OOS blocked** | 13d Oct + 7d Sep depth | Take δ0.30 Oct; Sep BREAK=0; see notes |
+| EXP-0042 | H33 IRT dual-level correlated S/R | **reject / park** (causal re-run) | 14d Oct + Sep aligned | causal shallow vol_k1 **−100 Oct / −59 Sep**; legacy +612/+128 was look-ahead; see notes |
+| EXP-0043 | H34 IRT hold vs break orderflow | **null pre-touch; dig candidate = StackConsume-intact fade at +2 s** | 14d Oct + 15d Sep depth | pre δ≤0.16 all CI∋0 (placebo same); StackConsume real δ0.40/0.47 vs placebo 0.20/−0.08; gated fade +422 Oct / +158 Sep (tp30); see notes |
 
 ## Run notes
 
@@ -64,7 +64,26 @@
 - Primary scores on `[-2s,+2s]` only: **TakeScore** med gap +0.38 (δ 0.30, d 0.53, LOO yes); **TapeScore** +0.41 (δ 0.20, LOO yes); StackScore +0.16 weak; AttractRepel ≈0 (few large levels tagged at IRT price). BreakLikeness +0.25 (δ 0.28).
 - Hold→Amb→Break gradient on Take (0.18→0.30→0.56) and Tape (0.30→0.47→0.71). Impulse tertile: Take separates low/high; Tape fails in high-impulse bucket (approach-speed confound).
 - Chart-review lists in `results/EXP-0043/summary.md`. No P&amp;L / no May. Candidate OF features for shallow-reclaim dig: beyond-aggressor + tape intensity at touch.
-- **Sep descriptive OOS** (`results/EXP-0043_202609/`): 7 depth days (`160926`…`300926`; early Sep no depth/mbo). Universe HOLD **9** / BREAK **0** / AMB **18** — **hold-vs-break contrast blocked**. HOLD Take med −0.00 (Oct HOLD 0.18); Tape HOLD ~0.29≈Oct; HOLD→AMB Take still steps (−0.00→0.34). Do not treat Oct Take as OOS-confirmed.
+- **Sep descriptive OOS** (`results/EXP-0043_202609/`): converted depth/mbo for `150926`/`250926`/`280926` (Rithmic primary). Now 10 depth days. Universe HOLD **15** / BREAK **7** / AMB **34** (breaks 5/7 on `280926`). **Take gap −0.30 / Tape −0.60** — sign flip vs Oct (+0.38 / +0.41). Thin + concentrated, but **Oct Take/Tape not OOS-confirmed**. Early Sep `010926`…`100926` still trades-only (NQU6 align-risk).
+- **The Oct numbers above are superseded** by the post-review re-run below (the `[-2s,+2s]` window included the reaction).
+
+### 2026-10-21 — EXP-0043 watertightness fixes + re-run (H34 → null pre-touch)
+
+- **Problems fixed** (`hold_break.py`, `of_scores.py`, `run_hold_break_of.py`): at-window `[0,+2s]` overlapped the outcome → primary scores are now **pre-touch only** `[-2s,0)` (`TakeScore_pre`, `TapeScore_pre`, `StackScore`, `BreakLikeness_pre`); `_at`/unsuffixed scores kept as **mechanism checks** only. Baselines: robust median/MAD sliding windows, RTH-clipped to 14:30, `baseline_ok` requires ≥5 min; tape z on a dense 100 ms grid (empty slots count). StackScore baseline is BBO-relative with the same level offset (was fixed price band → tautological); large size = session p99.9 of depth sizes (floor 15; abs 50 never fired). Depth replay seeds from the pre-window book. Universe: DOP ignored for first 5 min (was tautological at open), real transitive clustering ≤5 pt, per-level-id cooldown, jump-through prints count as touches. Report: `baseline_ok` stratum, ≤15 / >15 min split, session-cluster bootstrap CI90, cliffs δ + d + LOO.
+- **Oct (13d):** universe HOLD 64 / BREAK 50 / AMB 78 (sampled 58/44/72; baseline_ok 51/39/68). **Pre-touch primary:** Take_pre gap +0.33 **δ 0.165** boot δ CI90 **[−0.03, 0.33]**; Tape_pre gap +0.53 **δ 0.01**; StackScore δ −0.01; BreakLikeness_pre δ 0.12 CI ∋ 0. **Mechanism (`_at`):** Take_at gap +0.60 **δ 0.38** CI90 [0.24, 0.54], Tape_at δ 0.21, StackConsume δ 0.33 — i.e. the earlier "signal" was the first 2 s of the reaction. AttractRepel still ≡0 (tracker rarely tags at IRT price; `n_tracker_levels` median 0). Raw: `post_vol` δ 0.55 (post-hoc), `first_pierce_pts` δ 0.35, `pre_touch_vol` δ 0.22.
+- **TOD:** first-15-min Take_pre δ 0.16 vs after-15 δ 0.18 — no open artefact remaining; Take_at δ 0.50 in first 15 min (reaction is fastest at open).
+- **Sep (10d):** universe HOLD 14 / BREAK **5** / AMB 33 (baseline_ok BREAK **2**) — uninformative; signs negative but n_b=2.
+- **Decision: H34 pre-touch OF does not separate hold from break at this granularity.** Aggressor/tape response *after* first touch does (δ≈0.35–0.4), which is a reaction-confirmation feature not a prediction. Next, if pursued: (a) a confirmation design — enter after the first 1–2 s of reaction and test whether `Take_at`-style confirmation beats a plain reclaim; (b) longer pre-windows (5–10 s) and approach-leg features (`pre_touch_vol`, impulse shape); (c) more depth days (early Sep NQU6 needs roll handling). No P&L / no May.
+
+### 2026-10-22 — EXP-0043 scoring completion + follow-ups (placebo, confirmation, more days)
+
+- **Scoring (completes the appraisal list):** MBO cancels carry only `order_id` (price=size=0) → resolved vectorised against the order map (`_resolve_mbo`, 99.98 % resolved; `replace` = cancel old + add new). Before this `net_add` was adds-only. New pre-touch `MboScore_pre` = beyond near-band pull-rate z + depletion (stack at touch vs −2 s) − replenish z. Tape z baseline 5 min (`tape_lookback_ms`); AttractRepel dropped from both composites (≡0 at IRT prices). Secondary leak-free windows `pre5`/`pre10`/`leg` (60 s). Approach-leg shape: `leg_last10_frac`, `leg_max_pullback_pts`. **Placebo**: same detector/scores at levels shifted ±40 pt, scored in the same pass.
+- **Data:** converted Rithmic depth/mbo for `191026` (Oct now 14d) and NQU6 `010926`–`100926`. IRT `@NQ#` is back-adjusted: constant +297.25 pt basis (MAD ≤ 1) on those days → runner shifts IRT levels by the session median when MAD ≤ 2 pt (`basis_offset`/`shift_bars`); post-shift align err ≤ 1 pt. **Sep now 15 depth days.**
+- **Pre-touch (Oct 14d, baseline_ok HOLD 55 / BREAK 41):** Take_pre δ 0.04, Tape_pre 0.01, StackScore 0.16 [−0.05, 0.33], MboScore_pre 0.11, BreakLikeness_pre 0.12 — all CI90 ∋ 0. pre5/pre10/leg: δ ≤ 0.13. **Placebo** gives the same magnitudes (Take 0.01, Tape 0.14, Stack 0.04). Sep (HOLD 24 / BREAK 4): signs negative, uninformative. **Pre-touch H34 is null, and nothing in the pre-touch book/tape/MBO is level-specific.**
+- **Mechanism vs placebo:** `Take_at` real δ 0.39 (Oct) / 0.35 (Sep) vs placebo **0.22 / 0.32** → generic 2-s momentum, not about the level. `StackConsume` real **0.40 / 0.47** vs placebo **0.20 / −0.08** → the only level-specific signal.
+- **Reaction-confirmation at +2 s** (all events still undecided at +2 s): P(BREAK) by StackConsume tertile Oct 0.25 → 0.66, Sep 0.00 → 0.30. P&L (1-tick slip, 0.25/RT, time stop +120 s): `gated[StackConsume≥0.25]` positive in **all 12** bracket × threshold × month cells — tp30/sl15 **+457 Oct (n=165, 9/14 days, maxDD 99) / +192 Sep (n=68, 7/14, maxDD 85)**; tp20/sl15 +190 / +166. Unconditional `fade_tc` −53/+185 Oct, +154/+215 Sep (Sep is hold-heavy); `cont_tc` negative everywhere; `Take_at`/`BreakLikeness` gates mixed. **Decomposition:** the P&L is the *fade* leg — "beyond stack not consumed in the first 2 s → fade": Oct n=122 +130 (tp20) / +422 (tp30); Sep n=60 +154 / +158; continue leg n=43/8, ≈ flat. No single session > 27 % of a month's net.
+- **Plain reclaim** (EXP-0042-style, ≥2 pt pierce then back through level, NQ-only): −181/−58 Oct, +46/+57 Sep; pierce<8 subset worse. Consistent with the H33 rejection.
+- **Decision: dig candidate — StackConsume-intact fade at +2 s.** Caveats: one gate of three chosen after seeing this run (direction is mechanistically sensible: stop-side liquidity held); two months; tp30/sl15 is a 2:1 bracket with 44 % win. Next: freeze `StackConsume ≤ −0.25` + tp30/sl15, run on May depth days if available (else forward paper), and test whether the AMBIGUOUS-label trades (35/60 of Sep fades) carry the edge or dilute it. Results: `results/EXP-0043/`, `results/EXP-0043_202609/` (`events.parquet` has per-event strategy P&L; `placebo_events.parquet`).
 
 ### 2026-10-21 — EXP-0042 IRT dual-level S/R (H33)
 
@@ -73,14 +92,23 @@
 - **Oct P&L:** reclaim vol_k1 n=102 net **+364** / fixed 12.5/30 **+264**; **shallow&lt;8** vol_k1 n=66 net **+612** (11/13 days+, tpd 5.1, maxDD 60) / fixed **+348**; touch fade vol_k1 **−434**.
 - **Kind-pair P&L (shallow vol_k1):** `LVN×LVN` n=36 **+374**; `LVN×DOP` n=10 **+141**; `DOP×LVN` n=7 **+87**; `DOP×DOP` n=9 +23. NQ-kind shallow: LVN +495 / DOP +111 / dVPOC +16.
 - **Sep aligned** (`150926`–`300926`; early Sep skip ~297pt roll): shallow vol_k1 n=41 net **+128** (6/8); fixed shallow also reported in `EXP-0042_202609`. Soft confirm vs Oct.
-- **Decision: dig candidate** (shallow reclaim). CD/orderflow still deferred. May untouched. Results: `results/EXP-0042/`, `results/EXP-0042_202609/`.
+- ~~Decision: dig candidate (shallow reclaim).~~ **SUPERSEDED — the numbers above are look-ahead biased** (see next note). Legacy summaries kept as `summary_LEGACY_lookahead.md` in each results dir.
+
+### 2026-10-21 — EXP-0042 causal fix + re-run (H33 → reject/park)
+
+- **Bugs found:** (1) `nq_pierce_pts` was the max pierce over the *full* 120 s horizon, so the "shallow&lt;8" filter knew the future path; (2) `reclaim_ts_ns` was nulled whenever `outcome != hold`, so only eventual holds were ever entered (survivorship); (3) ES "joint hold" required ES to hold over its whole horizon, not up to entry time.
+- **Fix** (`events.py`): `_classify_one` now stamps `reclaim_causal_ts_ns` and `pierce_to_reclaim_pts` (max pierce **up to the reclaim print**); `classify_dual_events` adds `es_pierce_at_reclaim_pts` / `es_causal_ok` (ES not failed *by* NQ reclaim time); `reclaim_events_table(causal=True)` is the default (legacy behaviour via `causal=False`). Runners + dig updated; smoke test passes.
+- **Causal Oct (14d):** reclaim vol_k1 n=110 net **+9** (6/13 days+, maxDD 325) / fixed **−53**; **shallow&lt;8** vol_k1 n=90 net **−100** / fixed −20; touch fade −434 (unchanged, was always causal). Kind-pair shallow: `LVN×LVN` +199 (n=44) vs `DOP×DOP` −190 — same post-hoc split as before, now with no OOS support.
+- **Causal Sep aligned (8d):** reclaim n=61 net **+2** / shallow n=53 net **−59** (5/8). Hold-path diagnostic still shows hold hit10 0.63–0.72 vs fail 0.21–0.28, but that is conditional on the outcome and not tradeable.
+- **Shallow dig re-run (causal):** Oct best of 30 variants `hvn_g30_sl15` +104 (n=42) — a search artefact; Sep **every** variant negative (best fixed_12p5_30 −44, `hvn_g30_sl15` −279). HVN TP does not confirm.
+- **Decision: reject / park H33 as a standalone fade.** The +612/+128 "edge" was entirely the outcome-conditioned entry. Dual-level alignment may still be useful as a *context* feature for H34-style scoring but has no P&L on its own. CD/orderflow deferred; May untouched. Results: `results/EXP-0042/`, `results/EXP-0042_202609/`, `results/EXP-0042_SHALLOW_DIG_2026{10,09}/`.
 
 ### 2026-10-21 — EXP-0042 shallow bracket dig (HVN TP)
 
 - Runner: `python -m research.irt_lvn.run_shallow_dig --month YYYY-MM`. Same shallow reclaim entry; exit variants.
 - **HVN algo:** TP = nearest NQ HVN in profit direction − 2pt (cap 80), only if gap ≥ min_gap; SL = fixed 10/12/15 or beyond-level+8 or half-gap.
-- **Oct:** baselines win — `vol_rr3` +695 / `vol_rr2` +644 / `vol_k1` +612 (maxDD 60). Best HVN `hvn_g30_sl15` n=30 **+255** (weaker). Median HVN gap ~53pt.
-- **Sep aligned:** `vol_k1` +128 still best; all HVN arms **negative** (best −72). HVN targeting does **not** confirm OOS.
+- ~~Oct: baselines win — `vol_rr3` +695 / `vol_rr2` +644 / `vol_k1` +612. Best HVN `hvn_g30_sl15` +255. Sep: `vol_k1` +128; all HVN negative.~~ **Legacy look-ahead numbers** (`summary_LEGACY_lookahead.md`).
+- **Causal re-run:** Oct `vol_k1` **−100** / `fixed_12p5_30` −20 / `vol_rr3` +19; best HVN `hvn_g30_sl15` n=42 +104 (1 of 30 variants). Sep: all 25 variants negative (`fixed` −44, `vol_k1` −59, `hvn_g30_sl15` −279). HVN targeting does **not** confirm OOS; nothing here is tradeable.
 - Results: `results/EXP-0042_SHALLOW_DIG_202610/`, `…_202609/`.
 
 ### 2026-10-21 — EXP-0041 stop-run fingerprint (H32)

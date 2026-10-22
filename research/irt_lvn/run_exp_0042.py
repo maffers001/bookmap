@@ -721,7 +721,9 @@ def main() -> None:
         f"## P&L (NQ, 1-tick slip, {comm} pt/RT, no gates)",
         "",
         f"Brackets: **vol k=1** and fixed **TP{fixed_tp}/SL{fixed_sl}**. "
-        f"Shallow = nq_pierce &lt; {shallow_max}.",
+        f"Shallow = NQ pierce **up to the reclaim print** &lt; {shallow_max} (causal). "
+        "Entries: NQ reclaim by `reject_away` with ES not failed *by that time*; "
+        "the eventual hold/fail outcome is **not** used to select entries.",
         "",
         _pnl_md("Reclaim fade", reclaim_pnl),
         "",

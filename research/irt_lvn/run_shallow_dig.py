@@ -271,8 +271,9 @@ def main() -> None:
         "experiment": tag,
         "month": args.month,
         "algo": {
-            "entry": "dual IRT level touch → shallow pierce < "
-                     f"{shallow_max} → fade at NQ reclaim",
+            "entry": "dual IRT level touch → NQ pierce-to-reclaim < "
+                     f"{shallow_max} (causal) → fade at NQ reclaim; ES not failed "
+                     "by entry time; outcome not used to select entries",
             "hvn_tp": "TP = nearest NQ HVN in profit direction − 2pt buffer, "
                       "cap 80; trade only if gap ≥ min_gap",
             "hvn_sl": {

@@ -4,7 +4,9 @@ title: IRT level hold vs break orderflow
 description: >
   October NQ sample of IRT key-level holds vs breaks (30pt impulse in,
   30pt reject vs 30pt continue). Score orderflow (take, stack, tape,
-  attract/repel) in pre/at-touch windows. Descriptive only — no P&L.
+  attract/repel) in pre/at-touch windows. Pre-touch is descriptive only;
+  the post-review reaction-confirmation section carries a bracket P&L
+  (entry at +confirm_ms, undecided events only) and a shifted-level placebo.
 
 detector: irt_hold_break_of
 month_prefix: "2026-10"
@@ -20,15 +22,26 @@ pierce_min_break: 15.0
 extension_break_pts: 30.0
 cluster_tol_pts: 5.0
 cooldown_ms: 30000
+dop_exclude_first_min: 5.0   # DOP = NY open print; first minutes are tautological
 max_align_err_pts: 25.0
 sample_n_per_class: 100
 sample_min_per_class: 50
 sample_seed: 42
 max_per_session: 12
-large_size: 50
-large_size_footnote: 100
+# large size is session-relative: p99.9 of non-zero NQ depth sizes (~25-30), floored
+large_size_pct: 99.9
+large_size_min: 15
 tick_radius: 8
 far_band_ticks: 20
-z_lookback_ms: 1800000
-exclude_sessions:
-  - "191026"  # no depth/mbo parquet
+z_lookback_ms: 1800000       # baseline clipped to RTH open; robust median/MAD
+tape_lookback_ms: 300000     # short baseline for prints/vol/burst z (intensity drifts)
+baseline_min_ms: 300000      # < 5 min RTH baseline -> baseline_ok = 0
+first_window_split_min: 15   # time-of-day stratum report
+# post-review additions
+placebo_shift_pts: 40.0          # shifted-level placebo universe (beyond the 30 pt reject distance)
+basis_shift_mad_max_pts: 2.0     # roll handling: shift IRT levels by median offset if MAD <= this
+confirm_ms: 2000                 # reaction-confirmation decision time after first touch
+confirm_brackets: [[20, 15], [30, 15], [12.5, 30]]   # [tp, sl] pts, time stop at horizon
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+exclude_sessions: []

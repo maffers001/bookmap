@@ -316,10 +316,13 @@ kinds need not match (e.g. NQ DOP × ES LVN). Distinct from H7 (Bookmap causal
 session LVNs). Phase 1: diagnostic pierce hold/fail + reclaim-fade P&L; CD MA
 and orderflow deferred.
 
-**Test:** EXP-0042. **Result (14d Oct incl. `201026`):** reclaim vol_k1 +364 /
-fixed12.5/30 +264; **shallow&lt;8** vol_k1 n=66 net **+612** (11/13 days+).
-Kind-pair shallow: `LVN×LVN` +374, `LVN×DOP` +141. **Sep aligned** shallow
-+128 (6/8) — soft confirm. Dig candidate; CD/orderflow deferred. May untouched.
+**Test:** EXP-0042. ~~First result (Oct shallow&lt;8 vol_k1 +612, Sep +128)~~ was
+**look-ahead biased**: the shallow filter used the full-horizon pierce and the
+reclaim stamp was only kept for eventual holds. **Causal re-run:** Oct
+reclaim n=110 net **+9**, shallow n=90 **−100**; Sep reclaim +2, shallow
+**−59**; shallow dig all-negative OOS. **Status: reject / park** as a
+standalone fade. Dual alignment may survive only as a context feature.
+CD/orderflow deferred. May untouched.
 
 ## H34 — IRT level hold vs break orderflow
 
@@ -330,11 +333,24 @@ extension). Pre-registered scores: Take, Stack, Tape, Attract/Repel — oriented
 beyond vs hold-side so resistance and support share one scale. Descriptive
 only; not a P&amp;L book.
 
-**Test:** EXP-0043. **Result (13d Oct depth+mbo):** universe HOLD 67 / BREAK 61 /
-AMB 78; sampled 63/51/72. **TakeScore** median gap break−hold **+0.38**
-(cliffs δ 0.30, d 0.53, LOO-stable); **TapeScore** +0.41 (δ 0.20, LOO-stable);
-StackScore weak (+0.16); AttractRepel mostly null (tracker near-BBO). Hold→Amb→Break
-gradient on Take/Tape. Impulse tertiles: Take still separates in low/high;
-Tape collapses in high-impulse. **Sep OOS blocked:** 7 depth days, BREAK=0
-(HOLD 9 / AMB 18) — cannot confirm separation. See `results/EXP-0043/`,
-`results/EXP-0043_202609/`.
+**Test:** EXP-0043. ~~First pass (±2 s window): Take δ 0.30 / Tape δ 0.20 in
+Oct; Sep flip.~~ That window included the first 2 s of the reaction.
+**Post-review re-run (pre-touch `[-2s,0)` only, robust RTH baselines,
+BBO-relative stack baseline, session-relative large size, DOP open exclusion,
+real clustering, session-bootstrap CIs):** Oct 13d, HOLD 64 / BREAK 50 / AMB 78.
+`TakeScore_pre` **δ 0.17** (CI90 ∋ 0), `TapeScore_pre` **δ 0.01**, `StackScore`
+**δ −0.01**, AttractRepel ≡ 0. The `_at` mechanism scores still separate
+(Take_at δ 0.38, CI90 [0.24, 0.54]) — orderflow *confirms* the break within 2 s
+but does not *predict* it. Sep: BREAK n=5 (baseline_ok 2) — uninformative.
+**Completed scoring + follow-ups (14d Oct, 15d Sep incl. basis-shifted NQU6
+days; MBO cancels resolved; `MboScore_pre`; ±40 pt placebo):** every pre-touch
+score δ ≤ 0.16 with CI90 ∋ 0 and **placebo levels give the same values** —
+pre-touch H34 is null and not level-specific. `Take_at` is also ≈ placebo
+(generic 2-s momentum). `StackConsume` is the one level-specific signal (real δ
+0.40 / 0.47 vs placebo 0.20 / −0.08). Confirmation test at +2 s: **fade when
+the beyond stack is intact (`StackConsume ≤ −0.25`)** is positive in both
+months on every bracket (tp30/sl15 +422 Oct n=122 / +158 Sep n=60; maxDD
+≈ 90). Plain reclaim fade is flat/negative.
+**Status: pre-touch null; dig candidate = StackConsume-intact fade at +2 s
+(one gate of three picked post hoc; needs May / forward).** See
+`results/EXP-0043/`, `results/EXP-0043_202609/`.

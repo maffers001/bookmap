@@ -22,6 +22,8 @@ class HoldBreakConfig:
     extension_break_pts: float = 30.0
     cluster_tol_pts: float = 5.0
     cooldown_ms: int = 30_000
+    # DOP is the NY open print; a "touch" in the first minutes is tautological.
+    dop_exclude_first_min: float = 5.0
 
     def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():
@@ -54,6 +56,39 @@ def _impulse_ok(
         leg = float(start - level)
     dur_s = max(1e-6, (t_touch - int(ts[lo])) / 1e9)
     return leg >= impulse_pts - 1e-9, leg, dur_s, leg / dur_s
+
+
+def _leg_shape(
+    ts: np.ndarray,
+    px: np.ndarray,
+    t_touch: int,
+    level: float,
+    approach: int,
+    *,
+    lookback_ns: int,
+    last_ns: int = 10_000_000_000,
+) -> tuple[float, float]:
+    """Approach-leg shape over the impulse lookback.
+
+    Returns (last10_frac, max_pullback_pts): share of the leg covered in the
+    final ``last_ns`` before touch (1 = all of it; a late burst), and the
+    largest retrace against the approach direction within the leg.
+    """
+    t0 = t_touch - lookback_ns
+    lo = int(np.searchsorted(ts, t0, side="left"))
+    hi = int(np.searchsorted(ts, t_touch, side="left"))
+    if hi - lo < 2:
+        return 0.0, 0.0
+    seg = px[lo:hi] * (1.0 if approach > 0 else -1.0)  # oriented: up = toward level
+    lvl = level * (1.0 if approach > 0 else -1.0)
+    start = float(seg.min())
+    leg = max(1e-9, lvl - start)
+    k = int(np.searchsorted(ts[lo:hi], t_touch - last_ns, side="left"))
+    p_last = float(seg[k]) if k < len(seg) else float(seg[-1])
+    last_frac = float(max(0.0, min(1.0, (lvl - p_last) / leg)))
+    run_max = np.maximum.accumulate(seg)
+    pullback = float(np.max(run_max - seg))
+    return last_frac, pullback
 
 
 def _classify_path(
@@ -137,12 +172,16 @@ def detect_hold_break_events(
     *,
     cfg: HoldBreakConfig | None = None,
     window: tuple[int, int] | None = None,
+    rth_open_ns: int | None = None,
 ) -> pa.Table:
     """Detect NQ hold/break/ambiguous events at clustered frozen IRT levels.
 
     Approach side: +1 from below (resistance test), -1 from above (support).
-    Levels frozen from the last completed IRT bar at first touch; levels within
-    ``cluster_tol_pts`` share one event.
+    A touch fires when a print crosses into (or through) the pad from outside.
+    Levels frozen from the last completed IRT bar at first touch; **all active
+    levels** within ``cluster_tol_pts`` of the touched level are merged into one
+    event (centre = mean). Cooldown is per level id. ``HW_MT_DOP_NY`` is
+    ignored for the first ``dop_exclude_first_min`` minutes after ``rth_open_ns``.
     """
     cfg = cfg or HoldBreakConfig()
     if trades.num_rows == 0 or len(bars.ts_ns) == 0:
@@ -185,11 +224,12 @@ def detect_hold_break_events(
     if len(win_idxs) == 0:
         return pa.table({})
 
-    last_cluster_fire: dict[int, int] = {}
+    last_fire_by_lid: dict[str, int] = {}
     rows: list[dict[str, Any]] = []
-
-    def _bucket(price: float) -> int:
-        return int(round(price / max(tol, 1e-9)))
+    dop_cut_ns = (
+        int(rth_open_ns + cfg.dop_exclude_first_min * 60_000_000_000)
+        if rth_open_ns is not None else None
+    )
 
     for ii in range(len(win_idxs)):
         i = int(win_idxs[ii])
@@ -200,52 +240,44 @@ def detect_hold_break_events(
         prev = float(px_all[i - 1])
         bi = _asof_idx(bars.ts_ns, t)
         levels = _active_levels(bars, bi)
+        if dop_cut_ns is not None and t < dop_cut_ns:
+            levels = [L for L in levels if L[1] != "DOP"]
         if not levels:
             continue
 
-        # Collect all levels whose pad is entered from outside on this print
+        # Levels whose pad is crossed into (or jumped through) from outside.
         hits: list[tuple[str, str, float, int]] = []  # kind, lid, px, approach
         for kind, lid, level in levels:
             lo, hi = level - pad, level + pad
-            if not (lo <= p <= hi):
-                continue
-            if prev < lo:
-                approach = 1
-            elif prev > hi:
-                approach = -1
-            else:
-                continue
-            hits.append((kind, lid, level, approach))
+            if prev < lo <= p:
+                hits.append((kind, lid, level, 1))
+            elif prev > hi >= p:
+                hits.append((kind, lid, level, -1))
         if not hits:
             continue
 
-        # Cluster hits within tol of each other (and of seed)
-        # Use first hit as seed; pull all within tol
-        seed_px = hits[0][2]
-        cluster = [h for h in hits if abs(h[2] - seed_px) <= tol]
-        # Also merge any other hits within tol of cluster centre iteratively
-        centre = float(np.mean([h[2] for h in cluster]))
+        approaches = {h[3] for h in hits}
+        if len(approaches) != 1:
+            continue  # one print entering two pads from opposite sides — skip
+        approach = hits[0][3]
+
+        # Cluster: all ACTIVE levels within tol of any touched level (transitive).
+        cluster: list[tuple[str, str, float]] = [(h[0], h[1], h[2]) for h in hits]
         changed = True
         while changed:
             changed = False
-            for h in hits:
-                if h in cluster:
+            for kind, lid, level in levels:
+                if any(c[1] == lid for c in cluster):
                     continue
-                if abs(h[2] - centre) <= tol:
-                    cluster.append(h)
-                    centre = float(np.mean([x[2] for x in cluster]))
+                if any(abs(level - c[2]) <= tol for c in cluster):
+                    cluster.append((kind, lid, level))
                     changed = True
+        centre = float(np.mean([c[2] for c in cluster]))
+        kinds = sorted({c[0] for c in cluster})
+        lids = sorted({c[1] for c in cluster})
 
-        approaches = {h[3] for h in cluster}
-        if len(approaches) != 1:
-            continue  # conflicting approach sides — skip
-        approach = cluster[0][3]
-        kinds = sorted({h[0] for h in cluster})
-        lids = sorted({h[1] for h in cluster})
-        buck = _bucket(centre)
-
-        last_t = last_cluster_fire.get(buck)
-        if last_t is not None and t - last_t < cool_ns:
+        # Per-level cooldown: skip if any member fired recently.
+        if any(t - last_fire_by_lid.get(lid, -10**18) < cool_ns for lid in lids):
             continue
 
         ok, leg, dur_s, speed = _impulse_ok(
@@ -268,6 +300,7 @@ def detect_hold_break_events(
         lo_v = int(np.searchsorted(ts_all, t - lookback_ns, side="left"))
         hi_v = int(np.searchsorted(ts_all, t, side="left"))
         pre_vol = float(sz_all[lo_v:hi_v].sum()) if hi_v > lo_v else 0.0
+        last10_frac, pullback = _leg_shape(ts_all, px_all, t, centre, approach, lookback_ns=lookback_ns)
 
         rows.append({
             "event_ts_ns": t,
@@ -286,9 +319,15 @@ def detect_hold_break_events(
             "impulse_dur_s": float(dur_s),
             "impulse_speed": float(speed),
             "pre_touch_vol": pre_vol,
+            "leg_last10_frac": last10_frac,
+            "leg_max_pullback_pts": pullback,
             "irt_bar_ts_ns": int(bars.ts_ns[bi]) if bi >= 0 else -1,
+            "min_after_open": (
+                float((t - rth_open_ns) / 60e9) if rth_open_ns is not None else float("nan")
+            ),
         })
-        last_cluster_fire[buck] = t
+        for lid in lids:
+            last_fire_by_lid[lid] = t
 
     if not rows:
         return pa.table({})
@@ -309,7 +348,10 @@ def detect_hold_break_events(
         "impulse_dur_s": np.asarray([r["impulse_dur_s"] for r in rows], dtype=np.float64),
         "impulse_speed": np.asarray([r["impulse_speed"] for r in rows], dtype=np.float64),
         "pre_touch_vol": np.asarray([r["pre_touch_vol"] for r in rows], dtype=np.float64),
+        "leg_last10_frac": np.asarray([r["leg_last10_frac"] for r in rows], dtype=np.float64),
+        "leg_max_pullback_pts": np.asarray([r["leg_max_pullback_pts"] for r in rows], dtype=np.float64),
         "irt_bar_ts_ns": np.asarray([r["irt_bar_ts_ns"] for r in rows], dtype=np.int64),
+        "min_after_open": np.asarray([r["min_after_open"] for r in rows], dtype=np.float64),
     })
 
 

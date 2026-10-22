@@ -1,6 +1,30 @@
 """Oriented orderflow scores for IRT hold vs break (EXP-0043 / H34).
 
-Primary scores use only [-2s, +2s] around t_touch. Post [+2s, +10s] is diagnostic.
+Design (post-review):
+* Windows: ``pre`` = [-2s, 0), ``at`` = [0, +2s], ``both`` = [-2s, +2s].
+  ``*_pre`` scores cannot see the reaction and are the leak-free primary;
+  ``at`` / ``both`` are mechanism checks. ``[+2s, +10s]`` is diagnostic only.
+* Baselines are **session-relative, RTH-clipped, robust**: window statistics
+  are compared to sliding windows over ``[max(t-30min, rth_open), t)`` using
+  median / MAD. Events with < ``baseline_min_ms`` of RTH baseline are flagged
+  ``baseline_ok = 0`` and reported as a separate stratum.
+* Tape is a dense 100 ms grid (empty slots count), so prints/sec is honest.
+* Stack baseline uses bands **relative to the then-BBO** on the beyond side,
+  not the event's fixed price band (which is empty whenever price is away).
+* Large-size threshold is session-relative (p99.9 of non-zero depth sizes,
+  floored), not an absolute 50.
+* Depth replay starts from the book state at the window start (``init_books``),
+  so resting orders placed earlier are visible.
+* Tape z uses a short baseline (``tape_lookback_ms``, 5 min) because print
+  intensity drifts through the session; aggressor imbalance keeps the 30 min
+  baseline (common level cancels in beyond−hold).
+* MBO is used for more than net-add: beyond-side **pull rate**
+  (cancel / (add+cancel)), **replenish count** (sends) and **depletion**
+  (stack at touch vs 2 s earlier) on the near band → ``MboScore_pre``.
+* Longer pre-windows ``pre5`` [-5s,0) / ``pre10`` [-10s,0) and the approach
+  leg ``leg`` [-60s,0) are scored as secondary leak-free windows.
+* AttractRepel never fires at IRT prices (tracker tags near-BBO); it is
+  reported but no longer part of any BreakLikeness composite.
 """
 from __future__ import annotations
 
@@ -11,82 +35,70 @@ import numpy as np
 import pyarrow as pa
 
 from research.features.liquidity import LargeLevelConfig, LargeLevelTracker, TrackedLevel
-from research.features.momentum import trades_to_tape_bars
 from research.irt_lvn.events import PTS_PER_TICK
+
+NS_PER_MS = 1_000_000
 
 
 @dataclass
 class ScoreConfig:
-    large_size: int = 50
+    large_size_pct: float = 99.9
+    large_size_min: int = 15
     tick_radius: int = 8
     far_band_ticks: int = 20
     z_lookback_ms: int = 1_800_000  # 30 min
+    tape_lookback_ms: int = 300_000  # 5 min — tape intensity is non-stationary
+    baseline_min_ms: int = 300_000  # 5 min of RTH needed for baseline_ok
+    baseline_step_ms: int = 1_000
+    book_grid_ms: int = 10_000
     primary_pre_ms: int = 2_000
     primary_post_ms: int = 2_000
+    long_pre_ms: tuple[int, int] = (5_000, 10_000)
+    leg_ms: int = 60_000
     diagnostic_post_ms: int = 10_000
     attract_pre_ms: int = 5_000
     burst_min_trades: int = 6
     burst_min_vol: float = 25.0
     clip_z: float = 2.0
+    slot_ms: int = 100
 
+
+# ------------------------------------------------------------------ helpers
 
 def _clip(x: float, lo: float = -2.0, hi: float = 2.0) -> float:
+    if not np.isfinite(x):
+        return 0.0
     return float(max(lo, min(hi, x)))
 
 
-def _safe_z(x: float, mean: float, std: float) -> float:
-    if std < 1e-12 or not np.isfinite(std):
+def _robust_z(x: float, samples: np.ndarray, min_n: int = 5) -> float:
+    """(x − median) / (1.4826·MAD); std fallback when MAD is 0."""
+    s = np.asarray(samples, dtype=np.float64)
+    s = s[np.isfinite(s)]
+    if len(s) < min_n:
         return 0.0
-    return float((x - mean) / std)
-
-
-def _window_stats(
-    ts: np.ndarray,
-    values: np.ndarray,
-    t0: int,
-    t1: int,
-) -> tuple[float, float, int]:
-    """Sum, mean of values in [t0, t1], and count."""
-    lo = int(np.searchsorted(ts, t0, side="left"))
-    hi = int(np.searchsorted(ts, t1, side="right"))
-    if hi <= lo:
-        return 0.0, 0.0, 0
-    seg = values[lo:hi]
-    return float(seg.sum()), float(seg.mean()), int(hi - lo)
-
-
-def _rolling_baseline(
-    ts: np.ndarray,
-    series: np.ndarray,
-    t: int,
-    lookback_ns: int,
-) -> tuple[float, float]:
-    """Mean/std of ``series`` in [t-lookback, t)."""
-    lo = int(np.searchsorted(ts, t - lookback_ns, side="left"))
-    hi = int(np.searchsorted(ts, t, side="left"))
-    if hi - lo < 2:
-        return 0.0, 1.0
-    seg = series[lo:hi]
-    return float(seg.mean()), float(max(seg.std(), 1e-9))
+    med = float(np.median(s))
+    mad = float(np.median(np.abs(s - med))) * 1.4826
+    if mad < 1e-9:
+        sd = float(s.std())
+        if sd < 1e-9:
+            return 0.0
+        return float((x - med) / sd)
+    return float((x - med) / mad)
 
 
 def _beyond_hold_sides(approach: int) -> tuple[str, str, bool, bool]:
-    """Return (beyond_book, hold_book, beyond_is_buy_aggr, hold_is_buy_aggr).
-
-    approach +1 from below → beyond=ASK / buy; hold=BID / sell
-    approach -1 from above → beyond=BID / sell; hold=ASK / buy
-    """
-    if approach > 0:
+    """(beyond_book, hold_book, beyond_is_buy_aggr, hold_is_buy_aggr)."""
+    if approach > 0:  # from below → testing resistance
         return "ASK", "BID", True, False
     return "BID", "ASK", False, True
 
 
 def _band_ticks(level_pts: float, approach: int, near: int, far: int) -> tuple[int, int, int, int]:
-    """Beyond-side tick bands: (near_lo, near_hi, far_lo, far_hi) inclusive."""
+    """Beyond-side bands around the frozen level: (near_lo, near_hi, far_lo, far_hi)."""
     lvl = int(round(level_pts / PTS_PER_TICK))
-    if approach > 0:  # beyond = above
+    if approach > 0:
         return lvl, lvl + near, lvl + near + 1, lvl + far
-    # beyond = below
     return lvl - near, lvl, lvl - far, lvl - near - 1
 
 
@@ -95,39 +107,85 @@ def _book_band_stats(book: dict[int, int], lo: int, hi: int, large: int) -> dict
         lo, hi = hi, lo
     sizes = [sz for px, sz in book.items() if lo <= px <= hi and sz > 0]
     if not sizes:
-        return {"sum": 0.0, "max": 0.0, "n_large": 0.0, "n_large100": 0.0}
+        return {"sum": 0.0, "max": 0.0, "n_large": 0.0, "n_large2x": 0.0}
     return {
         "sum": float(sum(sizes)),
         "max": float(max(sizes)),
         "n_large": float(sum(1 for s in sizes if s >= large)),
-        "n_large100": float(sum(1 for s in sizes if s >= 100)),
+        "n_large2x": float(sum(1 for s in sizes if s >= 2 * large)),
     }
 
 
+def _bbo(bids: dict[int, int], asks: dict[int, int]) -> tuple[int | None, int | None]:
+    bb = max(bids) if bids else None
+    ba = min(asks) if asks else None
+    return bb, ba
+
+
+# ------------------------------------------------------------ session state
+
 @dataclass
 class _SessionOF:
-    """Precomputed session arrays for scoring many events."""
+    # trades (sorted)
     t_ts: np.ndarray
     t_px: np.ndarray  # ticks
     t_sz: np.ndarray
     t_buy: np.ndarray
-    tape_ts: np.ndarray
-    tape_n: np.ndarray
-    tape_vol: np.ndarray
-    tape_imb: np.ndarray
-    # depth stream
+    # dense 100ms grid (cumsums, length n_slots+1)
+    slot0_ns: int
+    slot_ns: int
+    n_slots: int
+    cs_n: np.ndarray
+    cs_vol: np.ndarray
+    cs_buy: np.ndarray
+    cs_sell: np.ndarray
+    cs_burst: np.ndarray
+    # depth stream (sorted) + initial book at d_ts[0]
     d_ts: np.ndarray
     d_bid: np.ndarray
     d_px: np.ndarray
     d_sz: np.ndarray
-    # mbo
+    init_bids: dict[int, int]
+    init_asks: dict[int, int]
+    # mbo (sorted), flattened: m_op = +1 add / −1 cancel with resolved px/sz
     m_ts: np.ndarray
     m_op: np.ndarray
     m_bid: np.ndarray
     m_px: np.ndarray
     m_sz: np.ndarray
     cfg: ScoreConfig
+    rth_open_ns: int
+    large_thr: int
     closed_levels: list[TrackedLevel] = field(default_factory=list)
+    mbo_stats: dict[str, int] = field(default_factory=dict)
+
+    # --- grid helpers
+    def slot(self, t_ns: int) -> int:
+        k = (int(t_ns) - self.slot0_ns) // self.slot_ns
+        return int(min(max(k, 0), self.n_slots))
+
+    def win_sum(self, cs: np.ndarray, a_ns: int, b_ns: int) -> float:
+        """Sum over slots covering [a, b)."""
+        ia, ib = self.slot(a_ns), self.slot(b_ns)
+        if ib <= ia:
+            return 0.0
+        return float(cs[ib] - cs[ia])
+
+    def sliding_sums(self, cs: np.ndarray, b0_ns: int, b1_ns: int, win_ns: int, step_ns: int) -> np.ndarray:
+        """Sliding window sums of length win over [b0, b1) with given step."""
+        if b1_ns - win_ns <= b0_ns:
+            return np.array([], dtype=np.float64)
+        starts = np.arange(b0_ns, b1_ns - win_ns + 1, step_ns, dtype=np.int64)
+        ia = np.clip((starts - self.slot0_ns) // self.slot_ns, 0, self.n_slots)
+        ib = np.clip((starts + win_ns - self.slot0_ns) // self.slot_ns, 0, self.n_slots)
+        return (cs[ib] - cs[ia]).astype(np.float64)
+
+    def baseline_bounds(self, t_ns: int, lookback_ms: int | None = None) -> tuple[int, int, bool]:
+        look = int((self.cfg.z_lookback_ms if lookback_ms is None else lookback_ms) * NS_PER_MS)
+        b0 = max(int(t_ns) - look, int(self.rth_open_ns))
+        b1 = int(t_ns)
+        ok = (b1 - b0) >= int(self.cfg.baseline_min_ms * NS_PER_MS)
+        return b0, b1, ok
 
 
 def prepare_session_of(
@@ -136,100 +194,81 @@ def prepare_session_of(
     mbo: pa.Table | None,
     *,
     cfg: ScoreConfig | None = None,
-    bounds: tuple[int, int] | None = None,
+    bounds: tuple[int, int],
+    init_books: tuple[dict[int, int], dict[int, int]] | None = None,
 ) -> _SessionOF | None:
-    """Filter feeds to bounds (plus z lookback) and run LargeLevelTracker once."""
+    """Slice feeds to bounds ± lookback, build dense tape, run LargeLevelTracker once.
+
+    ``bounds`` = (rth_open_ns, rth_close_ns). ``init_books`` = book state just
+    before the first depth row in the slice (see runner loader).
+    """
     cfg = cfg or ScoreConfig()
     if trades.num_rows == 0 or depth.num_rows == 0:
         return None
+    lo, hi = int(bounds[0]), int(bounds[1])
+    look_ns = int(cfg.z_lookback_ms * NS_PER_MS)
+    lo_ext = lo - look_ns
+    hi_ext = hi + int(cfg.diagnostic_post_ms * NS_PER_MS)
 
-    look_ns = int(cfg.z_lookback_ms * 1_000_000)
-    if bounds is not None:
-        lo, hi = bounds
-        # extend for lookback + post diagnostic
-        lo_ext = lo - look_ns
-        hi_ext = hi + int(cfg.diagnostic_post_ms * 1_000_000)
-    else:
-        lo_ext, hi_ext = -10**18, 10**18
-
-    def _slice_trades(t: pa.Table) -> tuple[np.ndarray, ...]:
-        ts = t.column("ts_ns").to_numpy().astype(np.int64)
-        m = (ts >= lo_ext) & (ts <= hi_ext)
-        idx = np.where(m)[0]
-        if len(idx) == 0:
-            return (
-                np.array([], dtype=np.int64),
-                np.array([], dtype=np.int64),
-                np.array([], dtype=np.float64),
-                np.array([], dtype=bool),
-            )
-        order = idx[np.argsort(ts[idx], kind="stable")]
-        return (
-            ts[order],
-            t.column("price").to_numpy().astype(np.int64)[order],
-            t.column("size").to_numpy().astype(np.float64)[order],
-            t.column("is_buy_aggressor").to_numpy().astype(bool)[order],
-        )
-
-    t_ts, t_px, t_sz, t_buy = _slice_trades(trades)
-    if len(t_ts) == 0:
+    # --- trades
+    ts = trades.column("ts_ns").to_numpy().astype(np.int64)
+    m = (ts >= lo_ext) & (ts <= hi_ext)
+    idx = np.where(m)[0]
+    if len(idx) == 0:
         return None
+    order = idx[np.argsort(ts[idx], kind="stable")]
+    t_ts = ts[order]
+    t_px = trades.column("price").to_numpy().astype(np.int64)[order]
+    t_sz = trades.column("size").to_numpy().astype(np.float64)[order]
+    t_buy = trades.column("is_buy_aggressor").to_numpy().astype(bool)[order]
 
-    d_ts = depth.column("ts_ns").to_numpy().astype(np.int64)
-    dm = (d_ts >= lo_ext) & (d_ts <= hi_ext)
+    # --- dense tape grid
+    slot_ns = int(cfg.slot_ms * NS_PER_MS)
+    slot0 = (lo_ext // slot_ns) * slot_ns
+    n_slots = int((hi_ext - slot0) // slot_ns) + 1
+    k = np.clip((t_ts - slot0) // slot_ns, 0, n_slots - 1).astype(np.int64)
+    n_per = np.bincount(k, minlength=n_slots).astype(np.float64)
+    v_per = np.bincount(k, weights=t_sz, minlength=n_slots)
+    b_per = np.bincount(k[t_buy], weights=t_sz[t_buy], minlength=n_slots)
+    s_per = np.bincount(k[~t_buy], weights=t_sz[~t_buy], minlength=n_slots)
+    burst = ((n_per >= cfg.burst_min_trades) & (v_per >= cfg.burst_min_vol)).astype(np.float64)
+
+    def _cs(a: np.ndarray) -> np.ndarray:
+        out = np.zeros(len(a) + 1, dtype=np.float64)
+        np.cumsum(a, out=out[1:])
+        return out
+
+    # --- depth
+    d_ts0 = depth.column("ts_ns").to_numpy().astype(np.int64)
+    dm = (d_ts0 >= lo_ext) & (d_ts0 <= hi_ext)
     d_idx = np.where(dm)[0]
     if len(d_idx) == 0:
         return None
-    d_order = d_idx[np.argsort(d_ts[d_idx], kind="stable")]
-    d_ts = d_ts[d_order]
+    d_order = d_idx[np.argsort(d_ts0[d_idx], kind="stable")]
+    d_ts = d_ts0[d_order]
     d_bid = depth.column("is_bid").to_numpy().astype(bool)[d_order]
     d_px = depth.column("price_ticks").to_numpy().astype(np.int64)[d_order]
     d_sz = depth.column("size").to_numpy().astype(np.int64)[d_order]
+    init_bids, init_asks = ({}, {}) if init_books is None else (dict(init_books[0]), dict(init_books[1]))
 
-    # MBO optional
-    if mbo is not None and mbo.num_rows > 0:
-        m_ts0 = mbo.column("ts_ns").to_numpy().astype(np.int64)
-        mm = (m_ts0 >= lo_ext) & (m_ts0 <= hi_ext)
-        m_idx = np.where(mm)[0]
-        if len(m_idx):
-            m_order = m_idx[np.argsort(m_ts0[m_idx], kind="stable")]
-            m_ts = m_ts0[m_order]
-            m_op = mbo.column("op").to_numpy(zero_copy_only=False)[m_order]
-            m_bid = mbo.column("is_bid").to_numpy().astype(bool)[m_order]
-            m_px = mbo.column("price_ticks").to_numpy().astype(np.int64)[m_order]
-            m_sz = mbo.column("size").to_numpy().astype(np.float64)[m_order]
-        else:
-            m_ts = np.array([], dtype=np.int64)
-            m_op = m_bid = m_px = m_sz = np.array([])
-    else:
-        m_ts = np.array([], dtype=np.int64)
-        m_op = m_bid = m_px = m_sz = np.array([])
+    nz = d_sz[d_sz > 0]
+    large_thr = int(max(cfg.large_size_min, np.percentile(nz, cfg.large_size_pct))) if len(nz) else cfg.large_size_min
 
-    # Tape bars on full sliced trades
-    tr_tbl = pa.table({
-        "ts_ns": t_ts,
-        "price": t_px.astype(np.float64),
-        "size": t_sz,
-        "is_buy_aggressor": t_buy,
-    })
-    tape = trades_to_tape_bars(tr_tbl, bar_ms=100)
-    if tape.num_rows:
-        tape_ts = tape.column("ts_ns").to_numpy().astype(np.int64)
-        tape_n = tape.column("n_trades").to_numpy().astype(np.float64)
-        tape_vol = tape.column("total_vol").to_numpy().astype(np.float64)
-        tape_imb = tape.column("imbalance").to_numpy().astype(np.float64)
-    else:
-        tape_ts = np.array([], dtype=np.int64)
-        tape_n = tape_vol = tape_imb = np.array([], dtype=np.float64)
+    # --- mbo: resolve cancels / replaces against the order map (cancel rows carry only order_id)
+    m_ts, m_op, m_bid, m_px, m_sz, mbo_stats = _resolve_mbo(mbo, lo_ext, hi_ext)
 
-    # Run tracker (absolute-only large levels)
-    ll_cfg = LargeLevelConfig(
-        absolute_size=cfg.large_size,
-        z_score=99.0,
-        tick_radius=cfg.tick_radius,
-    )
-    tracker = LargeLevelTracker(ll_cfg)
+    # --- tracker (session-relative absolute threshold; z disabled)
+    tracker = LargeLevelTracker(LargeLevelConfig(
+        absolute_size=large_thr, z_score=99.0, tick_radius=cfg.tick_radius,
+    ))
     closed: list[TrackedLevel] = []
+    t_prime = int(d_ts[0]) - 1
+    tracker.on_timestamp(t_prime)
+    for px, sz in init_bids.items():
+        tracker.on_depth(True, int(px), int(sz))
+    for px, sz in init_asks.items():
+        tracker.on_depth(False, int(px), int(sz))
+    tracker.active.clear()  # pre-existing size is context, not a "new" level
     i = j = 0
     n_d, n_t = len(d_ts), len(t_ts)
     while i < n_d or j < n_t:
@@ -243,33 +282,95 @@ def prepare_session_of(
             tracker.on_trade(int(t_px[j]), int(t_sz[j]), bool(t_buy[j]))
             j += 1
         closed.extend(tracker.drain_closed())
-    # leftover actives
-    for lvl in tracker.active.values():
+    for lvl in list(tracker.active.values()):
         if not lvl.closed:
             tracker._close_level(lvl)
     closed.extend(tracker.drain_closed())
 
     return _SessionOF(
         t_ts=t_ts, t_px=t_px, t_sz=t_sz, t_buy=t_buy,
-        tape_ts=tape_ts, tape_n=tape_n, tape_vol=tape_vol, tape_imb=tape_imb,
-        d_ts=d_ts, d_bid=d_bid, d_px=d_px, d_sz=d_sz,
+        slot0_ns=int(slot0), slot_ns=slot_ns, n_slots=n_slots,
+        cs_n=_cs(n_per), cs_vol=_cs(v_per), cs_buy=_cs(b_per), cs_sell=_cs(s_per), cs_burst=_cs(burst),
+        d_ts=d_ts, d_bid=d_bid, d_px=d_px, d_sz=d_sz, init_bids=init_bids, init_asks=init_asks,
         m_ts=m_ts, m_op=m_op, m_bid=m_bid, m_px=m_px, m_sz=m_sz,
-        cfg=cfg, closed_levels=closed,
+        cfg=cfg, rth_open_ns=lo, large_thr=large_thr, closed_levels=closed, mbo_stats=mbo_stats,
     )
+
+
+def _resolve_mbo(mbo: pa.Table | None, lo_ext: int, hi_ext: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, int]]:
+    """Flatten MBO into signed liquidity events: (+1 add, −1 cancel) with resolved price/size.
+
+    Bookmap ``cancel`` rows have price=size=0 and only ``order_id``; ``replace``
+    rows carry the new price/size. Each row is matched to the previous row of
+    the same order id (vectorised: stable sort by (oid, index)) so a cancel is
+    booked at the order's last known price/size and a replace becomes
+    cancel(old) + add(new). Orders whose send precedes the slice are dropped.
+    """
+    empty = (np.array([], dtype=np.int64), np.array([], dtype=np.int8), np.array([], dtype=bool),
+             np.array([], dtype=np.int64), np.array([], dtype=np.float64), {"rows": 0})
+    if mbo is None or mbo.num_rows == 0:
+        return empty
+    import pyarrow.compute as pc
+
+    ts0 = mbo.column("ts_ns").to_numpy().astype(np.int64)
+    mm = (ts0 >= lo_ext) & (ts0 <= hi_ext)
+    idx = np.where(mm)[0]
+    if len(idx) == 0:
+        return empty
+    idx = idx[np.argsort(ts0[idx], kind="stable")]
+    sub = mbo.take(pa.array(idx))
+    ts = sub.column("ts_ns").to_numpy().astype(np.int64)
+    opc = pc.utf8_lower(sub.column("op"))
+    is_send = pc.equal(opc, "send").to_numpy(zero_copy_only=False).astype(bool)
+    is_can = pc.equal(opc, "cancel").to_numpy(zero_copy_only=False).astype(bool)
+    is_rep = pc.equal(opc, "replace").to_numpy(zero_copy_only=False).astype(bool)
+    bid = sub.column("is_bid").to_numpy(zero_copy_only=False).astype(bool)
+    px = sub.column("price_ticks").to_numpy().astype(np.int64)
+    sz = sub.column("size").to_numpy().astype(np.float64)
+    oid = pc.dictionary_encode(sub.column("order_id")).combine_chunks().indices.to_numpy(zero_copy_only=False).astype(np.int64)
+
+    n = len(ts)
+    order = np.lexsort((np.arange(n), oid))          # by oid, then time order
+    o_sorted = oid[order]
+    prev_in_sorted = np.full(n, -1, dtype=np.int64)
+    same = np.zeros(n, dtype=bool)
+    same[1:] = o_sorted[1:] == o_sorted[:-1]
+    prev_in_sorted[1:][same[1:]] = order[:-1][same[1:]]
+    prev = np.full(n, -1, dtype=np.int64)
+    prev[order] = prev_in_sorted
+    has_prev = prev >= 0
+    # state of the order before this row = px/sz of the previous row (send or replace)
+    prev_px = np.where(has_prev, px[np.maximum(prev, 0)], 0)
+    prev_sz = np.where(has_prev, sz[np.maximum(prev, 0)], 0.0)
+    prev_bid = np.where(has_prev, bid[np.maximum(prev, 0)], bid)
+    prev_live = has_prev & (is_send[np.maximum(prev, 0)] | is_rep[np.maximum(prev, 0)])
+
+    add_m = is_send | is_rep
+    can_m = (is_can | is_rep) & prev_live
+    out_ts = np.concatenate([ts[add_m], ts[can_m]])
+    out_op = np.concatenate([np.ones(add_m.sum(), dtype=np.int8), -np.ones(can_m.sum(), dtype=np.int8)])
+    out_bid = np.concatenate([bid[add_m], prev_bid[can_m]])
+    out_px = np.concatenate([px[add_m], prev_px[can_m]])
+    out_sz = np.concatenate([sz[add_m], prev_sz[can_m]])
+    o = np.argsort(out_ts, kind="stable")
+    stats = {
+        "rows": int(n), "send": int(is_send.sum()), "cancel": int(is_can.sum()), "replace": int(is_rep.sum()),
+        "cancel_resolved": int((is_can & prev_live).sum()), "replace_resolved": int((is_rep & prev_live).sum()),
+    }
+    return out_ts[o], out_op[o], out_bid[o], out_px[o], out_sz[o], stats
 
 
 def _snapshot_books_at_times(
     sof: _SessionOF, times: list[int]
 ) -> dict[int, tuple[dict[int, int], dict[int, int]]]:
-    """One-pass depth replay; snapshot (bids, asks) at each timestamp in ``times``."""
+    """One-pass depth replay from the initial book; snapshot at each time."""
     if not times:
         return {}
     uniq = sorted(set(int(t) for t in times))
     out: dict[int, tuple[dict[int, int], dict[int, int]]] = {}
-    bids: dict[int, int] = {}
-    asks: dict[int, int] = {}
-    i = 0
-    n = len(sof.d_ts)
+    bids = dict(sof.init_bids)
+    asks = dict(sof.init_asks)
+    i, n = 0, len(sof.d_ts)
     for t_target in uniq:
         while i < n and int(sof.d_ts[i]) <= t_target:
             book = bids if sof.d_bid[i] else asks
@@ -283,38 +384,65 @@ def _snapshot_books_at_times(
     return out
 
 
-def _mbo_net_add(
-    sof: _SessionOF,
-    t0: int,
-    t1: int,
-    *,
-    want_bid: bool,
-    px_lo: int,
-    px_hi: int,
-) -> float:
-    """Net size sent − cancelled in window on beyond side within band."""
+def _mbo_net_add(sof: _SessionOF, t0: int, t1: int, *, want_bid: bool, px_lo: int, px_hi: int) -> float:
+    """Net size sent − cancelled on one book side within a tick band over [t0, t1]."""
     if len(sof.m_ts) == 0:
         return 0.0
     if px_lo > px_hi:
         px_lo, px_hi = px_hi, px_lo
     lo = int(np.searchsorted(sof.m_ts, t0, side="left"))
     hi = int(np.searchsorted(sof.m_ts, t1, side="right"))
-    net = 0.0
-    for i in range(lo, hi):
-        if bool(sof.m_bid[i]) != want_bid:
-            continue
-        px = int(sof.m_px[i])
-        if px < px_lo or px > px_hi:
-            continue
-        op = str(sof.m_op[i]).lower()
-        sz = float(sof.m_sz[i])
-        if op in ("send", "a", "add", "new", "0"):
-            net += sz
-        elif op in ("cancel", "c", "delete", "1"):
-            net -= sz
-        # replace ignored for net-add purity
-    return net
+    if hi <= lo:
+        return 0.0
+    sl = slice(lo, hi)
+    m = (sof.m_bid[sl] == want_bid) & (sof.m_px[sl] >= px_lo) & (sof.m_px[sl] <= px_hi)
+    if not m.any():
+        return 0.0
+    ops = sof.m_op[sl][m]
+    sz = sof.m_sz[sl][m]
+    return float(sz[ops > 0].sum() - sz[ops < 0].sum())
 
+
+def _mbo_band_flow(
+    sof: _SessionOF, t0: int, t1: int, *, want_bid: bool, px_lo: int, px_hi: int
+) -> tuple[float, float, int, int]:
+    """(add_size, cancel_size, n_add, n_cancel) on one book side in a tick band over [t0, t1]."""
+    if len(sof.m_ts) == 0:
+        return 0.0, 0.0, 0, 0
+    if px_lo > px_hi:
+        px_lo, px_hi = px_hi, px_lo
+    lo = int(np.searchsorted(sof.m_ts, t0, side="left"))
+    hi = int(np.searchsorted(sof.m_ts, t1, side="right"))
+    if hi <= lo:
+        return 0.0, 0.0, 0, 0
+    sl = slice(lo, hi)
+    m = (sof.m_bid[sl] == want_bid) & (sof.m_px[sl] >= px_lo) & (sof.m_px[sl] <= px_hi)
+    if not m.any():
+        return 0.0, 0.0, 0, 0
+    ops = sof.m_op[sl][m]
+    sz = sof.m_sz[sl][m]
+    ia = ops > 0
+    ic = ops < 0
+    return float(sz[ia].sum()), float(sz[ic].sum()), int(ia.sum()), int(ic.sum())
+
+
+def _pull_rate(add: float, can: float) -> float:
+    tot = add + can
+    return float(can / tot) if tot > 0 else 0.5
+
+
+def _rel_band(bb: int | None, ba: int | None, side: str, near: int) -> tuple[int, int] | None:
+    """Near band relative to the then-BBO on ``side``."""
+    if side == "ASK":
+        if ba is None:
+            return None
+        return ba, ba + near
+    if bb is None:
+        return None
+    return bb - near, bb
+
+
+# ------------------------------------------------------------------ scoring
 
 def score_event(
     sof: _SessionOF,
@@ -322,336 +450,306 @@ def score_event(
     t_touch: int,
     level_px: float,
     approach: int,
-    book_at: dict[int, tuple[dict[int, int], dict[int, int]]] | None = None,
+    book_at: dict[int, tuple[dict[int, int], dict[int, int]]],
 ) -> dict[str, Any]:
-    """Compute four primary scores + raw features for one event."""
     cfg = sof.cfg
-    clip = cfg.clip_z
-    look_ns = int(cfg.z_lookback_ms * 1_000_000)
-    pre_ns = int(cfg.primary_pre_ms * 1_000_000)
-    at_ns = int(cfg.primary_post_ms * 1_000_000)
-    post_ns = int(cfg.diagnostic_post_ms * 1_000_000)
-    attr_pre = int(cfg.attract_pre_ms * 1_000_000)
+    C = cfg.clip_z
+    pre_ns = int(cfg.primary_pre_ms * NS_PER_MS)
+    at_ns = int(cfg.primary_post_ms * NS_PER_MS)
+    post_ns = int(cfg.diagnostic_post_ms * NS_PER_MS)
+    attr_pre = int(cfg.attract_pre_ms * NS_PER_MS)
+    step_ns = int(cfg.baseline_step_ms * NS_PER_MS)
+    large = sof.large_thr
 
     beyond_book, hold_book, beyond_buy, hold_buy = _beyond_hold_sides(approach)
-    near_lo, near_hi, far_lo, far_hi = _band_ticks(
-        level_px, approach, cfg.tick_radius, cfg.far_band_ticks
-    )
-    want_bid_beyond = beyond_book == "BID"
+    cs_beyond = sof.cs_buy if beyond_buy else sof.cs_sell
+    cs_hold = sof.cs_buy if hold_buy else sof.cs_sell
+    near_lo, near_hi, far_lo, far_hi = _band_ticks(level_px, approach, cfg.tick_radius, cfg.far_band_ticks)
+    band_lo = min(near_lo, near_hi, far_lo, far_hi)
+    band_hi = max(near_lo, near_hi, far_lo, far_hi)
     lvl_tick = int(round(level_px / PTS_PER_TICK))
+    want_bid_beyond = beyond_book == "BID"
 
-    # --- Tape / aggressor volumes in primary window [-2s, +2s] ---
-    w0, w1 = t_touch - pre_ns, t_touch + at_ns
-    lo = int(np.searchsorted(sof.t_ts, w0, side="left"))
-    hi = int(np.searchsorted(sof.t_ts, w1, side="right"))
-    buy_vol = sell_vol = 0.0
-    n_prints = 0
-    if hi > lo:
-        buy_m = sof.t_buy[lo:hi]
-        sz = sof.t_sz[lo:hi]
-        buy_vol = float(sz[buy_m].sum()) if buy_m.any() else 0.0
-        sell_vol = float(sz[~buy_m].sum()) if (~buy_m).any() else 0.0
-        n_prints = int(hi - lo)
-    total_vol = buy_vol + sell_vol
-    beyond_aggr = buy_vol if beyond_buy else sell_vol
-    hold_aggr = buy_vol if hold_buy else sell_vol
+    b0, b1, baseline_ok = sof.baseline_bounds(t_touch)
+    tb0, tb1, _ = sof.baseline_bounds(t_touch, cfg.tape_lookback_ms)
+    baseline_min = (b1 - b0) / 60e9
+    pre5_ns, pre10_ns = (int(x * NS_PER_MS) for x in cfg.long_pre_ms)
+    leg_ns = int(cfg.leg_ms * NS_PER_MS)
 
-    tlo = int(np.searchsorted(sof.tape_ts, w0, side="left"))
-    thi = int(np.searchsorted(sof.tape_ts, w1, side="right"))
-    win_prints = float(sof.tape_n[tlo:thi].sum()) if thi > tlo else float(n_prints)
-    win_vol = float(sof.tape_vol[tlo:thi].sum()) if thi > tlo else total_vol
-    win_imb = float(np.mean(np.abs(sof.tape_imb[tlo:thi]))) if thi > tlo else 0.0
-    burst_n = 0
-    if thi > tlo:
-        for k in range(tlo, thi):
-            if sof.tape_n[k] >= cfg.burst_min_trades and sof.tape_vol[k] >= cfg.burst_min_vol:
-                burst_n += 1
+    windows = {
+        "pre": (t_touch - pre_ns, t_touch),
+        "at": (t_touch, t_touch + at_ns),
+        "both": (t_touch - pre_ns, t_touch + at_ns),
+        "pre5": (t_touch - pre5_ns, t_touch),
+        "pre10": (t_touch - pre10_ns, t_touch),
+        "leg": (t_touch - leg_ns, t_touch),
+    }
 
-    b_lo = int(np.searchsorted(sof.tape_ts, t_touch - look_ns, side="left"))
-    b_hi = int(np.searchsorted(sof.tape_ts, t_touch, side="left"))
-    if b_hi - b_lo >= 5:
-        n_bars_win = max(1, thi - tlo)
-        bar_n_mean = float(sof.tape_n[b_lo:b_hi].mean())
-        bar_n_std = float(max(sof.tape_n[b_lo:b_hi].std(), 1e-9))
-        bar_v_mean = float(sof.tape_vol[b_lo:b_hi].mean())
-        bar_v_std = float(max(sof.tape_vol[b_lo:b_hi].std(), 1e-9))
-        print_z = _safe_z(win_prints / n_bars_win, bar_n_mean, bar_n_std)
-        vol_z = _safe_z(win_vol / n_bars_win, bar_v_mean, bar_v_std)
-        base_burst = np.array([
-            1.0 if (sof.tape_n[k] >= cfg.burst_min_trades and sof.tape_vol[k] >= cfg.burst_min_vol) else 0.0
-            for k in range(b_lo, b_hi)
-        ])
-        exp_burst = float(base_burst.mean() * n_bars_win)
-        burst_std = float(max(np.sqrt(max(exp_burst, 0.25)), 0.5))
-        burst_z = (burst_n - exp_burst) / burst_std
+    feats: dict[str, Any] = {}
+    tape_z: dict[str, tuple[float, float, float]] = {}
+    take_in: dict[str, tuple[float, float, float]] = {}  # (bmh_z, share, beyond_z)
+
+    for name, (a, b) in windows.items():
+        win = b - a
+        beyond = sof.win_sum(cs_beyond, a, b)
+        hold = sof.win_sum(cs_hold, a, b)
+        prints = sof.win_sum(sof.cs_n, a, b)
+        vol = sof.win_sum(sof.cs_vol, a, b)
+        bursts = sof.win_sum(sof.cs_burst, a, b)
+        # baselines: sliding windows of the same length over RTH-clipped lookback;
+        # the 60 s leg window needs the long baseline to have enough samples.
+        tape_lo, tape_hi = (b0, b1) if name == "leg" else (tb0, tb1)
+        s_beyond = sof.sliding_sums(cs_beyond, b0, b1, win, step_ns)
+        s_hold = sof.sliding_sums(cs_hold, b0, b1, win, step_ns)
+        s_prints = sof.sliding_sums(sof.cs_n, tape_lo, tape_hi, win, step_ns)
+        s_vol = sof.sliding_sums(sof.cs_vol, tape_lo, tape_hi, win, step_ns)
+        s_burst = sof.sliding_sums(sof.cs_burst, tape_lo, tape_hi, win, step_ns)
+        bz = _robust_z(beyond, s_beyond)
+        hz = _robust_z(hold, s_hold)
+        pz = _robust_z(prints, s_prints)
+        vz = _robust_z(vol, s_vol)
+        uz = _robust_z(bursts, s_burst)
+        share = beyond / (beyond + hold) if (beyond + hold) > 0 else 0.5
+        feats[f"beyond_aggr_{name}"] = beyond
+        feats[f"hold_aggr_{name}"] = hold
+        feats[f"beyond_share_{name}"] = share
+        feats[f"beyond_minus_hold_z_{name}"] = bz - hz
+        feats[f"prints_per_s_{name}"] = prints / max(1e-9, win / 1e9)
+        feats[f"vol_{name}"] = vol
+        feats[f"print_z_{name}"] = pz
+        feats[f"vol_z_{name}"] = vz
+        feats[f"burst_n_{name}"] = bursts
+        feats[f"burst_z_{name}"] = uz
+        tape_z[name] = (pz, vz, uz)
+        take_in[name] = (bz - hz, share, bz)
+
+    # --- book at touch
+    bids, asks = book_at[t_touch]
+    beyond_dict = asks if beyond_book == "ASK" else bids
+    hold_dict = bids if beyond_book == "ASK" else asks
+    near = _book_band_stats(beyond_dict, near_lo, near_hi, large)   # stack just beyond the level
+    far = _book_band_stats(beyond_dict, far_lo, far_hi, large)
+    bbo_b0, bbo_a0 = _bbo(bids, asks)
+    # BBO-relative near bands on both sides at touch (for imbalance)
+    rb_beyond = _rel_band(bbo_b0, bbo_a0, beyond_book, cfg.tick_radius)
+    rb_hold = _rel_band(bbo_b0, bbo_a0, hold_book, cfg.tick_radius)
+    beyond_bbo = _book_band_stats(beyond_dict, *rb_beyond, large) if rb_beyond else {"sum": 0.0}
+    hold_near = _book_band_stats(hold_dict, *rb_hold, large) if rb_hold else {"sum": 0.0}
+    tot = beyond_bbo["sum"] + hold_near["sum"]
+    book_imb = (beyond_bbo["sum"] - hold_near["sum"]) / tot if tot > 0 else 0.0
+    # offset of the level band from the BBO at touch (ticks, ≥0); baseline bands use the same offset
+    if beyond_book == "ASK":
+        off = max(0, near_lo - bbo_a0) if bbo_a0 is not None else 0
     else:
-        print_z = vol_z = burst_z = 0.0
+        off = max(0, bbo_b0 - near_hi) if bbo_b0 is not None else 0
 
-    win_len = w1 - w0
-    aggr_beyond_samples: list[float] = []
-    aggr_hold_samples: list[float] = []
-    t_cursor = t_touch - look_ns
-    while t_cursor + win_len <= t_touch:
-        a, b = t_cursor, t_cursor + win_len
-        i0 = int(np.searchsorted(sof.t_ts, a, side="left"))
-        i1 = int(np.searchsorted(sof.t_ts, b, side="right"))
-        if i1 > i0:
-            bm = sof.t_buy[i0:i1]
-            s = sof.t_sz[i0:i1]
-            bv = float(s[bm].sum()) if bm.any() else 0.0
-            sv = float(s[~bm].sum()) if (~bm).any() else 0.0
-            aggr_beyond_samples.append(bv if beyond_buy else sv)
-            aggr_hold_samples.append(bv if hold_buy else sv)
-        t_cursor += win_len
-    if len(aggr_beyond_samples) >= 3:
-        beyond_vol_z = _safe_z(
-            beyond_aggr, float(np.mean(aggr_beyond_samples)),
-            float(max(np.std(aggr_beyond_samples), 1e-9)),
-        )
-        hold_vol_z = _safe_z(
-            hold_aggr, float(np.mean(aggr_hold_samples)),
-            float(max(np.std(aggr_hold_samples), 1e-9)),
-        )
-    else:
-        beyond_vol_z = hold_vol_z = 0.0
-    beyond_minus_hold_z = beyond_vol_z - hold_vol_z
+    def _off_band(bb_s: dict[int, int], aa_s: dict[int, int], width: int) -> tuple[int, int] | None:
+        bbo_b, bbo_a = _bbo(bb_s, aa_s)
+        if beyond_book == "ASK":
+            return None if bbo_a is None else (bbo_a + off, bbo_a + off + width)
+        return None if bbo_b is None else (bbo_b - off - width, bbo_b - off)
 
-    # --- Stack at t_touch (books precomputed when possible) ---
-    if book_at is not None and t_touch in book_at:
-        bids, asks = book_at[t_touch]
-    else:
-        snap = _snapshot_books_at_times(sof, [t_touch])
-        bids, asks = snap[t_touch]
-    beyond_book_dict = asks if beyond_book == "ASK" else bids
-    near_stats = _book_band_stats(beyond_book_dict, near_lo, near_hi, cfg.large_size)
-    far_stats = _book_band_stats(beyond_book_dict, far_lo, far_hi, cfg.large_size)
+    # offset-matched baseline for the beyond-side near band
+    s_sum: list[float] = []
+    s_large: list[float] = []
+    grid_times = [t for t in book_at if b0 <= t < b1]
+    for t_s in grid_times:
+        bb_s, aa_s = book_at[t_s]
+        rb = _off_band(bb_s, aa_s, cfg.tick_radius)
+        if rb is None:
+            continue
+        st = _book_band_stats(aa_s if beyond_book == "ASK" else bb_s, rb[0], rb[1], large)
+        s_sum.append(st["sum"])
+        s_large.append(st["n_large"])
+    near_sum_z = _robust_z(near["sum"], np.asarray(s_sum))
+    large_count_z = _robust_z(near["n_large"], np.asarray(s_large))
 
-    # Baseline near-sum from precomputed grid snaps in prior 30m
-    stack_samples: list[float] = []
-    large_samples: list[float] = []
-    if book_at is not None:
-        for t_s, (bb, aa) in book_at.items():
-            if t_s < t_touch - look_ns or t_s >= t_touch:
-                continue
-            bd = aa if beyond_book == "ASK" else bb
-            st = _book_band_stats(bd, near_lo, near_hi, cfg.large_size)
-            stack_samples.append(st["sum"])
-            large_samples.append(st["n_large"])
-    if len(stack_samples) >= 3:
-        near_sum_z = _safe_z(
-            near_stats["sum"], float(np.mean(stack_samples)),
-            float(max(np.std(stack_samples), 1e-9)),
-        )
-        large_count_z = _safe_z(
-            near_stats["n_large"], float(np.mean(large_samples)),
-            float(max(np.std(large_samples), 1e-9)),
-        )
-    else:
-        near_sum_z = large_count_z = 0.0
+    # --- MBO net add on beyond band in [-2s, 0]; baseline on offset-matched bands at grid points
+    net_add = _mbo_net_add(sof, t_touch - pre_ns, t_touch, want_bid=want_bid_beyond, px_lo=band_lo, px_hi=band_hi)
+    s_net: list[float] = []
+    for t_s in grid_times:
+        bb_s, aa_s = book_at[t_s]
+        rb = _off_band(bb_s, aa_s, cfg.far_band_ticks)
+        if rb is None:
+            continue
+        s_net.append(_mbo_net_add(sof, t_s, t_s + pre_ns, want_bid=want_bid_beyond, px_lo=rb[0], px_hi=rb[1]))
+    net_add_z = _robust_z(net_add, np.asarray(s_net))
 
-    band_lo = min(near_lo, far_lo, near_hi, far_hi)
-    band_hi = max(near_lo, far_lo, near_hi, far_hi)
-    net_add = _mbo_net_add(
-        sof, t_touch - pre_ns, t_touch,
-        want_bid=want_bid_beyond, px_lo=band_lo, px_hi=band_hi,
+    # --- MBO pull rate / replenish on the beyond NEAR band in [-2s, 0); depletion vs book 2 s earlier
+    add_sz, can_sz, n_add, n_can = _mbo_band_flow(
+        sof, t_touch - pre_ns, t_touch, want_bid=want_bid_beyond, px_lo=near_lo, px_hi=near_hi
     )
-    net_samples: list[float] = []
-    t_cursor = t_touch - look_ns
-    while t_cursor + pre_ns <= t_touch and len(net_samples) < 40:
-        net_samples.append(_mbo_net_add(
-            sof, t_cursor, t_cursor + pre_ns,
-            want_bid=want_bid_beyond, px_lo=band_lo, px_hi=band_hi,
-        ))
-        t_cursor += pre_ns
-    if len(net_samples) >= 3:
-        net_add_z = _safe_z(
-            net_add, float(np.mean(net_samples)),
-            float(max(np.std(net_samples), 1e-9)),
-        )
-    else:
-        net_add_z = 0.0
+    pull_rate = _pull_rate(add_sz, can_sz)
+    s_pull: list[float] = []
+    s_repl: list[float] = []
+    for t_s in grid_times:
+        bb_s, aa_s = book_at[t_s]
+        rb = _off_band(bb_s, aa_s, cfg.tick_radius)
+        if rb is None:
+            continue
+        a_s, c_s, na_s, _ = _mbo_band_flow(sof, t_s, t_s + pre_ns, want_bid=want_bid_beyond, px_lo=rb[0], px_hi=rb[1])
+        s_pull.append(_pull_rate(a_s, c_s))
+        s_repl.append(float(na_s))
+    pull_rate_z = _robust_z(pull_rate, np.asarray(s_pull))
+    replenish_z = _robust_z(float(n_add), np.asarray(s_repl))
+    bids_m2, asks_m2 = book_at.get(t_touch - pre_ns, (bids, asks))
+    near_m2 = _book_band_stats(asks_m2 if beyond_book == "ASK" else bids_m2, near_lo, near_hi, large)
+    depletion = ((near_m2["sum"] - near["sum"]) / near_m2["sum"]) if near_m2["sum"] > 0 else 0.0
+    depletion = float(max(-1.0, min(1.0, depletion)))
 
-    stack0 = near_stats["sum"] + far_stats["sum"]
-    consumed = 0.0
+    # --- consume of the beyond stack in [0, +2s]
+    stack0 = near["sum"] + far["sum"]
     i0 = int(np.searchsorted(sof.t_ts, t_touch, side="left"))
     i1 = int(np.searchsorted(sof.t_ts, t_touch + at_ns, side="right"))
-    for i in range(i0, i1):
-        if bool(sof.t_buy[i]) != beyond_buy:
-            continue
-        px = int(sof.t_px[i])
-        if band_lo <= px <= band_hi:
-            consumed += float(sof.t_sz[i])
-    consume_frac = (consumed / stack0) if stack0 > 0 else (1.0 if consumed > 0 else 0.0)
-    if len(aggr_beyond_samples) >= 3:
-        beyond_consume_z = _safe_z(
-            consumed, float(np.mean(aggr_beyond_samples)),
-            float(max(np.std(aggr_beyond_samples), 1e-9)),
-        )
-    else:
-        beyond_consume_z = 0.0
+    consumed = 0.0
+    if i1 > i0:
+        sl = slice(i0, i1)
+        m = (sof.t_buy[sl] == beyond_buy) & (sof.t_px[sl] >= band_lo) & (sof.t_px[sl] <= band_hi)
+        consumed = float(sof.t_sz[sl][m].sum())
+    consume_frac = consumed / stack0 if stack0 > 0 else (1.0 if consumed > 0 else 0.0)
+    s_beyond_at = sof.sliding_sums(cs_beyond, b0, b1, at_ns, step_ns)
+    beyond_consume_z = _robust_z(consumed, s_beyond_at)
 
+    # --- tracker-based flags (session-relative large levels)
     take_flag = 0.0
     absorb_flag = 0.0
-    relevant: list[TrackedLevel] = []
-    for lvl in sof.closed_levels:
-        if lvl.side != beyond_book:
-            continue
-        fs = lvl.first_seen_ns
-        if fs < t_touch - attr_pre or fs > t_touch + at_ns:
-            continue
-        if not (band_lo - cfg.tick_radius <= lvl.price <= band_hi + cfg.tick_radius):
-            continue
-        relevant.append(lvl)
-        if lvl.max_penetration_ticks > max(1, cfg.tick_radius // 2):
-            take_flag = 1.0
-        if lvl.label == "ABSORB":
-            absorb_flag = 1.0
-    if take_flag < 0.5 and absorb_flag > 0.5:
-        take_flag = -1.0
-    elif take_flag > 0.5:
-        take_flag = 1.0
-    else:
-        take_flag = 1.0 if (consume_frac >= 0.5 and beyond_aggr > hold_aggr) else (
-            -1.0 if (stack0 > 0 and consume_frac < 0.2 and beyond_aggr < hold_aggr) else 0.0
-        )
-
+    n_rel = 0
     ar = 0.0
     for lvl in sof.closed_levels:
         fs = lvl.first_seen_ns
         if fs < t_touch - attr_pre or fs > t_touch + at_ns:
             continue
+        if abs(lvl.price - lvl_tick) > cfg.far_band_ticks:
+            continue
+        n_rel += 1
+        is_beyond = lvl.side == beyond_book
+        if is_beyond:
+            if lvl.max_penetration_ticks > max(1, cfg.tick_radius // 2):
+                take_flag = 1.0
+            if lvl.label == "ABSORB":
+                absorb_flag = 1.0
+        # attract / repel within 8 ticks of level
         if abs(lvl.price - lvl_tick) > cfg.tick_radius:
             continue
-        is_beyond = lvl.side == beyond_book
-        is_hold = lvl.side == hold_book
         lab = lvl.label
         if lab in ("NONE", "DWELL_SUPPORT") and lvl.post_move_1s is not None:
-            if lvl.side == "ASK" and lvl.post_move_1s > 0:
-                lab = "ATTRACT"
-            elif lvl.side == "BID" and lvl.post_move_1s < 0:
-                lab = "ATTRACT"
-            elif lvl.side == "ASK" and lvl.post_move_1s < 0:
-                lab = "REPEL"
-            elif lvl.side == "BID" and lvl.post_move_1s > 0:
-                lab = "REPEL"
+            toward = (lvl.side == "ASK" and lvl.post_move_1s > 0) or (lvl.side == "BID" and lvl.post_move_1s < 0)
+            lab = "ATTRACT" if toward else "REPEL"
         if is_beyond:
             if lab == "ATTRACT" or (lvl.max_penetration_ticks > 0 and lab != "ABSORB"):
                 ar += 1.0
             elif lab in ("REPEL", "ABSORB", "WITHDRAW"):
                 ar -= 1.0
-        elif is_hold:
+        elif lvl.side == hold_book:
             if lab == "ATTRACT":
                 ar -= 1.0
             elif lab in ("REPEL", "WITHDRAW"):
                 ar += 1.0
+    if take_flag < 0.5 and absorb_flag > 0.5:
+        take_flag = -1.0
+    elif take_flag < 0.5:
+        bmh_at, share_at, _ = take_in["at"]
+        take_flag = 1.0 if (consume_frac >= 0.5 and share_at > 0.5) else (
+            -1.0 if (stack0 > 0 and consume_frac < 0.2 and share_at < 0.5) else 0.0
+        )
 
-    take_score = _clip(
-        0.50 * _clip(beyond_minus_hold_z, -clip, clip)
-        + 0.30 * _clip(beyond_consume_z, -clip, clip)
-        + 0.20 * take_flag,
-        -clip, clip,
-    )
-    stack_score = _clip(
-        0.40 * _clip(near_sum_z, -clip, clip)
-        + 0.30 * _clip(large_count_z, -clip, clip)
-        + 0.30 * _clip(net_add_z, -clip, clip),
-        -clip, clip,
-    )
-    stack_consume = _clip(
-        0.5 * _clip(near_sum_z, -clip, clip)
-        + 0.5 * _clip((consume_frac - 0.5) * 4.0, -clip, clip),
-        -clip, clip,
-    )
-    tape_score = _clip(
-        0.40 * _clip(print_z, -clip, clip)
-        + 0.40 * _clip(vol_z, -clip, clip)
-        + 0.20 * _clip(burst_z, -clip, clip),
-        -clip, clip,
-    )
-    attract_repel = _clip(ar, -clip, clip)
-    break_likeness = _clip(
-        0.35 * take_score
-        + 0.25 * stack_consume
-        + 0.20 * tape_score
-        + 0.20 * attract_repel,
-        -clip, clip,
-    )
+    # --- scores
+    def _take(name: str, with_consume: bool) -> float:
+        bmh, share, _ = take_in[name]
+        if with_consume:
+            return _clip(0.50 * _clip(bmh, -C, C) + 0.30 * _clip(beyond_consume_z, -C, C) + 0.20 * take_flag, -C, C)
+        return _clip(0.60 * _clip(bmh, -C, C) + 0.40 * _clip((share - 0.5) * 4.0, -C, C), -C, C)
 
-    p0, p1 = t_touch + at_ns, t_touch + post_ns
-    plo = int(np.searchsorted(sof.t_ts, p0, side="left"))
-    phi = int(np.searchsorted(sof.t_ts, p1, side="right"))
-    post_vol = float(sof.t_sz[plo:phi].sum()) if phi > plo else 0.0
-    post_prints = int(phi - plo)
+    def _tape(name: str) -> float:
+        pz, vz, uz = tape_z[name]
+        return _clip(0.40 * _clip(pz, -C, C) + 0.40 * _clip(vz, -C, C) + 0.20 * _clip(uz, -C, C), -C, C)
 
-    return {
-        "TakeScore": take_score,
+    take_pre, take_at, take_both = _take("pre", False), _take("at", True), _take("both", True)
+    tape_pre, tape_at, tape_both = _tape("pre"), _tape("at"), _tape("both")
+    take_pre5, take_pre10, take_leg = _take("pre5", False), _take("pre10", False), _take("leg", False)
+    tape_pre5, tape_pre10 = _tape("pre5"), _tape("pre10")
+    stack_score = _clip(0.40 * _clip(near_sum_z, -C, C) + 0.30 * _clip(large_count_z, -C, C) + 0.30 * _clip(net_add_z, -C, C), -C, C)
+    # beyond-side liquidity being withdrawn ahead of touch → break-like (+)
+    mbo_pre = _clip(
+        0.40 * _clip(pull_rate_z, -C, C) + 0.30 * _clip(depletion * 2.0, -C, C) - 0.30 * _clip(replenish_z, -C, C), -C, C
+    )
+    stack_consume = _clip(0.5 * _clip(near_sum_z, -C, C) + 0.5 * _clip((consume_frac - 0.5) * 4.0, -C, C), -C, C)
+    attract_repel = _clip(ar, -C, C)  # reported only; ≡0 at IRT prices
+    bl_both = _clip(0.45 * take_both + 0.30 * stack_consume + 0.25 * tape_both, -C, C)
+    bl_pre = _clip(0.35 * take_pre + 0.25 * stack_score + 0.20 * tape_pre + 0.20 * mbo_pre, -C, C)
+
+    # --- diagnostic post window
+    post_vol = sof.win_sum(sof.cs_vol, t_touch + at_ns, t_touch + post_ns)
+    post_prints = sof.win_sum(sof.cs_n, t_touch + at_ns, t_touch + post_ns)
+
+    out: dict[str, Any] = {
+        # primary (pre-touch only; leak-free)
+        "TakeScore_pre": take_pre,
+        "TapeScore_pre": tape_pre,
         "StackScore": stack_score,
-        "StackConsume": stack_consume,
-        "TapeScore": tape_score,
+        "MboScore_pre": mbo_pre,
+        "BreakLikeness_pre": bl_pre,
+        # secondary leak-free windows
+        "TakeScore_pre5": take_pre5, "TapeScore_pre5": tape_pre5,
+        "TakeScore_pre10": take_pre10, "TapeScore_pre10": tape_pre10,
+        "TakeScore_leg": take_leg,
+        # MBO raws (pre window, beyond near band)
+        "pull_rate_pre": pull_rate, "pull_rate_z": pull_rate_z,
+        "replenish_n_pre": float(n_add), "replenish_z": replenish_z,
+        "cancel_n_pre": float(n_can), "depletion_pre": depletion, "near_sum_m2": near_m2["sum"],
+        # mechanism (sees first 2 s of reaction)
+        "TakeScore_at": take_at,
+        "TapeScore_at": tape_at,
+        "TakeScore": take_both,
+        "TapeScore": tape_both,
         "AttractRepelScore": attract_repel,
-        "BreakLikeness": break_likeness,
-        "beyond_aggressor_vol": beyond_aggr,
-        "holdside_aggressor_vol": hold_aggr,
-        "beyond_minus_hold_vol_z": beyond_minus_hold_z,
-        "beyond_consume": consumed,
-        "beyond_consume_z": beyond_consume_z,
-        "consume_frac": consume_frac,
-        "take_flag": take_flag,
-        "near_sum": near_stats["sum"],
-        "near_max": near_stats["max"],
-        "near_n_large": near_stats["n_large"],
-        "near_n_large100": near_stats["n_large100"],
-        "far_sum": far_stats["sum"],
-        "near_sum_z": near_sum_z,
-        "large_count_z": large_count_z,
-        "net_add": net_add,
-        "net_add_z": net_add_z,
-        "print_rate": win_prints / max(1e-6, (w1 - w0) / 1e9),
-        "total_vol": win_vol,
-        "print_z": print_z,
-        "vol_z": vol_z,
-        "abs_imbalance": win_imb,
-        "burst_count": float(burst_n),
-        "burst_z": burst_z,
-        "post_vol": post_vol,
-        "post_prints": float(post_prints),
-        "n_tracker_levels": float(len(relevant)),
+        "StackConsume": stack_consume,
+        "BreakLikeness": bl_both,
+        # flags
+        "baseline_ok": 1.0 if baseline_ok else 0.0,
+        "baseline_min": baseline_min,
+        "large_thr": float(large),
+        # book raw
+        "near_sum": near["sum"], "near_max": near["max"], "near_n_large": near["n_large"],
+        "far_sum": far["sum"], "beyond_bbo_sum": beyond_bbo["sum"], "hold_near_sum": hold_near["sum"],
+        "book_imbalance": book_imb, "band_offset_ticks": float(off),
+        "near_sum_z": near_sum_z, "large_count_z": large_count_z,
+        "net_add": net_add, "net_add_z": net_add_z,
+        "beyond_consume": consumed, "beyond_consume_z": beyond_consume_z, "consume_frac": consume_frac,
+        "take_flag": take_flag, "n_tracker_levels": float(n_rel),
+        "post_vol": post_vol, "post_prints": post_prints,
     }
+    out.update(feats)
+    return out
 
 
-def enrich_events_with_scores(
-    events: pa.Table,
-    sof: _SessionOF,
-) -> pa.Table:
-    """Append score columns for all events in a single session (sof)."""
+def enrich_events_with_scores(events: pa.Table, sof: _SessionOF) -> pa.Table:
+    """Append score columns for all events in one session."""
     if events.num_rows == 0:
         return events
     cfg = sof.cfg
-    look_ns = int(cfg.z_lookback_ms * 1_000_000)
-    # Snapshot books at each event + 10s grid in lookback for stack z
+    grid_ns = int(cfg.book_grid_ms * NS_PER_MS)
     times: list[int] = []
-    for i in range(events.num_rows):
-        t = int(events.column("t_touch_ns")[i].as_py())
+    touches = [int(x) for x in events.column("t_touch_ns").to_pylist()]
+    pre_ns = int(cfg.primary_pre_ms * NS_PER_MS)
+    for t in touches:
         times.append(t)
-        t0 = t - look_ns
-        step = 10_000_000_000  # 10s
-        tt = t0
-        while tt < t:
-            times.append(tt)
-            tt += step
+        times.append(t - pre_ns)  # book 2 s before touch (depletion)
+        b0, b1, _ = sof.baseline_bounds(t)
+        g = (b0 // grid_ns) * grid_ns
+        while g < b1:
+            if g >= b0:
+                times.append(int(g))
+            g += grid_ns
     book_at = _snapshot_books_at_times(sof, times)
 
+    levels = [float(x) for x in events.column("level_px").to_pylist()]
+    apps = [int(x) for x in events.column("approach").to_pylist()]
     rows = [
-        score_event(
-            sof,
-            t_touch=int(events.column("t_touch_ns")[i].as_py()),
-            level_px=float(events.column("level_px")[i].as_py()),
-            approach=int(events.column("approach")[i].as_py()),
-            book_at=book_at,
-        )
-        for i in range(events.num_rows)
+        score_event(sof, t_touch=t, level_px=L, approach=a, book_at=book_at)
+        for t, L, a in zip(touches, levels, apps)
     ]
     out = events
     for k in rows[0]:
-        out = out.append_column(k, pa.array([r[k] for r in rows], type=pa.float64()))
+        out = out.append_column(k, pa.array([float(r[k]) for r in rows], type=pa.float64()))
     return out

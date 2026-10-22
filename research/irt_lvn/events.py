@@ -222,14 +222,17 @@ def _classify_one(
     horizon_ms: int,
 ) -> dict:
     """hold / fail / ambiguous + pierce depth + optional reclaim stamp."""
+    empty = {
+        "outcome": "ambiguous",
+        "pierce_pts": 0.0,
+        "reclaim_ts_ns": None,
+        "reclaim_causal_ts_ns": None,
+        "pierce_to_reclaim_pts": 0.0,
+        "clean_fail": False,
+    }
     i0 = int(np.searchsorted(path_ts, t0, side="left"))
     if i0 >= len(path_ts):
-        return {
-            "outcome": "ambiguous",
-            "pierce_pts": 0.0,
-            "reclaim_ts_ns": None,
-            "clean_fail": False,
-        }
+        return dict(empty)
     t_end = t0 + int(horizon_ms * 1_000_000)
     i1 = int(np.searchsorted(path_ts, t_end, side="right"))
     if i1 <= i0:
@@ -238,12 +241,7 @@ def _classify_one(
     seg = path_px[i0:i1]
     seg_ts = path_ts[i0:i1]
     if len(seg) == 0:
-        return {
-            "outcome": "ambiguous",
-            "pierce_pts": 0.0,
-            "reclaim_ts_ns": None,
-            "clean_fail": False,
-        }
+        return dict(empty)
 
     # pierce beyond level in approach direction
     if approach > 0:
@@ -259,19 +257,25 @@ def _classify_one(
 
     reclaim_ts = None
     hold = False
+    pierce_to_reclaim = 0.0  # max pierce observed up to and incl. the reclaim print
     for j in range(len(seg)):
         p = float(seg[j])
         if approach > 0:
+            pierce_to_reclaim = max(pierce_to_reclaim, p - level)
             # resistance: hold when back below level by reject_away
             if p <= level - reject:
                 hold = True
                 reclaim_ts = int(seg_ts[j])
                 break
         else:
+            pierce_to_reclaim = max(pierce_to_reclaim, level - p)
             if p >= level + reject:
                 hold = True
                 reclaim_ts = int(seg_ts[j])
                 break
+    pierce_to_reclaim = max(0.0, pierce_to_reclaim)
+    # Causal stamp: known at the reclaim print, independent of what follows.
+    reclaim_causal_ts = reclaim_ts
 
     # clean fail: reach fail_thr with limited pullback from extreme excursion path
     clean_fail = False
@@ -311,7 +315,9 @@ def _classify_one(
     else:
         outcome = "ambiguous"
 
-    # Reclaim-valid for fade entry: hold with pierce never reaching fail
+    # LEGACY (look-ahead): reclaim stamp kept only when the *full-horizon*
+    # outcome is hold. Retained for the path/outcome study; P&L entries must
+    # use ``reclaim_causal_ts_ns`` + ``pierce_to_reclaim_pts`` instead.
     if outcome == "hold" and pierce < fail_thr and reclaim_ts is not None:
         pass
     else:
@@ -322,8 +328,31 @@ def _classify_one(
         "outcome": outcome,
         "pierce_pts": round(pierce, 3),
         "reclaim_ts_ns": reclaim_ts,
+        "reclaim_causal_ts_ns": reclaim_causal_ts,
+        "pierce_to_reclaim_pts": round(pierce_to_reclaim, 3),
         "clean_fail": bool(clean_fail),
     }
+
+
+def _pierce_to_time(
+    path_ts: np.ndarray,
+    path_px: np.ndarray,
+    t0: int,
+    t1: int,
+    approach: int,
+    level: float,
+) -> float:
+    """Max pierce beyond ``level`` in approach direction over prints in [t0, t1]."""
+    if t1 < t0:
+        return 0.0
+    i0 = int(np.searchsorted(path_ts, t0, side="left"))
+    i1 = int(np.searchsorted(path_ts, t1, side="right"))
+    if i1 <= i0:
+        return 0.0
+    seg = path_px[i0:i1]
+    if approach > 0:
+        return max(0.0, float(np.max(seg) - level))
+    return max(0.0, float(level - np.min(seg)))
 
 
 def classify_dual_events(
@@ -347,6 +376,12 @@ def classify_dual_events(
     reclaim_ts = []
     reclaim_side = []
     joint = []
+    # causal (entry-time) fields
+    reclaim_causal_ts = []
+    reclaim_causal_side = []
+    nq_pierce_to_reclaim = []
+    es_pierce_at_reclaim = []
+    es_causal_ok = []
 
     ts0 = dual.column("event_ts_ns").to_numpy().astype(np.int64)
     es_t0 = dual.column("es_event_ts_ns").to_numpy().astype(np.int64)
@@ -354,6 +389,7 @@ def classify_dual_events(
     nq_lvl = dual.column("nq_level_px").to_numpy().astype(np.float64)
     es_lvl = dual.column("es_level_px").to_numpy().astype(np.float64)
     sides = dual.column("side").to_numpy().astype(np.int8)
+    es_fail_thr = float(cfg.es.pierce_fail)
 
     for i in range(n):
         nq_c = _classify_one(
@@ -369,7 +405,7 @@ def classify_dual_events(
         nq_pierce.append(nq_c["pierce_pts"])
         es_pierce.append(es_c["pierce_pts"])
 
-        # joint: both hold, or NQ hold and ES not fail
+        # LEGACY joint (full-horizon outcomes; look-ahead for entries)
         if nq_c["outcome"] == "hold" and es_c["outcome"] != "fail":
             j = "hold"
             r_ts = nq_c["reclaim_ts_ns"]
@@ -383,6 +419,27 @@ def classify_dual_events(
         reclaim_ts.append(-1 if r_ts is None else int(r_ts))
         reclaim_side.append(int(sides[i]) if r_ts is not None else 0)
 
+        # CAUSAL: stamp at NQ reclaim print; ES judged only on prints up to then.
+        rc = nq_c["reclaim_causal_ts_ns"]
+        if rc is None:
+            reclaim_causal_ts.append(-1)
+            reclaim_causal_side.append(0)
+            nq_pierce_to_reclaim.append(nq_c["pierce_to_reclaim_pts"])
+            es_pierce_at_reclaim.append(0.0)
+            es_causal_ok.append(False)
+            continue
+        rc = int(rc)
+        es_p = _pierce_to_time(
+            es_path_ts, es_path_px, int(es_t0[i]), rc, int(approach[i]), float(es_lvl[i]),
+        )
+        # ES touch must already be observed and ES must not have failed yet.
+        ok = (rc >= int(es_t0[i])) and (es_p < es_fail_thr)
+        reclaim_causal_ts.append(rc)
+        reclaim_causal_side.append(int(sides[i]))
+        nq_pierce_to_reclaim.append(nq_c["pierce_to_reclaim_pts"])
+        es_pierce_at_reclaim.append(es_p)
+        es_causal_ok.append(bool(ok))
+
     cols = {name: dual.column(name) for name in dual.column_names}
     cols["nq_outcome"] = nq_out
     cols["es_outcome"] = es_out
@@ -391,32 +448,60 @@ def classify_dual_events(
     cols["es_pierce_pts"] = np.asarray(es_pierce, dtype=np.float64)
     cols["reclaim_ts_ns"] = np.asarray(reclaim_ts, dtype=np.int64)
     cols["reclaim_side"] = np.asarray(reclaim_side, dtype=np.int8)
+    cols["reclaim_causal_ts_ns"] = np.asarray(reclaim_causal_ts, dtype=np.int64)
+    cols["reclaim_causal_side"] = np.asarray(reclaim_causal_side, dtype=np.int8)
+    cols["nq_pierce_to_reclaim_pts"] = np.asarray(nq_pierce_to_reclaim, dtype=np.float64)
+    cols["es_pierce_at_reclaim_pts"] = np.asarray(es_pierce_at_reclaim, dtype=np.float64)
+    cols["es_causal_ok"] = pa.array(es_causal_ok, type=pa.bool_())
     return pa.table(cols)
 
 
-def reclaim_events_table(classified: pa.Table) -> pa.Table:
-    """P&L stamps: reclaim_ts where joint hold and reclaim valid."""
+def reclaim_events_table(classified: pa.Table, *, causal: bool = True) -> pa.Table:
+    """P&L entry stamps at the NQ reclaim print.
+
+    ``causal=True`` (default): entry exists whenever NQ reclaims by
+    ``reject_away`` within the horizon and ES has not failed *by that time*.
+    ``nq_pierce_pts`` is the pierce observed **up to the reclaim** so a
+    ``pierce < 8`` filter is decidable at entry. The eventual outcome is not
+    used. ``nq_pierce_full_pts`` keeps the full-horizon pierce for diagnostics.
+
+    ``causal=False``: legacy behaviour (joint hold over the full horizon) —
+    look-ahead; kept only to reproduce old numbers.
+    """
     if classified.num_rows == 0:
         return pa.table({})
-    rts = classified.column("reclaim_ts_ns").to_numpy().astype(np.int64)
-    sides = classified.column("reclaim_side").to_numpy().astype(np.int8)
-    joint = classified.column("joint_outcome").to_pylist()
-    keep = [i for i in range(len(rts)) if rts[i] > 0 and joint[i] == "hold" and sides[i] != 0]
+    if causal and "reclaim_causal_ts_ns" in classified.column_names:
+        rts = classified.column("reclaim_causal_ts_ns").to_numpy().astype(np.int64)
+        sides = classified.column("reclaim_causal_side").to_numpy().astype(np.int8)
+        ok = classified.column("es_causal_ok").to_numpy(zero_copy_only=False).astype(bool)
+        keep = [i for i in range(len(rts)) if rts[i] > 0 and sides[i] != 0 and ok[i]]
+        pierce_col = "nq_pierce_to_reclaim_pts"
+    else:
+        rts = classified.column("reclaim_ts_ns").to_numpy().astype(np.int64)
+        sides = classified.column("reclaim_side").to_numpy().astype(np.int8)
+        joint = classified.column("joint_outcome").to_pylist()
+        keep = [i for i in range(len(rts)) if rts[i] > 0 and joint[i] == "hold" and sides[i] != 0]
+        pierce_col = "nq_pierce_pts"
     if not keep:
         return pa.table({})
     idx = np.asarray(keep, dtype=np.int64)
-    return pa.table({
+    out = {
         "event_ts_ns": rts[idx],
         "side": sides[idx],
         "event_type": ["irt_reclaim"] * len(idx),
         "nq_kind": classified.column("nq_kind").take(idx),
         "es_kind": classified.column("es_kind").take(idx),
         "touch_ts_ns": classified.column("event_ts_ns").take(idx),
-        "nq_pierce_pts": classified.column("nq_pierce_pts").take(idx),
+        "nq_pierce_pts": classified.column(pierce_col).take(idx),
+        "nq_pierce_full_pts": classified.column("nq_pierce_pts").take(idx),
+        "nq_outcome_post": classified.column("nq_outcome").take(idx),
         "nq_level_px": classified.column("nq_level_px").take(idx),
         "approach": classified.column("approach").take(idx),
         "same_kind": classified.column("same_kind").take(idx),
-    })
+    }
+    if "es_pierce_at_reclaim_pts" in classified.column_names:
+        out["es_pierce_at_reclaim_pts"] = classified.column("es_pierce_at_reclaim_pts").take(idx)
+    return pa.table(out)
 
 
 def pierce_bucket(pts: float, *, nq: bool = True) -> str:
