@@ -57,8 +57,18 @@
 | EXP-0043_STACK_FADE | H34 frozen dig (May OOS) | **soft confirm** | 17d May OOS (Oct/Sep context) | n=192 net **+160** (8/17, maxDD 277; was +131 pre grid fix); HOLD +1475 / BREAK −788 / AMB −527; see notes |
 | EXP-0043_CONFIRM_DIG | H34 follow-ups (b) approach-leg book, (a) confirm sweep + 2nd filter | **null (b); (a) robust to k, no filter adopted** | Oct+Sep train, May frozen | StackTrend_pre ≈ placebo; fade +ve 12/12 k×month; `after 15 min` Δavg +0.29 < 1 SE on May; see notes |
 | EXP-0044 | H35 dwell + intact break-side wall | **reject / park** | 14d Oct + 14d Sep + 17d May | duration claim fails train; Arm A May +241 but Oct ≪ placebo; Arm B/protect null; see notes |
+| EXP-0045 | H36 open-book standout resting levels | **reject / park** | 14d Oct + 15d Sep + 17d May | thin n (~12 touches/mo); T0 Oct/May ≪0 and ≤placebo; Sep +88 flip; old stratum empty; see notes |
 
 ## Run notes
+
+### 2026-10-22 — EXP-0045 open-book standout resting orders (H36)
+
+- Runner: `python -m research.irt_lvn.run_open_book_levels [--month]`. Snapshot NQ book at **14:35 UK**; clusters within 2 ticks; standout ≥ p98 of cluster sizes and ≥ 2× session large_thr; top 5/side by age-weighted MBO size (depth size missing from MBO → age_cap 2 h). Arms: T0 first-touch fade, T2 +2 s with `StackConsume ≤ −0.25`, R0 break-retest continue, R2 + TakeScore_at≥0.25. Primary bracket vol 2:1 (`SL=clip(u,6,15)`). Placebo ±40 pt.
+- **Oct develop:** p99 yielded 9 touches → frozen **p98** (11 touches / 17 levels / 14d). Hold@60 **0.09**. T0 n=11 net **−88.5** (placebo −83); old stratum n=1. T2 better than T0 on avg/DD but still negative. R0 −2. Pull fresh>old **False**.
+- **Sep OOS (read once):** touches 13; Hold@60 **0.92**; T0 **+87.75** (8/13 days) vs placebo −11 — month flip vs Oct. Old n=0. R0 n=2 −25.
+- **May OOS (read once):** touches 12; T0 **−81.6** ≤ placebo −58; T2 worse; R0 −27.
+- **Decision: reject / park.** Registered age claims fail on Oct (old ≰ fresh/placebo); first-touch fade is not stably better than placebo and flips sign across months; sample is thin (~1 touch/day under frozen cuts). Bright-book open clusters as fade levels are not supported. Keep H34 StackConsume dig. Results: `results/EXP-0045/`, `…_202609/`, `…_202605/`, `results/EXP-0045_OPEN/`.
+
 
 ### 2026-10-21 — EXP-0043 IRT hold vs break OF (H34)
 

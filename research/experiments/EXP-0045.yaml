@@ -1,0 +1,66 @@
+name: EXP-0045
+hypothesis: H36
+title: Open-book standout resting orders as levels
+description: >
+  At NQ RTH open, snapshot the book at 14:35 UK; select age-weighted standout
+  resting clusters (compact prices, top of size distribution). Trade first-touch
+  fades (T0 / T2 with frozen StackConsume≤−0.25) and break-retest continuations
+  (R0 / R2). Primary bracket is vol 2:1. Develop on Oct; Sep and May read once.
+  NQ book only — no ES, no IRT levels.
+
+month_prefix: "2026-10"
+snap_time: "14:35"
+window_end: "17:00"
+vol_start: "14:00"
+vol_end: "14:30"
+
+# Snapshot / clustering
+book_radius_pts: 100.0
+cluster_ticks: 2
+standout_pct: 98.0          # frozen after Oct p99 yielded <40 touches (see P98_NOTE.txt)
+large_mult: 2.0             # cluster size ≥ large_mult × large_thr
+top_n_per_side: 5
+near_mid_exclude_pts: 10.0
+large_size_pct: 99.9
+large_size_min: 15
+
+# Age weighting
+age_scale_s: 900.0          # full weight by 15 min
+age_w_min: 0.25
+age_w_max: 1.0
+old_age_s: 900.0
+age_cap_s: 7200.0           # orders present at data start
+frac_old_thr: 0.5
+
+# Lifecycle
+alive_frac: 0.5
+pull_size_frac: 0.25
+pull_trade_frac: 0.25
+
+# Touch / break / retest
+pad_pts: 2.0
+break_floor_pts: 8.0        # break pierce = max(break_floor, u)
+retest_horizon_ms: 1200000  # 20 min
+reject_pts: 30.0
+extension_pts: 30.0
+
+# Arms / OF gates (StackConsume thr frozen from EXP-0043)
+confirm_ms: 2000
+stack_consume_thr: -0.25
+take_at_thr: 0.25
+tick_radius: 8
+far_band_ticks: 20
+z_lookback_ms: 1800000
+
+# Bracket
+horizon_ms: 180000
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+sl_floor: 6.0
+sl_cap: 15.0
+primary_rr: 2.0             # TP = primary_rr × SL; SL = clip(u, floor, cap)
+
+# Controls
+placebo_shift_pts: 40.0
+exclude_sessions: []
+oos_months: ["2026-09", "2026-05"]

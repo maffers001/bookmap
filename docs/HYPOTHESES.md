@@ -391,3 +391,20 @@ Arm B thin (n≤4/month) and not adopted; protect-stack not selected (train avg
 worse than Arm A). **Status: reject / park** the longer-dwell theory as stated.
 The short +2 s StackConsume fade (H34) remains the better dig. See
 `results/EXP-0044_DWELL/`.
+
+## H36 — Open-book standout resting orders as levels
+
+At the NQ RTH open, the largest compact longest-lived resting clusters in the
+visible book (snapshot at 14:35 UK, age-weighted from MBO) act as S/R: **first
+touch** from the far side holds (fade); if the cluster is **broken** (consumed
+through a vol-scaled pierce), the **retest** continues in the break direction.
+Age-weighting separates real intent from fresh/spoofed size. Asymmetric vol 2:1
+R:R; optional +2 s OF gates (`StackConsume ≤ −0.25` on touch; `TakeScore_at` on
+retest). Distinct from IRT levels (H33–H35) — levels come from the **live book**.
+
+**Test:** EXP-0045. Runner: `python -m research.irt_lvn.run_open_book_levels`.
+Develop on Oct; Sep and May read once. NQ book only.
+**Result:** Thin under frozen cuts (p99→p98; ~11–13 first touches/month).
+Oct T0 net −88 ≤ placebo; old stratum nearly empty (n≤1); Sep T0 flips to
++88; May T0 −82. Age claims fail on train. Retest arms thin/negative.
+**Status: reject / park.** See `results/EXP-0045_OPEN/`.
