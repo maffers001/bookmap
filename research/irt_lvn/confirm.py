@@ -218,6 +218,17 @@ def gated_pnl(tbl: pa.Table, score: str, thr: float, tag: str) -> np.ndarray:
     return out
 
 
+def fade_when_score_le(tbl: pa.Table, score: str, thr: float, tag: str) -> np.ndarray:
+    """Per-event fade P&L when ``score ≤ thr`` and the event was undecided at +confirm_ms; else nan."""
+    s = tbl.column(score).to_numpy().astype(np.float64)
+    und = tbl.column("undecided_at_tc").to_numpy().astype(np.float64) >= 0.5
+    fade = tbl.column(f"pnl_fade_tc_{tag}").to_numpy().astype(np.float64)
+    out = np.full(len(s), np.nan)
+    m = und & (s <= thr)
+    out[m] = fade[m]
+    return out
+
+
 def score_tertile_break_rate(tbl: pa.Table, score: str) -> list[dict[str, Any]]:
     """Among undecided HOLD/BREAK events: P(BREAK) by tertile of score."""
     lab = np.array(tbl.column("label").to_pylist())

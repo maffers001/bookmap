@@ -53,7 +53,8 @@
 | EXP-0040_NOGATE | H31 bounce, no trend/VWAP | ran — **reject / thin** | 32d + May | bounce_5 n=5 train +5.5 / May −20 — no ship |
 | EXP-0041 | H32 stop-run fingerprint | ran — **visual freeze / no auto-trade** | 49d UK 14:30–17:00 (May OOS) | n=44 hit10 0.41≈null 0.39; see notes |
 | EXP-0042 | H33 IRT dual-level correlated S/R | **reject / park** (causal re-run) | 14d Oct + Sep aligned | causal shallow vol_k1 **−100 Oct / −59 Sep**; legacy +612/+128 was look-ahead; see notes |
-| EXP-0043 | H34 IRT hold vs break orderflow | **null pre-touch; dig candidate = StackConsume-intact fade at +2 s** | 14d Oct + 15d Sep depth | pre δ≤0.16 all CI∋0 (placebo same); StackConsume real δ0.40/0.47 vs placebo 0.20/−0.08; gated fade +422 Oct / +158 Sep (tp30); see notes |
+| EXP-0043 | H34 IRT hold vs break orderflow | **null pre-touch; StackConsume fade soft-confirms May** | 14d Oct + 15d Sep + 17d May depth | freeze fade StackConsume≤−0.25 tp30/sl15: +422/+158/+131; AMB dilutes; see notes |
+| EXP-0043_STACK_FADE | H34 frozen dig (May OOS) | **soft confirm** | 17d May OOS (Oct/Sep context) | n=191 net **+131** (8/17, maxDD 261); HOLD +1445 / BREAK −788 / AMB −527; see notes |
 
 ## Run notes
 
@@ -84,6 +85,23 @@
 - **Reaction-confirmation at +2 s** (all events still undecided at +2 s): P(BREAK) by StackConsume tertile Oct 0.25 → 0.66, Sep 0.00 → 0.30. P&L (1-tick slip, 0.25/RT, time stop +120 s): `gated[StackConsume≥0.25]` positive in **all 12** bracket × threshold × month cells — tp30/sl15 **+457 Oct (n=165, 9/14 days, maxDD 99) / +192 Sep (n=68, 7/14, maxDD 85)**; tp20/sl15 +190 / +166. Unconditional `fade_tc` −53/+185 Oct, +154/+215 Sep (Sep is hold-heavy); `cont_tc` negative everywhere; `Take_at`/`BreakLikeness` gates mixed. **Decomposition:** the P&L is the *fade* leg — "beyond stack not consumed in the first 2 s → fade": Oct n=122 +130 (tp20) / +422 (tp30); Sep n=60 +154 / +158; continue leg n=43/8, ≈ flat. No single session > 27 % of a month's net.
 - **Plain reclaim** (EXP-0042-style, ≥2 pt pierce then back through level, NQ-only): −181/−58 Oct, +46/+57 Sep; pierce<8 subset worse. Consistent with the H33 rejection.
 - **Decision: dig candidate — StackConsume-intact fade at +2 s.** Caveats: one gate of three chosen after seeing this run (direction is mechanistically sensible: stop-side liquidity held); two months; tp30/sl15 is a 2:1 bracket with 44 % win. Next: freeze `StackConsume ≤ −0.25` + tp30/sl15, run on May depth days if available (else forward paper), and test whether the AMBIGUOUS-label trades (35/60 of Sep fades) carry the edge or dilute it. Results: `results/EXP-0043/`, `results/EXP-0043_202609/` (`events.parquet` has per-event strategy P&L; `placebo_events.parquet`).
+
+### 2026-10-22 — EXP-0043_STACK_FADE May OOS (frozen StackConsume-intact fade)
+
+- **Freeze (no retune):** undecided at +2 s and `StackConsume ≤ −0.25` → fade; TP 30 / SL 15; 1-tick slip; 0.25 pt/RT; time stop +120 s. Runner: `python -m research.irt_lvn.run_stack_consume_fade`. Config: `research/experiments/EXP-0043_STACK_FADE.yaml`.
+- **Data:** converted Rithmic depth/mbo for all 17 May sessions (`*0526`, NQM6). Basis shift −590 pt (MAD ≤ 1.5) → post-shift align ≤ 1.4 pt. Universe HOLD **154** / BREAK **108** / AMB **152** (sampled 100/86/100).
+- **Frozen P&L:**
+
+| month | role | n | net | avg | win | days+ | maxDD |
+|---|---|---:|---:|---:|---:|---|---:|
+| 2026-05 | **OOS** | 191 | **+131** | 0.69 | 0.39 | 8/17 | 261 |
+| 2026-10 | context | 122 | +422 | 3.46 | 0.46 | 10/14 | 72 |
+| 2026-09 | context | 60 | +158 | 2.63 | 0.47 | 7/14 | 132 |
+
+- **AMBIGUOUS dilutes in every month** (diagnostic labels, not known at entry): May HOLD +1445 / BREAK −788 / AMB **−527**; Oct HOLD +1260 / BREAK −362 / AMB −476; Sep HOLD +442 / BREAK −63 / AMB −222. Edge is carried entirely by eventual HOLDs; AMB and BREAK lose.
+- **May mechanism check:** StackConsume real δ 0.23 vs placebo **0.23** — level-specificity weaker than Oct/Sep (where real ≫ placebo). Pre-touch still null (Take_pre δ −0.04). Bidirectional `gated[StackConsume≥0.25]` tp30 also +489 May (consistent).
+- **Caveats:** OOS days+ only 8/17; maxDD 261 (3.6× Oct); one session (`150526`) +194 ≈ 148 % of month net; freeze chosen after seeing Oct/Sep. Soft confirm, not a ship.
+- **Decision: soft confirm — keep as dig / forward-paper candidate.** Do not increase size. Optional next: require something that cuts AMB/BREAK false fades (e.g. dual ES context, or a second confirmation print) without retuning thr/TP/SL on May. Results: `results/EXP-0043_STACK_FADE/`, `results/EXP-0043_202605/`.
 
 ### 2026-10-21 — EXP-0042 IRT dual-level S/R (H33)
 

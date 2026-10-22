@@ -1,0 +1,24 @@
+name: EXP-0043_STACK_FADE
+hypothesis: H34
+title: Frozen StackConsume-intact fade at +2 s (May OOS)
+description: >
+  Freeze the EXP-0043 dig candidate: at IRT key-level first touch, wait
+  confirm_ms; if still undecided and StackConsume ≤ thr, fade with
+  fixed TP/SL. No retune. May is the holdout; Oct/Sep reported for context only.
+
+# Frozen entry / exit (do not retune on May)
+confirm_ms: 2000
+score: StackConsume
+thr: -0.25          # fade when score ≤ thr (beyond stack intact)
+side: fade          # fade only — not the bidirectional gated rule
+tp_pts: 30.0
+sl_pts: 15.0
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+horizon_ms: 120000
+reclaim_min_pierce_pts: 2.0
+
+# Universe / scoring inherited from EXP-0043 (same detector)
+parent_config: EXP-0043.yaml
+oos_month: "2026-05"
+context_months: ["2026-10", "2026-09"]

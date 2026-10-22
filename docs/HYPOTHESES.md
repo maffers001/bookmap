@@ -351,6 +351,10 @@ pre-touch H34 is null and not level-specific. `Take_at` is also ≈ placebo
 the beyond stack is intact (`StackConsume ≤ −0.25`)** is positive in both
 months on every bracket (tp30/sl15 +422 Oct n=122 / +158 Sep n=60; maxDD
 ≈ 90). Plain reclaim fade is flat/negative.
-**Status: pre-touch null; dig candidate = StackConsume-intact fade at +2 s
-(one gate of three picked post hoc; needs May / forward).** See
-`results/EXP-0043/`, `results/EXP-0043_202609/`.
+**Frozen dig EXP-0043_STACK_FADE (May OOS, 17d depth):** fade when
+`StackConsume ≤ −0.25` at +2 s, TP30/SL15 — May n=191 net **+131** (8/17,
+maxDD 261) with Oct/Sep context +422/+158. AMBIGUOUS dilutes every month
+(May AMB −527); HOLD carries the edge. May StackConsume δ ≈ placebo (weaker
+level-specificity than Oct/Sep). **Status: pre-touch null; StackConsume-intact
+fade soft-confirms May — dig / forward-paper, not ship.** See
+`results/EXP-0043_STACK_FADE/`, `results/EXP-0043/`, `…_202609/`, `…_202605/`.
