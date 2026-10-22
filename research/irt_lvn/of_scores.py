@@ -55,6 +55,8 @@ class ScoreConfig:
     primary_post_ms: int = 2_000
     long_pre_ms: tuple[int, int] = (5_000, 10_000)
     leg_ms: int = 60_000
+    book_trend_ms: tuple[int, ...] = (10_000, 30_000, 60_000)   # book snapshots before touch
+    consume_windows_ms: tuple[int, ...] = (1_000, 3_000, 5_000)  # StackConsume_{w}s variants
     diagnostic_post_ms: int = 10_000
     attract_pre_ms: int = 5_000
     burst_min_trades: int = 6
@@ -552,7 +554,9 @@ def score_event(
     # offset-matched baseline for the beyond-side near band
     s_sum: list[float] = []
     s_large: list[float] = []
-    grid_times = [t for t in book_at if b0 <= t < b1]
+    # fixed grid only (not other events' touch / pre-window snapshots that share book_at)
+    grid_ns = int(cfg.book_grid_ms * NS_PER_MS)
+    grid_times = [t for t in book_at if b0 <= t < b1 and t % grid_ns == 0]
     for t_s in grid_times:
         bb_s, aa_s = book_at[t_s]
         rb = _off_band(bb_s, aa_s, cfg.tick_radius)
@@ -597,6 +601,40 @@ def score_event(
     depletion = ((near_m2["sum"] - near["sum"]) / near_m2["sum"]) if near_m2["sum"] > 0 else 0.0
     depletion = float(max(-1.0, min(1.0, depletion)))
 
+    # --- book trajectory over the approach leg (price-fixed bands at the level)
+    if approach > 0:
+        h_lo, h_hi = lvl_tick - cfg.tick_radius, lvl_tick
+    else:
+        h_lo, h_hi = lvl_tick, lvl_tick + cfg.tick_radius
+    hold_fixed = _book_band_stats(hold_dict, h_lo, h_hi, large)
+    trend_feats: dict[str, float] = {}
+    for tm in cfg.book_trend_ms:
+        k = tm // 1000
+        b_then, a_then = book_at.get(t_touch - int(tm * NS_PER_MS), (bids, asks))
+        then_beyond = _book_band_stats(a_then if beyond_book == "ASK" else b_then, near_lo, near_hi, large)
+        # hold side: BBO-relative near band then vs now (price-fixed band is empty before touch)
+        rb_h_then = _rel_band(*_bbo(b_then, a_then), hold_book, cfg.tick_radius)
+        then_hold = _book_band_stats(b_then if beyond_book == "ASK" else a_then, *rb_h_then, large) if rb_h_then else {"sum": 0.0}
+        trend_feats[f"near_sum_m{k}"] = then_beyond["sum"]
+        # log-ratio build: >0 stack grew into the touch, <0 pulled
+        trend_feats[f"stack_build_{k}"] = float(np.log((near["sum"] + 1.0) / (then_beyond["sum"] + 1.0)))
+        trend_feats[f"hold_build_{k}"] = float(np.log((hold_near["sum"] + 1.0) / (then_hold["sum"] + 1.0)))
+        # MBO pull-rate on beyond near band over [-tm, 0)
+        a_l, c_l, _, _ = _mbo_band_flow(sof, t_touch - int(tm * NS_PER_MS), t_touch, want_bid=want_bid_beyond, px_lo=near_lo, px_hi=near_hi)
+        trend_feats[f"pull_rate_pre{k}"] = _pull_rate(a_l, c_l)
+    # baseline for the 10 s / 30 s pull rates at grid points (offset-matched bands)
+    for tm in cfg.book_trend_ms[:2]:
+        k = tm // 1000
+        s_p: list[float] = []
+        for t_s in grid_times:
+            bb_s, aa_s = book_at[t_s]
+            rb = _off_band(bb_s, aa_s, cfg.tick_radius)
+            if rb is None:
+                continue
+            a_s, c_s, _, _ = _mbo_band_flow(sof, t_s, t_s + int(tm * NS_PER_MS), want_bid=want_bid_beyond, px_lo=rb[0], px_hi=rb[1])
+            s_p.append(_pull_rate(a_s, c_s))
+        trend_feats[f"pull_rate_z{k}"] = _robust_z(trend_feats[f"pull_rate_pre{k}"], np.asarray(s_p))
+
     # --- consume of the beyond stack in [0, +2s]
     stack0 = near["sum"] + far["sum"]
     i0 = int(np.searchsorted(sof.t_ts, t_touch, side="left"))
@@ -609,6 +647,16 @@ def score_event(
     consume_frac = consumed / stack0 if stack0 > 0 else (1.0 if consumed > 0 else 0.0)
     s_beyond_at = sof.sliding_sums(cs_beyond, b0, b1, at_ns, step_ns)
     beyond_consume_z = _robust_z(consumed, s_beyond_at)
+    # variable-window consume fractions for the confirmation-time sweep
+    consume_frac_w: dict[int, float] = {}
+    for wm in cfg.consume_windows_ms:
+        i1w = int(np.searchsorted(sof.t_ts, t_touch + int(wm * NS_PER_MS), side="right"))
+        cw = 0.0
+        if i1w > i0:
+            slw = slice(i0, i1w)
+            mw = (sof.t_buy[slw] == beyond_buy) & (sof.t_px[slw] >= band_lo) & (sof.t_px[slw] <= band_hi)
+            cw = float(sof.t_sz[slw][mw].sum())
+        consume_frac_w[wm // 1000] = cw / stack0 if stack0 > 0 else (1.0 if cw > 0 else 0.0)
 
     # --- tracker-based flags (session-relative large levels)
     take_flag = 0.0
@@ -674,6 +722,18 @@ def score_event(
         0.40 * _clip(pull_rate_z, -C, C) + 0.30 * _clip(depletion * 2.0, -C, C) - 0.30 * _clip(replenish_z, -C, C), -C, C
     )
     stack_consume = _clip(0.5 * _clip(near_sum_z, -C, C) + 0.5 * _clip((consume_frac - 0.5) * 4.0, -C, C), -C, C)
+    stack_consume_w = {
+        k: _clip(0.5 * _clip(near_sum_z, -C, C) + 0.5 * _clip((cf - 0.5) * 4.0, -C, C), -C, C)
+        for k, cf in consume_frac_w.items()
+    }
+    # pre-touch book trajectory: stack pulled into the touch (+) vs built (−), plus short pull-rate z
+    stack_trend = _clip(
+        0.35 * _clip(-trend_feats.get("stack_build_30", 0.0) * 2.0, -C, C)
+        + 0.25 * _clip(-trend_feats.get("stack_build_10", 0.0) * 2.0, -C, C)
+        + 0.25 * _clip(trend_feats.get("pull_rate_z10", 0.0), -C, C)
+        + 0.15 * _clip(trend_feats.get("pull_rate_z30", 0.0), -C, C),
+        -C, C,
+    )
     attract_repel = _clip(ar, -C, C)  # reported only; ≡0 at IRT prices
     bl_both = _clip(0.45 * take_both + 0.30 * stack_consume + 0.25 * tape_both, -C, C)
     bl_pre = _clip(0.35 * take_pre + 0.25 * stack_score + 0.20 * tape_pre + 0.20 * mbo_pre, -C, C)
@@ -688,6 +748,7 @@ def score_event(
         "TapeScore_pre": tape_pre,
         "StackScore": stack_score,
         "MboScore_pre": mbo_pre,
+        "StackTrend_pre": stack_trend,
         "BreakLikeness_pre": bl_pre,
         # secondary leak-free windows
         "TakeScore_pre5": take_pre5, "TapeScore_pre5": tape_pre5,
@@ -720,6 +781,11 @@ def score_event(
         "post_vol": post_vol, "post_prints": post_prints,
     }
     out.update(feats)
+    out.update(trend_feats)
+    out["hold_fixed_sum"] = hold_fixed["sum"]
+    for k, v in stack_consume_w.items():
+        out[f"StackConsume_{k}s"] = v
+        out[f"consume_frac_{k}s"] = consume_frac_w[k]
     return out
 
 
@@ -735,6 +801,8 @@ def enrich_events_with_scores(events: pa.Table, sof: _SessionOF) -> pa.Table:
     for t in touches:
         times.append(t)
         times.append(t - pre_ns)  # book 2 s before touch (depletion)
+        for tm in cfg.book_trend_ms:
+            times.append(t - int(tm * NS_PER_MS))
         b0, b1, _ = sof.baseline_bounds(t)
         g = (b0 // grid_ns) * grid_ns
         while g < b1:

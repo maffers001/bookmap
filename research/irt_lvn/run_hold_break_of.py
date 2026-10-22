@@ -36,7 +36,7 @@ UK = ZoneInfo("Europe/London")
 OPEN = time(14, 30)
 CLOSE = time(17, 0)
 
-PRIMARY = ("TakeScore_pre", "TapeScore_pre", "StackScore", "MboScore_pre", "BreakLikeness_pre")
+PRIMARY = ("TakeScore_pre", "TapeScore_pre", "StackScore", "MboScore_pre", "StackTrend_pre", "BreakLikeness_pre")
 LONGPRE = ("TakeScore_pre5", "TapeScore_pre5", "TakeScore_pre10", "TapeScore_pre10", "TakeScore_leg")
 MECHANISM = ("TakeScore_at", "TapeScore_at", "TakeScore", "TapeScore", "StackConsume", "AttractRepelScore", "BreakLikeness")
 RAW = (
@@ -45,6 +45,9 @@ RAW = (
     "near_sum", "near_max", "near_n_large", "beyond_bbo_sum", "hold_near_sum", "book_imbalance", "far_sum",
     "band_offset_ticks", "net_add_z", "near_sum_z",
     "pull_rate_pre", "pull_rate_z", "replenish_n_pre", "replenish_z", "cancel_n_pre", "depletion_pre", "near_sum_m2",
+    "stack_build_10", "stack_build_30", "stack_build_60", "hold_build_10", "hold_build_30", "hold_build_60",
+    "near_sum_m10", "near_sum_m30", "near_sum_m60", "hold_fixed_sum", "pull_rate_pre10", "pull_rate_pre30", "pull_rate_z10", "pull_rate_z30",
+    "consume_frac_1s", "consume_frac_3s", "consume_frac_5s",
     "net_add", "beyond_consume", "consume_frac", "take_flag", "n_tracker_levels",
     "post_vol", "post_prints", "impulse_pts", "impulse_speed", "impulse_dur_s", "first_pierce_pts",
     "pre_touch_vol", "leg_last10_frac", "leg_max_pullback_pts", "beyond_share_leg", "beyond_minus_hold_z_leg",

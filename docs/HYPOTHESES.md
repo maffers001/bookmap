@@ -358,3 +358,15 @@ maxDD 261) with Oct/Sep context +422/+158. AMBIGUOUS dilutes every month
 level-specificity than Oct/Sep). **Status: pre-touch null; StackConsume-intact
 fade soft-confirms May — dig / forward-paper, not ship.** See
 `results/EXP-0043_STACK_FADE/`, `results/EXP-0043/`, `…_202609/`, `…_202605/`.
+**Follow-up dig EXP-0043_CONFIRM_DIG (b: approach-leg book, a: confirmation
+sweep + second filter; Oct+Sep train, May frozen):** (b) `StackTrend_pre`
+(stack build/pull over −10/−30/−60 s + MBO pull-rate z) δ −0.01 / 0.04 / −0.15
+≈ placebo → null; only `StackScore`/`near_sum_z` (bigger beyond wall → more
+breaks) keep one sign in all three months and beat placebo each month, but at
+δ 0.15–0.27 — a candidate, not a signal. (a) The intact-stack fade is positive
+in **12/12** confirmation-time × month cells (1/2/3/5 s) with no k winning
+every month; the best train second filter (`after 15 min`) adds Δavg +0.29 pt
+on May, < 1 SE → not adopted. Baseline-grid fix in the same pass moved the
+frozen numbers slightly: Oct +406 / Sep +142 / **May +160** (n 192, 8/17,
+maxDD 277). **Status unchanged: soft confirm; nothing found that cuts the
+AMB/BREAK false fades.**

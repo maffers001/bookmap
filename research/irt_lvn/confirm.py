@@ -42,6 +42,8 @@ class ConfirmConfig:
     gate_scores: tuple[str, ...] = ("TakeScore_at", "StackConsume", "BreakLikeness")
     gate_thresholds: tuple[float, ...] = (0.25, 0.5)
     reclaim_min_pierce_pts: float = 2.0  # a "reclaim" needs a real pierce first
+    confirm_sweep_ms: tuple[int, ...] = (1_000, 3_000, 5_000)  # extra confirmation times (fade/cont at tc)
+    sweep_bracket: tuple[float, float] = (30.0, 15.0)
 
     @property
     def slip_pts(self) -> float:
@@ -143,10 +145,32 @@ def confirmation_table(trades: pa.Table, events: pa.Table, cfg: ConfirmConfig) -
         for strat in ("fade_tc", "cont_tc", "fade_reclaim"):
             cols[f"pnl_{strat}_{tag}"] = []
             cols[f"exit_{strat}_{tag}"] = []
+    s_tp, s_sl = cfg.sweep_bracket
+    s_tag = f"tp{s_tp:g}_sl{s_sl:g}"
+    for cm in cfg.confirm_sweep_ms:
+        k = cm // 1000
+        for name in (f"undecided_{k}s", f"pierce_{k}s", f"px_hold_side_{k}s", f"pnl_fade_{k}s_{s_tag}", f"pnl_cont_{k}s_{s_tag}"):
+            cols[name] = []
 
     for t0, L, a in zip(touches, levels, apps):
-        tc = t0 + conf_ns
         t_stop = t0 + hor_ns
+        fade_side = -a
+        cont_side = a
+        # confirmation-time sweep (fixed sweep bracket)
+        for cm in cfg.confirm_sweep_ms:
+            k = cm // 1000
+            tck = t0 + int(cm * 1_000_000)
+            p_k, pierce_k, undec_k, _, _ = _state_at(ts, px, t0, tck, L, a, cfg.reject_pts, cfg.extension_pts)
+            cols[f"undecided_{k}s"].append(1.0 if undec_k else 0.0)
+            cols[f"pierce_{k}s"].append(pierce_k)
+            cols[f"px_hold_side_{k}s"].append(1.0 if (p_k - L) * (1.0 if a > 0 else -1.0) <= 0.0 else 0.0)
+            for strat, side in (("fade", fade_side), ("cont", cont_side)):
+                if not undec_k:
+                    cols[f"pnl_{strat}_{k}s_{s_tag}"].append(float("nan"))
+                    continue
+                pnl, reason, _ = bracket_pnl(ts, px, tck, side, s_tp, s_sl, t_stop, slip, comm)
+                cols[f"pnl_{strat}_{k}s_{s_tag}"].append(float("nan") if reason == "no_fill" else pnl)
+        tc = t0 + conf_ns
         p_tc, pierce, undec, rej, tb = _state_at(ts, px, t0, tc, L, a, cfg.reject_pts, cfg.extension_pts)
         cols["px_at_tc"].append(p_tc)
         cols["pierce_at_tc"].append(pierce)
@@ -160,8 +184,7 @@ def confirmation_table(trades: pa.Table, events: pa.Table, cfg: ConfirmConfig) -
         else:
             pr = 0.0
         cols["reclaim_pierce_pts"].append(pr)
-        fade_side = -a   # approach +1 (from below): fade = short
-        cont_side = a
+        cols.setdefault("px_hold_side_tc", []).append(1.0 if (p_tc - L) * (1.0 if a > 0 else -1.0) <= 0.0 else 0.0)
         for tp, sl in cfg.brackets:
             tag = f"tp{tp:g}_sl{sl:g}"
             for strat, side, trig in (("fade_tc", fade_side, tc), ("cont_tc", cont_side, tc), ("fade_reclaim", fade_side, t_rc)):
