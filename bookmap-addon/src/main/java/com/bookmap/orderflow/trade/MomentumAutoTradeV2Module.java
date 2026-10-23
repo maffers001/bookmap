@@ -154,6 +154,7 @@ public class MomentumAutoTradeV2Module implements
     private Boolean lastSyncedAllowLongs;
     private Boolean lastSyncedAllowShorts;
     private boolean sideHotkeysInstalled;
+    private final MatTradeControl.Flattener flattenAction = this::flattenPosition;
 
     /**
      * When true, orders use Bookmap's Account dropdown for this instrument
@@ -383,6 +384,7 @@ public class MomentumAutoTradeV2Module implements
             MatSideHotkeys.install();
             sideHotkeysInstalled = true;
         }
+        MatTradeControl.register(flattenAction);
 
         Log.info("Momentum AutoTrade v3 init on " + alias
                 + " role=" + primary.role
@@ -1209,6 +1211,59 @@ public class MomentumAutoTradeV2Module implements
         }
     }
 
+    /** Market-close open position (no brackets). Invoked from MAT Side console. */
+    private void flattenPosition() {
+        int pos = flatCheckPosition();
+        int size = Math.abs(pos);
+        if (size <= 0) {
+            size = Math.abs(netFills);
+        }
+        if (size <= 0) {
+            Log.info("MAT2 FLATTEN: already flat (pos=" + position + " netFills=" + netFills + ")");
+            return;
+        }
+        if (api == null || primaryAlias == null) {
+            Log.info("MAT2 FLATTEN: no api/alias");
+            return;
+        }
+        if (!Boolean.TRUE.equals(enableTrading)) {
+            Log.info("MAT2 FLATTEN: trading disabled — side filter already NONE; enable trading to market-close");
+            return;
+        }
+        boolean isBuy = pos < 0; // cover short with buy, long with sell
+        refreshTradingAccountId("flatten");
+        flatLocked = true;
+        pendingReverse = false;
+        try {
+            SimpleOrderSendParametersBuilder builder = new SimpleOrderSendParametersBuilder(
+                    primaryAlias,
+                    isBuy,
+                    size,
+                    OrderDuration.GTC,
+                    null,
+                    Double.NaN,
+                    Double.NaN,
+                    0,
+                    0,
+                    0,
+                    0,
+                    false);
+            if (tradingAccountId != null && !tradingAccountId.isEmpty()) {
+                builder.setAccountId(tradingAccountId);
+            }
+            api.sendOrder(builder.build());
+            Log.info(String.format(
+                    "MAT2 FLATTEN sent %s size=%d (close pos=%d netFills=%d) account=%s",
+                    isBuy ? "BUY" : "SELL",
+                    size,
+                    pos,
+                    netFills,
+                    tradingAccountId == null ? "null(primary)" : tradingAccountId));
+        } catch (Throwable t) {
+            Log.info("MAT2 FLATTEN failed: " + t);
+        }
+    }
+
     private void sendBracketOrder(boolean isBuy, double entryPricePoints, boolean force) {
         int size = Math.max(1, orderSize == null ? 1 : orderSize.intValue());
         InstrumentState nq = byAlias.get(primaryAlias);
@@ -1625,6 +1680,7 @@ public class MomentumAutoTradeV2Module implements
 
     @Override
     public void stop() {
+        MatTradeControl.unregister(flattenAction);
         if (sideHotkeysInstalled) {
             MatSideHotkeys.uninstall();
             sideHotkeysInstalled = false;

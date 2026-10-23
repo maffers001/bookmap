@@ -75,16 +75,31 @@ public final class MatControlPanel {
         toggles.add(toggleLongs);
         toggles.add(toggleShorts);
 
+        JButton flatten = new JButton("FLATTEN");
+        flatten.setForeground(Color.WHITE);
+        flatten.setBackground(new Color(0xB7, 0x1C, 0x1C));
+        flatten.setOpaque(true);
+        flatten.setBorderPainted(false);
+        flatten.setFont(flatten.getFont().deriveFont(Font.BOLD, 14f));
+        flatten.setToolTipText("Set side filter to NONE and market-close open MAT position(s)");
+        flatten.addActionListener(e -> MatTradeControl.flattenAll());
+        JPanel flattenRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 4));
+        flattenRow.add(flatten);
+
         JLabel footer = new JLabel(
                 "<html><center>Ctrl+Shift+L/K toggle &nbsp; B both &nbsp; X off<br/>"
                         + "(works with panel or Bookmap focused)</center></html>",
                 SwingConstants.CENTER);
         footer.setBorder(BorderFactory.createEmptyBorder(4, 8, 8, 8));
 
+        JPanel mid = new JPanel(new BorderLayout(0, 4));
+        mid.add(toggles, BorderLayout.NORTH);
+        mid.add(flattenRow, BorderLayout.CENTER);
+
         JPanel center = new JPanel(new BorderLayout(0, 8));
         center.setBorder(BorderFactory.createEmptyBorder(8, 10, 4, 10));
         center.add(modes, BorderLayout.NORTH);
-        center.add(toggles, BorderLayout.CENTER);
+        center.add(mid, BorderLayout.CENTER);
 
         frame.getContentPane().setLayout(new BorderLayout());
         frame.getContentPane().add(statusLabel, BorderLayout.NORTH);
@@ -153,7 +168,7 @@ public final class MatControlPanel {
                 statusLabel.setBackground(new Color(0x15, 0x65, 0xC0));
                 statusLabel.setForeground(Color.WHITE);
             } else if (shorts) {
-                statusLabel.setBackground(new Color(0xEF, 0x6C, 0x00));
+                statusLabel.setBackground(new Color(0xC6, 0x28, 0x28)); // red — shorts only
                 statusLabel.setForeground(Color.WHITE);
             } else {
                 statusLabel.setBackground(new Color(0x61, 0x61, 0x61));
