@@ -194,8 +194,11 @@ public final class MatControlPanel {
     public static void showPanel() {
         Runnable r = () -> {
             try {
-                if (instance == null) {
+                boolean first = instance == null;
+                if (first) {
                     instance = new MatControlPanel();
+                    // Start with indicator off (no new signals until user picks a side).
+                    MatSideFilter.set(false, false, "panel open");
                 }
                 instance.showNow();
             } catch (Throwable t) {

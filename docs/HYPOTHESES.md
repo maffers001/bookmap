@@ -36,7 +36,9 @@ Restricting events to CD MA direction (22-tick range CD with 100 SMA / Bollinger
 
 **Test:** EXP-0009 (post-filter on existing events). First result: with-flow hurts H2 absorb-fade; against-trend looks better. Pullback∩OF rare — next design should emit CD pullbacks as primary events.
 
-**Follow-up EXP-0014:** Pre-fix primary weak on hit; ×mom path strong but hit loses to 0008 → demoted to gate. Points re-run (causal): n=49 hit10 **0.55** / @60s **+7.8**. MAT *gate* new cohort fails (−182) — do not ship as filter. **Reopen dig:** standalone CD×mom entries under MAT vol-k=1 P&L (not vs 0008 hit%).
+**Follow-up EXP-0014:** Pre-fix primary weak on hit; ×mom path strong but hit loses to 0008 → demoted to gate. Points re-run (causal): n=49 hit10 **0.55** / @60s **+7.8**. MAT *gate* new cohort fails (−182) — do not ship as filter.
+
+**EXP-0014_PNL (2026-10-23):** standalone CD×mom under vol k=1, no gate, Sep+Oct train. **Bar FAIL** — n=89 net **−110.6** (Sep −104 / Oct −6); avg −1.24 < momentum-only −0.64; ≪ null p90 +225; May not read. **Status: reject / park.** Event-study path did not survive as a P&L book.
 
 ## H7 — Dual-market LVN rejection
 
@@ -80,7 +82,9 @@ Large resting size near BBO on **both** ES and NQ is challenged (price approache
 
 A single `aggressor_order_id` that prints ≥min_prints with ≥min_vol and price span ≥min_span_ticks is a “without hesitation” sweep. When NQ and ES both produce a same-side sweep within a short sync window (prefer |ES lag| &lt; 250ms), short-horizon NQ continuation beats random null, NQ-only sweeps, and EXP-0008 100ms bar bursts.
 
-**Test:** EXP-0017. **Result (pre-fix):** dual hit+10 52% vs null 43% vs look-ahead 0008 85% — killed for ≪0008 while beating null. **Reopen:** points event study then conditional MAT P&L; 0008 is a continuation overlay bar, not an auto-reject when null is beaten.
+**Test:** EXP-0017. **Result (pre-fix):** dual hit+10 52% vs null 43% vs look-ahead 0008 85% — killed for ≪0008 while beating null.
+
+**EXP-0017_REOPEN (2026-10-23):** points event study, qualify+confirm stamps, Sep+Oct. dual_q n=3672 hit10 0.45 / @60s +0.63. Stage-1 bar **FAIL** (Sep pass; Oct hit10 lift vs null_large +0.048 < required +0.05). Forced May: Stage-1 PASS (hit10 0.49) but Stage-2 vol k=1 **−1344** (n=866). **Status: reject / park.**
 
 ## H13 — Correlated near-BBO MBO vacuum
 
@@ -408,6 +412,7 @@ Develop on Oct; Sep and May read once. NQ book only.
 Oct T0 net −88 ≤ placebo; old stratum nearly empty (n≤1); Sep T0 flips to
 +88; May T0 −82. Age claims fail on train. Retest arms thin/negative.
 **Status: reject / park.** See `results/EXP-0045_OPEN/`.
+2026-10-23 rebook (depth-seed fix): Oct T0 +32 ≤ placebo +110, n=12 — reject unchanged (`results/EXP-0045_REBOOK/`).
 
 ## H37 — ES open-book standout resting orders as levels
 
@@ -425,3 +430,4 @@ Develop on Oct; Sep and May read once.
 Old ≰ placebo on Oct; R0 negative every month. Pull fresh>old on Oct (spoof
 direction OK) but not a trade. **Status: reject / park.** See
 `results/EXP-0046_OPEN_ES/`.
+2026-10-23 rebook (depth-seed fix): Oct T0 −31, all brackets ≤0, n=20 — reject unchanged (`results/EXP-0046_REBOOK_ES/`).

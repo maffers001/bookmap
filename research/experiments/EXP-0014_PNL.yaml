@@ -1,0 +1,61 @@
+name: EXP-0014_PNL
+hypothesis: H6
+title: Standalone CD-pullback × ES+NQ momentum — vol k=1 P&L book
+description: >
+  Reopen dig of EXP-0014: run the frozen CD-pullback × ES+NQ-momentum confirmed
+  events as their own entries under MAT-sim vol k=1 (no gate). Yardstick is
+  P&L vs null and vs the momentum-only parent — not hit% vs EXP-0008. Event
+  parameters copied verbatim from EXP-0014.yaml; no retune.
+
+# --- Event construction (frozen = EXP-0014.yaml) ---
+detector: cd_pullback_momentum_pnl
+range_ticks: 22
+tick_size: 1.0
+sma_len: 100
+slope_lookback: 5
+pullback_frac_of_bb: 0.35
+cd_cooldown_bars: 3
+bar_ms: 100
+min_trades: 6
+min_vol: 25
+min_imbalance: 0.55
+min_progress_ticks: 1.0
+sync_ms: 1500
+confirm_window_ms: 2000
+rth_uk_only: true
+
+# --- Sim (MAT yardstick) ---
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+signal_cooldown_sec: 5.0
+flat_only: true
+primary_bracket: vol_k1   # make_vol_bracket(1.0)
+# Secondary brackets are reported only; never selected on train.
+secondary_brackets: [vol_rr_1_2, fixed_10_10]
+
+# --- Cohorts ---
+# Train = Sep + Oct (all converted). Mar/Aug shown separately. May read once
+# only if the pre-registered bar passes. Session IDs are DDMMYY.
+train_months: [202609, 202610]
+show_months: [202603, 202608]
+oos_month: 202605
+null_seeds: 50
+
+# --- Pre-registered bar (all required on train = Sep+Oct) ---
+# (1) net > 0 in Sep AND Oct separately
+# (2) train net ≥ p90 of 50-seed null
+# (3) avg/trade ≥ momentum-only parent avg/trade
+# (4) n_train ≥ 100
+# (5) top-3 session share of +net ≤ 0.55 AND leave-one-session-out net < 0 on ≤ 2 drops
+bar:
+  min_n_train: 100
+  max_top3_share_of_pos: 0.55
+  max_loo_neg: 2
+  # Power note (stated in report): ~3.5 events/day → ~100 trades on 30 train
+  # days, SE ≈ 2 pt/trade. Only a large effect can clear; a miss at this n is
+  # "thin", not "falsified".
+  target_n: 100
+  mde_note: "SE≈2 pt/trade at n≈100; bar requires large effect"
+
+horizons_ms: [10000, 60000]
+point_targets: [5, 10, 20]

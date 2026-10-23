@@ -10,11 +10,10 @@
 
 The best edge is the **correlated-exhaustion fade (CFADE, EXP-0036 DIG4)** — the
 only idea that made money on untouched May 2026 in the same regime where MAT
-lost. The best *unexplored* upside is **standalone CD-pullback × momentum
-(EXP-0014)** — strongest corrected event-study path, never run as its own P&L
-book. Depth / LVN / level ideas are dead (one narrow construction exception).
-The deliverable is increasingly a **two-book portfolio** (MAT continuation +
-CFADE fade), not a single strategy.
+lost. Dig backlog: EXP-0014_PNL and EXP-0017_REOPEN both **reject/park**
+(2026-10-23). Next dig: EXP-0033 high-vol overlay. Depth / LVN / level ideas are
+dead (one narrow construction exception). The deliverable is increasingly a
+**two-book portfolio** (MAT continuation + CFADE fade), not a single strategy.
 
 ---
 
@@ -67,28 +66,22 @@ Results: `results/MAT2_MAY2026_VOLK1_SKIP_RANGE175/`.
 
 Order matches the 2026-10-19 audit in `EXPERIMENT_LOG.md`. Agree with that order.
 
-### 3. EXP-0014 — standalone CD pullback × momentum — highest EV per hour of work
+### 3. EXP-0014 — standalone CD pullback × momentum — **DONE reject/park (2026-10-23)**
 
 Corrected points (14d, causal): **n=49, hit+10 0.55** (vs 0.44 raw 0008),
 **@60s +7.8**, MFE 20.1 / MAE 11.7 — best path asymmetry of any event set.
 
-Killed unfairly twice: vs look-ahead 85% comparator; as a *gate* on MAT (new
-cohort disagreed). **Never run as standalone entries under MAT vol-k=1 P&L.**
+**EXP-0014_PNL:** standalone vol k=1, Sep+Oct n=89 net **−110.6**; bar FAIL
+(both months ≤0, avg < momentum parent, ≪ null p90). May not read. Event-study
+path does not survive as a P&L book. See `results/EXP-0014_PNL/`.
 
-- Yardstick: P&L vs null, not vs 0008 hit%.
-- Watch: n=49 over 14d may be day-clustered — report per-session concentration
-  (DIG2/DIG3 style) before believing it.
-- If it P&Ls even at half the event-study promise → third diversifying book
-  (pullback-timing ≠ burst-chase MAT ≠ burst-fade CFADE).
-
-### 4. EXP-0017 — aggressor sweeps (cheap reopen)
+### 4. EXP-0017 — aggressor sweeps — **DONE reject/park (2026-10-23)**
 
 Pre-fix: dual hit+10 52% vs null 43%; killed solely vs void 0008 85%.
-Never had a points event study. Closest formalisation of discretionary
-"without hesitation" sweep language that hasn't been properly tested.
 
-- Step 1: points event study (60 s).
-- Step 2: MAT P&L only if it still beats large-n null (~0.40 hit10), not 0008.
+**EXP-0017_REOPEN:** Stage-1 points bar FAIL (Sep pass / Oct miss hit10 vs
+null by 0.2 pp). dual_q n=3672 hit10 0.45 / @60s +0.63 — beats NQ-only but not
+month-stable vs large-n null. Stage 2 / May not run. See `results/EXP-0017_REOPEN/`.
 
 ### 5. EXP-0033 — high-vol simultaneous flow (overlay, not standalone)
 
@@ -234,8 +227,8 @@ directly monetisable.
 1. **Now:** CFADE test-autotrade forward (specced) + May side-split check;
    combined-book correlation / DD study (A).
 2. **Next experiments** (each ≤ a day, pre-registered kill bars):
-   EXP-0014 standalone P&L → EXP-0017 points re-run → EXP-0033 high-vol overlay
-   → dual_magnet one-shot.
+   ~~EXP-0014 standalone P&L~~ / ~~EXP-0017 sweeps~~ (both reject/park) →
+   EXP-0033 high-vol overlay → dual_magnet one-shot.
 3. **Then:** CFADE May anatomy strata (B) and MAT May diagnosis (C) — look once,
    freeze or drop.
 4. **Shadow / forward only:** HV retest and stop-run visual on fresh sessions.

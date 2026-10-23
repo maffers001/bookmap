@@ -141,10 +141,10 @@ public class MomentumAutoTradeModule implements
      * While trading prefer Ctrl+Shift hotkeys (see {@link MatSideHotkeys}).
      */
     @Parameter(name = "Allow longs")
-    Boolean allowLongs = true;
+    Boolean allowLongs = false;
 
     @Parameter(name = "Allow shorts")
-    Boolean allowShorts = true;
+    Boolean allowShorts = false;
 
     /** Ctrl+Shift+L/K toggle, Ctrl+Shift+B both, Ctrl+Shift+X none. */
     @Parameter(name = "Enable Ctrl+Shift side hotkeys")
@@ -309,7 +309,13 @@ public class MomentumAutoTradeModule implements
         if (Boolean.TRUE.equals(enableSideHotkeys)) {
             MatSideHotkeys.install();
             sideHotkeysInstalled = true;
+        } else {
+            MatControlPanel.showPanel();
         }
+        // Console / attach always starts with signals off (ignore saved Allow longs/shorts).
+        MatSideFilter.set(false, false, "mat attach start OFF");
+        lastSyncedAllowLongs = false;
+        lastSyncedAllowShorts = false;
         MatTradeControl.register(flattenAction);
 
         Log.info("Momentum AutoTrade init on " + alias

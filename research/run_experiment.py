@@ -139,7 +139,12 @@ def _load_trades(parquet_dir: Path, session_id: str, role: str) -> pa.Table:
     path = parquet_dir / f"session_id={session_id}" / "trades.parquet"
     if not path.exists():
         return pa.table({})
-    table = pq.read_table(path)
+    # partitioning=None: avoid hive-dir session_id (dict) merging with on-disk
+    # string column under older pyarrow Dataset readers.
+    try:
+        table = pq.read_table(path, partitioning=None)
+    except TypeError:
+        table = pq.ParquetFile(path).read()
     if role and "role" in table.column_names:
         roles = table.column("role").to_numpy(zero_copy_only=False)
         idx = np.where(roles == role)[0]

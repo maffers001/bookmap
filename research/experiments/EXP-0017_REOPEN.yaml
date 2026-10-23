@@ -1,0 +1,66 @@
+name: EXP-0017_REOPEN
+hypothesis: H12
+title: Aggressor sweeps reopen — points event study → conditional vol k=1 P&L
+description: >
+  Reopen EXP-0017 (H12): same-aggressor multi-print sweeps, dual ES+NQ.
+  Stage 1 = corrected points event study (60 s) vs null and NQ-only on Sep+Oct.
+  Stage 2 = standalone vol k=1 P&L book only if Stage 1 clears. Frozen detector
+  thresholds from EXP-0017.yaml; methodology stamp fix (qualify + confirm) only.
+  Yardstick is vs null / NQ-only / momentum parent — not vs look-ahead 0008 85%.
+
+# --- Detector (frozen = EXP-0017.yaml) ---
+detector: aggressor_sweep_reopen
+min_prints: 5
+min_vol: 5
+min_span_ticks: 1
+max_duration_ms: 2000
+sync_ms: 1500
+max_es_lag_ms: 250
+tick_size: 1.0
+cooldown_ms: 500
+# Methodology stamps (not a threshold retune)
+sweep_stamp: qualify   # primary; end reported alongside
+dual_stamp: confirm    # event_ts = max(nq, es)
+rth_uk_only: true
+
+# --- Event study ---
+horizons_ms: [10000, 60000]
+point_targets: [5, 10, 20]
+null_large_n_per_session: 200
+
+# --- Sim (Stage 2, MAT yardstick) ---
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+signal_cooldown_sec: 5.0
+flat_only: true
+primary_bracket: vol_k1
+secondary_brackets: [vol_rr_1_2, fixed_10_10]
+
+# --- Cohorts ---
+train_months: [202609, 202610]
+show_months: [202603, 202608]
+oos_month: 202605
+null_seeds: 50
+
+# --- Stage-1 bar (points event; all required on Sep AND Oct separately) ---
+# dual_q hit10 ≥ null_large + 0.05 AND @60s mean > null_large AND
+# hit10 ≥ nq_only_q + 0.03; n_dual ≥ 100 per month.
+stage1_bar:
+  min_n_per_month: 100
+  hit10_vs_null_pp: 0.05
+  hit10_vs_nq_only_pp: 0.03
+  # @60s mean must exceed null_large mean (strict >)
+
+# --- Stage-2 bar (P&L; = EXP-0014_PNL verbatim) ---
+stage2_bar:
+  min_n_train: 100
+  max_top3_share_of_pos: 0.55
+  max_loo_neg: 2
+  target_n: 100
+  mde_note: >
+    Pre-fix ≈60 dual/day; with |lag|≤250 + confirm expect 20–40/day →
+    600–1200 Stage-1 events / ~300–500 Stage-2 trades on 30 days (SE≈1.1 pt).
+
+power_note: >
+  Best-powered dig in the backlog. A miss at this n is informative; Stage 1
+  fail → reject/park H12 with no Stage 2 / May / threshold neighbours.

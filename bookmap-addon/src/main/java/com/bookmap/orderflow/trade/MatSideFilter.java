@@ -14,8 +14,9 @@ import velox.api.layer1.common.Log;
  */
 public final class MatSideFilter {
 
-    private static final AtomicBoolean ALLOW_LONGS = new AtomicBoolean(true);
-    private static final AtomicBoolean ALLOW_SHORTS = new AtomicBoolean(true);
+    /** Default OFF — console / attach start with no new signals until user enables a side. */
+    private static final AtomicBoolean ALLOW_LONGS = new AtomicBoolean(false);
+    private static final AtomicBoolean ALLOW_SHORTS = new AtomicBoolean(false);
     private static final List<BiConsumer<Boolean, Boolean>> LISTENERS = new CopyOnWriteArrayList<>();
 
     private MatSideFilter() {}

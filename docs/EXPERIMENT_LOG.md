@@ -22,10 +22,12 @@
 | EXP-0011 | H7 dual LVN rejection | re-run 14d (see notes) | 14d | was falsified on 5d ticks |
 | EXP-0012 | H8 liquidity flip at LVN | needs re-run (units/comparator) | 5d | flip=0; beyond-only n=3 (one cluster) — not validated |
 | EXP-0013 | H9 correlated dwell/repel | needs re-run (units/comparator) | 5d | uncontacted dwell/withdraw almost never closes on NQ abs≥50 |
-| EXP-0014 | H6 CD pullback primary | **reopen dig** (standalone P&L) | 14d→23d | best path in points; MAT *gate* failed OOS; never MAT-sim'd as own entries |
+| EXP-0014 | H6 CD pullback primary | event study done; gate failed | 14d→23d | best path in points; MAT *gate* failed OOS |
+| EXP-0014_PNL | H6 standalone CD×mom P&L | **reject / park** | 30d Sep+Oct (+4 show); May not read | bar FAIL: Sep −104 / Oct −6; n=89; avg −1.24 < mom −0.64; ≪ null p90; see notes |
 | EXP-0015 | H10 CD BB regime × momentum | needs re-run (units/comparator) | 5d→14d ticks | wide≈narrow; non-monotonic in 14d tick re-run |
 | EXP-0016 | H11 dual challenge-wo-trade ± LVN × narrow BB | re-run 14d (see notes) | 14d | |
-| EXP-0017 | H12 aggressor sweep momentum | **reopen** points+P&L dig | 5d | beat null; killed only vs look-ahead 0008 85% — never points re-run |
+| EXP-0017 | H12 aggressor sweep momentum | pre-fix only | 5d | beat null; killed vs look-ahead 0008 85% |
+| EXP-0017_REOPEN | H12 sweeps points → conditional P&L | **reject / park** | 30d Sep+Oct; forced May once | Stage-1 FAIL on train (Oct); forced May Stage-1 PASS / Stage-2 −1344; see notes |
 | EXP-0018 | H13 near-BBO MBO vacuum | needs re-run (units/comparator) | 5d | dual hit+10 40% ≈ null 41%; n=5245 no edge |
 | EXP-0019 | H14 VPOC/HVN departure (S20/S4 port) | needs re-run (units/comparator) | 5d | S20 hit+10 40% / S4 36% ≤ null 46% vs old 0008 85%; scalp horizon ≠ TP 25pt holds |
 | EXP-0020 | H15 near-book depth imbalance | pressure **reject**; dual_magnet **tiny dig** | 14d | dual_magnet n=20 hit10 0.70 / @10s +6.2 — never MAT P&L |
@@ -61,6 +63,41 @@
 | EXP-0046 | H37 ES open-book standout resting levels | **reject / park** | 14d Oct + 15d Sep + 17d May | T0 −27/−27/−31 all months; all ES brackets ≤0 on Oct; R0 null; see notes |
 
 ## Run notes
+
+### 2026-10-23 — MAT August 2026 OOS (vol k=1, UK 14:30–17:00)
+
+- Same frozen base as May: causal ES, trend+VWAP, vol k=1, 1-tick, 0.25 pt/RT. Runner: `research/run_mat_august.py`. 15 sessions (`*0826`, same set as CFADE Aug).
+- Results: `results/MAT2_AUG2026_VOLK1/`. n=297 WR 0.49 net **−333**, days+ 4/15, portfolio high +208 then underwater to −333 (maxDD 541). Strong open (03–04 Aug) then mostly red; worst day 250826 (−125).
+- August is another **losing OOS month** on this base (alongside May). Do not retune.
+
+### 2026-10-23 — EXP-0017_REOPEN aggressor sweeps points → conditional P&L (H12)
+
+- Frozen detector from EXP-0017.yaml (min_prints 5 / min_vol 5 / span 1 / dur 2000 / cooldown 500). Methodology stamps only: `sweep_stamp=qualify`, `dual_stamp=confirm`, `|es_lag|≤250`. Runner: `python -m research.run_sweep_pnl`.
+- Stage 1 Sep+Oct (30 sessions): dual_q **n=3672** hit10 **0.45** / @60s **+0.63** vs null_large 0.38 / −0.04 vs nq_only 0.38 / −0.36 vs momentum 0.44 / +0.25. **Sep PASS** (hit10 0.437 ≥ null 0.338+0.05; @60s +0.58 > −0.50; ≥ nq_only +0.03; n=1445). **Oct FAIL** (hit10 0.460 vs null 0.412 — lift +0.048 < required +0.05; though @60s and vs nq_only clear). Mar/Aug show dual hit10 0.47 / @60s +0.23.
+- Stage 2 skipped on train. No threshold neighbours.
+- **Forced May OOS** (user request after train FAIL; frozen params; `--may-only`): Stage-1 **PASS** on May alone (n=3441 hit10 0.486 vs null 0.431 / nq_only 0.422; @60s +0.45 vs +0.07). Stage-2 vol k=1 **FAIL**: dual_q n=866 net **−1344** (days+ 6/17, maxDD 1505) ≪ null p90 +362; MAT base also −264 that month. Results: `results/EXP-0017_REOPEN_MAY/`.
+- **Decision: reject / park H12.** Train Stage-1 not month-stable (Oct miss); forced May event study looks fine but the P&L book loses badly. Do not reopen on May-selected filters. Results: `results/EXP-0017_REOPEN/`, `…_MAY/`.
+
+### 2026-10-23 — EXP-0014_PNL standalone CD-pullback × momentum P&L (H6 reopen)
+
+- Frozen event params from EXP-0014.yaml (no retune). Entries = CD pullback ∩ same-side ES+NQ momentum within 2 s, stamped at `max(pb, burst)`. Sim: MAT-sim vol k=1, 1-tick slip, 0.25 pt/RT, flat-only, 5 s cooldown, **no gate**. Runner: `python -m research.run_cd_pullback_pnl`.
+- Train Sep+Oct (30 sessions): **cd_x_mom n=89 net −110.6** (Sep −104.2 / Oct −6.4, days+ 12/30, maxDD 409). Momentum-only parent −844 (avg −0.64); CD-only −1118; MAT base **+398**. Null 50-seed mean −2.2 / p90 **+224.7**. Top3 share of +net 0.577; LOO remaining-net<0 on 29/30 drops. Mar/Aug show n=12 net −1.8.
+- Pre-registered bar **FAIL** on all five checks (month nets, vs null p90, avg ≥ mom, n≥100, concentration). **May not read.** No parameter neighbours.
+- **Decision: reject / park.** The event-study path (@60s +7.8 on n=49) does not survive as a vol k=1 P&L book; CD×mom underperforms its own momentum parent on avg/trade. Results: `results/EXP-0014_PNL/`.
+
+### 2026-10-23 — ES open-cluster ∩ LVN confluence fade (Oct develop → Sep/May once)
+- **Idea:** large open resting clusters near IRT LVN2/3 hold better on first-touch fade than clusters without LVN.
+- **Oct:** near-LVN (≤10 pts) hit *more* (magnet); NQ fades worse near LVN; **ES** outside+2 SL8/TP16 near avg +5.44 vs far −0.17.
+- **Frozen (no retune):** ES only · cluster ≤10 pts of LVN · fade limit 2 pts outside · SL8/TP16.
+- **Sep:** near n=19 net **+12** avg +0.61 vs far −2.45 (lift holds).
+- **May:** near n=19 net **+44** avg +2.30 vs far −1.03 (lift holds). Sum three months near **+202**.
+- At-level ES SL5/TP10 **flips** Sep/May (−27 / −18) — reject tight at-level.
+- **Decision: soft confirm / dig — ES only.** Not NQ. Results: `results/OPEN_CLUSTER_LVN_CONFLUENCE_ES_OOS/`, month dirs `…_OCT/_SEP/_MAY/`.
+
+### 2026-10-23 — EXP-0045/0046 Oct rebook after depth-seed fix
+- **Bug:** `prepare_session_of` kept an early `init_books` seed while slicing depth to the last 30 min lookback, leaving stale ask size and crossed BBOs (e.g. ES 7769.5 labelled resistance below open). Fix: fold any pre-`lo_ext` depth into init before slicing (`research/irt_lvn/of_scores.py`). EXP-0043/0044 unaffected (init already matched lookback).
+- **EXP-0045 Oct redo** (`results/EXP-0045_REBOOK/`): n=12 touches; T0 vol2 **+32** but **≤ placebo +110**; `old_T0_gt_placebo` False; T2 empty. Still thin; reject unchanged.
+- **EXP-0046 Oct redo** (`results/EXP-0046_REBOOK_ES/`): n=20 touches; T0 vol2 **−31** (all ES brackets ≤0); old ≰ placebo; R0 negative. Reject unchanged. Sep/May not re-run (Oct alone does not revive either book).
 
 ### 2026-10-22 — EXP-0046 ES open-book standout resting orders (H37)
 
@@ -314,16 +351,16 @@ Same mistake pattern as the first EXP-0036 fade close: treating continuation hit
 |------|-------------------------------------|--------------|------------|
 | EXP-0036 fade | Hit ≪ 0008; P&L +479 | No — **frozen DIG4** | Test auto-trade (spec) |
 | EXP-0035 absorb fade | Framed ≪ 0008 | **Yes** — dual≈NQ-only + train P&L all negative | No reopen |
-| **EXP-0014** CD×mom | Pre-fix: nice path but hit **loses to 0008**; demoted to gate; gate new −182 | Gate stay closed | **Standalone** causal CD×mom events → vol k=1 P&L (23d). Yardstick = P&L vs null, not vs 0008 hit |
-| **EXP-0017** sweeps | Beat null 52% vs 43%; killed solely vs 0008 **85%** | Unknown | Points event study (60s) → if still beats null, MAT P&L as alternate entry |
+| **EXP-0014** CD×mom | Pre-fix: nice path but hit **loses to 0008**; demoted to gate; gate new −182 | Gate stay closed; **EXP-0014_PNL reject/park** (Sep+Oct −110.6) | Done — event-study path did not survive as P&L book |
+| **EXP-0017** sweeps | Beat null 52% vs 43%; killed solely vs 0008 **85%** | **EXP-0017_REOPEN reject/park** (Stage-1 FAIL Oct) | Done — points bar not month-stable; no Stage 2 / May |
 | **EXP-0020** dual_magnet | Points: n=20 hit10 **0.70** / @10s **+6.2**; parked “dig only”, never dug | Pressure stay closed | Tiny-n MAT P&L dig (expect thin; one shot) |
 | **EXP-0033** high-vol | Beat null / ≈0008 in ticks; parked “no holdout”; base flow later called dead vs 0008 | Base flow stay closed | High-vol+price stratum as MAT overlay / alternate entry on 23d P&L |
 
 **Not the same mistake (correctly closed):** fades ≈null in points (0005/0006/0011/0016/0019/0026/0027/0031); continuations ≈null (0029/0032/0018/0021); swing-break 0025 no hit lift in points; CD *gate* on MAT (new cohort disagree). Pre-fix “≪0008 85%” rows that also fail null stay dead without a dig.
 
 **Dig backlog order (EXP-0036 fade frozen; next reopen digs):**
-1. EXP-0014 standalone CD×mom MAT P&L
-2. EXP-0017 points re-run → conditional P&L
+1. ~~EXP-0014 standalone CD×mom MAT P&L~~ — **reject/park** (EXP-0014_PNL, 2026-10-23)
+2. ~~EXP-0017 points re-run → conditional P&L~~ — **reject/park** (EXP-0017_REOPEN, 2026-10-23)
 3. EXP-0033 high-vol holdout P&L
 4. EXP-0020 dual_magnet one-shot P&L (lowest priority)
 

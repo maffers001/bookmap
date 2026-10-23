@@ -242,16 +242,35 @@ def prepare_session_of(
 
     # --- depth
     d_ts0 = depth.column("ts_ns").to_numpy().astype(np.int64)
+    d_bid_all = depth.column("is_bid").to_numpy().astype(bool)
+    d_px_all = depth.column("price_ticks").to_numpy().astype(np.int64)
+    d_sz_all = depth.column("size").to_numpy().astype(np.int64)
+    init_bids, init_asks = ({}, {}) if init_books is None else (dict(init_books[0]), dict(init_books[1]))
+
+    # If the caller seeded ``init_books`` earlier than ``lo_ext`` and passed a
+    # wider depth slice (e.g. open-book age_cap 2h vs z_lookback 30m), fold any
+    # pre-lo_ext rows into init before slicing. Otherwise stale size survives
+    # and the book at snap can be badly crossed (EXP-0045/0046 / export bug).
+    pre = np.where(d_ts0 < lo_ext)[0]
+    if len(pre):
+        pre = pre[np.argsort(d_ts0[pre], kind="stable")]
+        for i in pre:
+            book = init_bids if bool(d_bid_all[i]) else init_asks
+            px, sz = int(d_px_all[i]), int(d_sz_all[i])
+            if sz <= 0:
+                book.pop(px, None)
+            else:
+                book[px] = sz
+
     dm = (d_ts0 >= lo_ext) & (d_ts0 <= hi_ext)
     d_idx = np.where(dm)[0]
     if len(d_idx) == 0:
         return None
     d_order = d_idx[np.argsort(d_ts0[d_idx], kind="stable")]
     d_ts = d_ts0[d_order]
-    d_bid = depth.column("is_bid").to_numpy().astype(bool)[d_order]
-    d_px = depth.column("price_ticks").to_numpy().astype(np.int64)[d_order]
-    d_sz = depth.column("size").to_numpy().astype(np.int64)[d_order]
-    init_bids, init_asks = ({}, {}) if init_books is None else (dict(init_books[0]), dict(init_books[1]))
+    d_bid = d_bid_all[d_order]
+    d_px = d_px_all[d_order]
+    d_sz = d_sz_all[d_order]
 
     nz = d_sz[d_sz > 0]
     large_thr = int(max(cfg.large_size_min, np.percentile(nz, cfg.large_size_pct))) if len(nz) else cfg.large_size_min
