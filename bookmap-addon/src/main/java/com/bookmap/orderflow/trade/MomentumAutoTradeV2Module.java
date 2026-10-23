@@ -58,11 +58,14 @@ import velox.api.layer1.simplified.TimeListener;
 import velox.api.layer1.simplified.TradeDataListener;
 
 /**
- * Momentum AutoTrade <b>v2</b> — EXP-0008 tape momentum plus optional regime /
- * trend / VWAP gates and vol-scaled brackets (EXP-0034).
+ * Momentum AutoTrade <b>v3</b> (class still {@code MomentumAutoTradeV2Module}) —
+ * EXP-0008 tape momentum plus optional regime / trend / VWAP gates and
+ * vol-scaled brackets (EXP-0034). Side filter console via {@link MatControlPanel}
+ * when <b>MAT Hotkeys v3</b> is enabled.
  *
  * Leave v1 ({@code Momentum AutoTrade (ES+NQ)}) unchanged; do not enable trading
- * on both at once (they share {@link MatSideFilter}).
+ * on both at once (they share {@link MatSideFilter}). Log tags stay {@code MAT2}
+ * for replay compare tooling.
  *
  * Frozen research defaults (OOS 2026-10-18): Trend mode = with-trend (1),
  * Require VWAP side = true, Max ES lag = 250, <b>Vol-scaled brackets ON</b> with
@@ -74,7 +77,7 @@ import velox.api.layer1.simplified.TradeDataListener;
 @Layer1SimpleAttachable
 @Layer1TradingStrategy
 @Layer1MultiAccountTradingSupported
-@Layer1StrategyName("Momentum AutoTrade v2 (ES+NQ)")
+@Layer1StrategyName("Momentum AutoTrade v3 (ES+NQ)")
 @Layer1ApiVersion(Layer1ApiVersionValue.VERSION2)
 public class MomentumAutoTradeV2Module implements
         CustomModule,
@@ -381,7 +384,7 @@ public class MomentumAutoTradeV2Module implements
             sideHotkeysInstalled = true;
         }
 
-        Log.info("Momentum AutoTrade v2 init on " + alias
+        Log.info("Momentum AutoTrade v3 init on " + alias
                 + " role=" + primary.role
                 + " trading=" + Boolean.TRUE.equals(enableTrading)
                 + " longs=" + MatSideFilter.allowLongs()
@@ -1634,7 +1637,7 @@ public class MomentumAutoTradeV2Module implements
             }
         }
         byAlias.clear();
-        Log.info("Momentum AutoTrade v2 stopped. lastSignalSide=" + lastSignalSide
+        Log.info("Momentum AutoTrade v3 stopped. lastSignalSide=" + lastSignalSide
                 + " sideFilter=" + sideFilterLabel());
     }
 }

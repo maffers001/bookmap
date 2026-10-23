@@ -11,9 +11,9 @@ Custom Bookmap Layer 1 add-ons for NQ scalping with ES confirmation:
 | **Liquidity Reaction** | Large-order attract / repel / absorb / dwell / withdraw |
 | **ES/NQ Flow Confirm** | Normalized ES vs NQ flow agreement (attach on NQ; keep ES open) |
 | **Momentum AutoTrade (ES+NQ)** | v1 — EXP-0008 tape momentum signals (+ optional CD pullback); optional bracket orders |
-| **Momentum AutoTrade v2 (ES+NQ)** | v1 + regime/trend/VWAP gates + vol-scaled brackets (EXP-0034); leave v1 unchanged |
+| **Momentum AutoTrade v3 (ES+NQ)** | v1 + regime/trend/VWAP gates + vol-scaled brackets (EXP-0034); leave v1 unchanged (was labelled v2) |
 | **Correlated Fade AutoTrade (ES+NQ)** | H29 / EXP-0036_DIG4 frozen test auto-trade: fade an ES+NQ burst when NQ keeps pushing but ES flips against it; ER ≤ 0.30 gate; vol RR brackets SL 1R / TP 2R |
-| **MAT Hotkeys** | Classic companion: keyboard shortcuts for MAT long/short side filter |
+| **MAT Hotkeys v3** | Classic companion: always-on-top **MAT Side v3** panel + keyboard shortcuts for long/short side filter |
 | **Pitch and Catch** | High-vol peak/trough (“pitch”) then low-vol move away (“catch”); chart markers |
 | **HV Extreme Move AutoTrade** | HV tip → clean Move pts leg → tip markers; optional market + TP/SL brackets |
 | **Trapped Retest** | HV peak → weak lower-vol retest → fire on break beyond 2nd swing |
@@ -60,8 +60,11 @@ $cp = "C:\Program Files\Bookmap\lib\bm-l1api.jar;C:\Program Files\Bookmap\lib\bm
 $out = "build\classes\java\main"
 $sources = Get-ChildItem -Recurse -Filter "*.java" -Path "src\main\java" | % FullName
 javac -encoding UTF-8 -cp $cp -d $out @sources
-Push-Location $out; jar cf "..\..\..\libs\bookmap-orderflow-mat-v2.jar" .; Pop-Location
+Push-Location $out; jar cf "..\..\..\libs\bookmap-orderflow-mat-v3.jar" .; Pop-Location
 ```
+
+For a named MAT v3 build with Gradle: `$env:ORDERFLOW_JAR_NAME='bookmap-orderflow-mat-v3.jar'; .\gradlew.bat jar`
+
 
 The build compiles against your installed Bookmap API jars (`%BOOKMAP_HOME%\lib\bm-l1api.jar` and `bm-simplified-api-wrapper.jar`, default `C:\Program Files\Bookmap`) so the add-on matches your Bookmap runtime.
 
@@ -135,7 +138,9 @@ Research lead from **EXP-0008** (tape momentum + ES sync). Optional **CD pullbac
 
 Reverse always respects **Allow longs/shorts**. Logs: `MAT REVERSE …`, `MAT TP EXTEND …`.
 
-**Hotkeys (long/short on/off):** with MAT attached and **Enable Ctrl+Shift side hotkeys = true** (default):
+**Side filter console + hotkeys (MAT v3):** the always-on-top **MAT Side v3** window opens when you **attach Momentum AutoTrade v3 (or v1) on the chart** (and also when **MAT Hotkeys v3** is enabled in API plugins). Buttons: Both / Longs / Shorts / Off + Longs/Shorts toggles. Closing hides it (filter unchanged). Re-open: detach/reattach MAT, or enable **MAT Hotkeys v3**, or bind Bookmap action **Show MAT Side panel**. Check the Bookmap log for `MAT Side v3 panel shown` / `MAT Hotkeys v3 loaded`.
+
+With MAT attached and **Enable Ctrl+Shift side hotkeys = true** (default), or with the console focused:
 
 | Shortcut | Effect |
 |---|---|
@@ -147,23 +152,23 @@ Reverse always respects **Allow longs/shorts**. Logs: `MAT REVERSE …`, `MAT TP
 (Ctrl+Alt clashes with Windows / Evernote / Snipping Tool.) Log example: `MAT side filter: SHORTS only  [longs=false shorts=true]  (toggled longs)`. Panel **Allow longs/shorts** still seed/sync the same filter when changed.
 
 **Replay test (recommended first):**
-1. Rebuild JAR, remove/re-add the plugin in Bookmap if already loaded; enable **MAT Hotkeys** and **Momentum AutoTrade (ES+NQ)**.
+1. Rebuild JAR, remove/re-add the plugin in Bookmap if already loaded; enable **MAT Hotkeys v3** and **Momentum AutoTrade v3 (ES+NQ)** (or v1 for classic).
 2. Open **Replay**, load a feed with **both NQ and ES**.
-3. Add **Momentum AutoTrade (ES+NQ)** on the **NQ** chart; leave **Enable trading = false**.
+3. Add **Momentum AutoTrade v3 (ES+NQ)** on the **NQ** chart; leave **Enable trading = false**.
 4. Defaults match the study: 100ms bars, min 6 trades, vol≥25, |imb|≥0.55, ES sync 1500ms.
 5. Optional: set **Max ES lag ms = 250** (stronger subset from research) or **Require CD pullback to MA = true**.
-6. Run replay; watch markers + `MAT Signal`. Logs: `MAT SIGNAL LONG/SHORT ...` in Bookmap log.
+6. Run replay; watch markers + `MAT Signal`. Logs: `MAT SIGNAL` / `MAT2 SIGNAL` in Bookmap log.
 7. Only after signals look right: use a **simulation / paper** connection, set **Enable trading = true**, size/TP/SL. Brackets are absolute TP/SL in **price points**.
 
 **Safety:** trading defaults **OFF**. Do not enable on a live account until you have validated on replay/sim.
 
-### Momentum AutoTrade v2 (ES+NQ)
+### Momentum AutoTrade v3 (ES+NQ)
 
-Same core as v1 (EXP-0008 tape + ES sync, reverse-on-stop, TP extend, Ctrl+Shift side hotkeys), plus optional **regime / trend / VWAP** gates and **vol-scaled brackets** from **EXP-0034**.
+Same core as v1 (EXP-0008 tape + ES sync, reverse-on-stop, TP extend, Ctrl+Shift side hotkeys), plus optional **regime / trend / VWAP** gates and **vol-scaled brackets** from **EXP-0034**. User-visible name is **v3** (control panel); log tags remain `MAT2 …` for replay tooling.
 
-Do **not** enable trading on v1 and v2 at the same time — they share `MatSideFilter`.
+Do **not** enable trading on v1 and v3 at the same time — they share `MatSideFilter`.
 
-JAR: `bookmap-addon/build/libs/bookmap-orderflow-mat-v2.jar` (contains both v1 and v2).
+JAR: `bookmap-addon/build/libs/bookmap-orderflow-mat-v3.jar` (or default `bookmap-orderflow.jar` from `gradle jar`). Remove any old mat-v2 plugin entry before installing.
 
 **Look-ahead note:** research now stamps bursts at **bar end** (corrected 2026-10-18). Older ~85% hit+10 tick figures used bar-start entry and are invalid vs live MAT. Corrected EXP-0008 `p_hit_10pts` ≈ **0.56**.
 
@@ -189,7 +194,7 @@ Defaults are **with-trend + VWAP + vol-scaled k=1** (range gate off). Trend uses
 
 **Replay check vs offline reference:**  
 `python -m research.export_mat2_ref --session 021026 --stamp confirm --bracket vol_k1`  
-Install `bookmap-orderflow-mat-v2-confirm.jar`, set **ES confirm mode=1**, **Vol-scaled=true**, **k=1**, Verbose=true; grep `MAT2 SIGNAL` / `MAT2 SIGNAL(confirm)` and match with `python -m research.compare_replay_ref`.
+Install `bookmap-orderflow-mat-v3.jar` (or a confirm-tagged build), set **ES confirm mode=1**, **Vol-scaled=true**, **k=1**, Verbose=true; grep `MAT2 SIGNAL` / `MAT2 SIGNAL(confirm)` and match with `python -m research.compare_replay_ref`.
 
 ### Correlated Fade AutoTrade (ES+NQ)
 
@@ -318,7 +323,7 @@ bookmap-addon/
     effort/       Effort vs Result
     liquidity/    Liquidity Reaction
     crossmarket/  ES/NQ Flow Confirm
-    trade/        Momentum AutoTrade v1 + v2 (ES+NQ) + MAT Hotkeys companion + Correlated Fade AutoTrade
+    trade/        Momentum AutoTrade v1 + v3 (ES+NQ) + MAT Hotkeys v3 / MatControlPanel + Correlated Fade AutoTrade
     pitch/        Pitch and Catch
     hvmove/       HV Extreme Move
     retest/       Trapped Retest

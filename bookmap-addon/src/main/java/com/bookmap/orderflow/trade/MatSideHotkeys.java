@@ -28,7 +28,10 @@ public final class MatSideHotkeys {
     private MatSideHotkeys() {}
 
     public static synchronized void install() {
-        if (REFS.getAndIncrement() > 0) {
+        int prev = REFS.getAndIncrement();
+        // Always (re)show console when MAT attaches — does not require MAT Hotkeys v3 alone.
+        MatControlPanel.showPanel();
+        if (prev > 0) {
             return;
         }
         dispatcher = e -> {
@@ -74,5 +77,7 @@ public final class MatSideHotkeys {
             dispatcher = null;
             Log.info("MAT side hotkeys OFF");
         }
+        // Last MAT instance gone — hide console (Hotkeys v3 may still re-show if loaded).
+        MatControlPanel.hidePanel();
     }
 }
