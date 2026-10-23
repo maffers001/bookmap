@@ -72,6 +72,11 @@ def _hhmm_ns(y: int, m: int, d: int, hhmm: str) -> int:
 
 
 def _cfg(exp: dict) -> OpenBookConfig:
+    fb = exp.get("fixed_brackets")
+    fixed = (
+        tuple(tuple(float(x) for x in b) for b in fb)
+        if fb else ((30.0, 15.0), (20.0, 10.0), (40.0, 10.0), (10.0, 20.0))
+    )
     return OpenBookConfig(
         book_radius_pts=float(exp.get("book_radius_pts", 100.0)),
         cluster_ticks=int(exp.get("cluster_ticks", 2)),
@@ -105,7 +110,12 @@ def _cfg(exp: dict) -> OpenBookConfig:
         sl_cap=float(exp.get("sl_cap", 15.0)),
         primary_rr=float(exp.get("primary_rr", 2.0)),
         placebo_shift_pts=float(exp.get("placebo_shift_pts", 40.0)),
+        fixed_brackets=fixed,
     )
+
+
+def _exp_tag(exp: dict) -> str:
+    return str(exp.get("name", "EXP-0045"))
 
 
 def run_month(exp: dict, month: str, out: Path, *, smoke: bool = False) -> dict:
@@ -150,6 +160,9 @@ def run_month(exp: dict, month: str, out: Path, *, smoke: bool = False) -> dict:
     placebo_parts: list[pa.Table] = []
     census: dict[str, Any] = {}
 
+    role = str(exp.get("role", "NQ"))
+    print(f"Role={role} standout_pct={ob.standout_pct}", flush=True)
+
     for sid in eligible:
         print(f"[session] {sid}", flush=True)
         y, m, d = session_id_to_ymd(sid)
@@ -160,27 +173,27 @@ def run_month(exp: dict, month: str, out: Path, *, smoke: bool = False) -> dict:
         vol_hi = _hhmm_ns(y, m, d, vol_b)
         age_lo = snap_ns - int(ob.age_cap_s * 1e9)
 
-        nq0 = _prefer_single_feed(_load_trades(pq_dir, sid, "NQ"), pq_dir, sid, "NQ")
-        if nq0.num_rows == 0:
+        tr0 = _prefer_single_feed(_load_trades(pq_dir, sid, role), pq_dir, sid, role)
+        if tr0.num_rows == 0:
             census[sid] = {"note": "empty"}
             continue
-        nq = filt(nq0, vol_lo, win_hi + int(post_ms * NS_PER_MS))
-        ts = nq.column("ts_ns").to_numpy().astype(np.int64)
-        px = nq.column("price").to_numpy().astype(np.float64) * PTS_PER_TICK
+        tr = filt(tr0, vol_lo, win_hi + int(post_ms * NS_PER_MS))
+        ts = tr.column("ts_ns").to_numpy().astype(np.int64)
+        px = tr.column("price").to_numpy().astype(np.float64) * PTS_PER_TICK
         o = np.argsort(ts, kind="stable")
         ts, px = ts[o], px[o]
         u = vol_unit_preopen(ts, px, vol_lo, vol_hi)
 
         depth, init_b, init_a = load_depth_window_with_book(
-            pq_dir, sid, "NQ", (age_lo, win_hi + int(post_ms * NS_PER_MS)),
+            pq_dir, sid, role, (age_lo, win_hi + int(post_ms * NS_PER_MS)),
         )
-        mbo = load_mbo_window(pq_dir, sid, "NQ", (age_lo, win_hi + int(post_ms * NS_PER_MS)))
+        mbo = load_mbo_window(pq_dir, sid, role, (age_lo, win_hi + int(post_ms * NS_PER_MS)))
         if depth.num_rows == 0:
             census[sid] = {"note": "no_depth"}
             continue
 
         sof = prepare_session_of(
-            nq0, depth, mbo, cfg=sc_cfg, bounds=(open_ns, win_hi), init_books=(init_b, init_a),
+            tr0, depth, mbo, cfg=sc_cfg, bounds=(open_ns, win_hi), init_books=(init_b, init_a),
         )
         if sof is None:
             census[sid] = {"note": "sof_fail"}
@@ -195,16 +208,34 @@ def run_month(exp: dict, month: str, out: Path, *, smoke: bool = False) -> dict:
             continue
         mid = (bb + aa) // 2
 
-        clusters = snapshot_clusters(bids, asks, mid_tick=mid, cfg=ob)
-        # MBO age: resolve full loaded mbo up to snap
+        # Bright-price floor on the snap book, then cluster those prices only
+        # (avoids dense ES books merging into one mega-cluster per side).
+        standout_size_pct = float(exp.get("standout_size_pct", ob.large_size_pct))
+        rad_t = int(round(ob.book_radius_pts / PTS_PER_TICK))
+        nz_snap = np.asarray(
+            [
+                s for p, s in list(bids.items()) + list(asks.items())
+                if s > 0 and abs(p - mid) <= rad_t
+            ],
+            dtype=np.float64,
+        )
+        bright_floor = int(max(
+            ob.large_size_min,
+            float(np.percentile(nz_snap, standout_size_pct)) if len(nz_snap) else ob.large_size_min,
+        ))
+        clusters = snapshot_clusters(
+            bids, asks, mid_tick=mid, cfg=ob, min_price_size=float(bright_floor),
+        )
         m_ts, m_op, m_bid, m_px, m_sz, _st = _resolve_mbo(mbo, age_lo, snap_ns + 1)
         data_start = int(m_ts[0]) if len(m_ts) else age_lo
         resting = mbo_resting_at(
             m_ts, m_op, m_bid, m_px, m_sz, snap_ns,
             data_start_ns=data_start, age_cap_s=ob.age_cap_s,
         )
+        # Among bright clusters, keep those ≥ standout_pct of bright-cluster sizes
+        # (large_thr=1 → floor is driven by cluster percentile only).
         standouts = select_standouts(
-            clusters, resting, snap_ns=snap_ns, large_thr=sof.large_thr, cfg=ob,
+            clusters, resting, snap_ns=snap_ns, large_thr=1, cfg=ob,
         )
         lt = levels_table(standouts, session_id=sid, snap_ns=snap_ns, u=u)
         if lt.num_rows:
@@ -261,6 +292,14 @@ def run_month(exp: dict, month: str, out: Path, *, smoke: bool = False) -> dict:
 
     report = _month_report(month, events, placebo, levels, census, ob)
     report["standout_pct"] = ob.standout_pct
+    report["role"] = role
+    report["experiment"] = _exp_tag(exp)
+    report["hypothesis"] = exp.get("hypothesis", "")
+    if events.num_rows and "has_touch" in events.column_names:
+        has = events.column("has_touch").to_numpy() > 0.5
+        touched = _subset(events, has)
+        bnames = [c.replace("pnl_T0_", "") for c in events.column_names if c.startswith("pnl_T0_")]
+        report["t0_brackets"] = {bn: arm_stats(touched, "T0", bn) for bn in bnames}
     (out / "report.json").write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
     (out / "summary.md").write_text(_month_md(report, month, out), encoding="utf-8")
     print(f"Wrote {out / 'summary.md'}  touches={report.get('n_touch', 0)}", flush=True)
@@ -308,7 +347,7 @@ def _month_report(
     hold180 = touched.column("hold_180").to_numpy() if touched.num_rows else np.array([])
 
     return {
-        "experiment": "EXP-0045", "hypothesis": "H36", "month": month,
+        "month": month,
         "n_sessions": len(census), "n_levels": int(levels.num_rows),
         "n_touch": int(has.sum()) if len(has) else 0,
         "n_retest": int(np.sum(touched.column("t_retest_ns").to_numpy() > 0)) if touched.num_rows else 0,
@@ -352,8 +391,10 @@ def _fmt_arm(st: dict) -> str:
 
 
 def _month_md(report: dict, month: str, out: Path) -> str:
+    tag = report.get("experiment", "EXP-0045")
+    role = report.get("role", "NQ")
     L = [
-        f"# EXP-0045 — Open-book standout levels ({month})",
+        f"# {tag} — Open-book standout levels ({role}, {month})",
         "",
         f"Sessions {report['n_sessions']} · levels {report['n_levels']} · touches {report['n_touch']} · "
         f"broke {report['n_broke']} · retests {report['n_retest']}. "
@@ -371,6 +412,11 @@ def _month_md(report: dict, month: str, out: Path) -> str:
             f"| {arm} | {_fmt_arm(a['all'])} | {_fmt_arm(a['old'])} | {_fmt_arm(a['fresh'])} | "
             f"{_fmt_arm(report['placebo_arms'][arm])} |"
         )
+    if report.get("t0_brackets"):
+        L += ["", "## T0 fade across brackets (n/net/avg/days+/DD)", "",
+              "| bracket | n/net/avg/days+/days/maxDD |", "|---|---|"]
+        for bn, st in report["t0_brackets"].items():
+            L.append(f"| {bn} | {_fmt_arm(st)} |")
     L += ["", "## Claims (this month)", ""]
     for k, v in report["claims"].items():
         L.append(f"- `{k}`: **{v}**")
@@ -380,17 +426,20 @@ def _month_md(report: dict, month: str, out: Path) -> str:
 
 def run_dig(exp: dict, root: Path) -> Path:
     """Cross-month verdict: Oct train, Sep+May OOS."""
-    out = root / "results" / "EXP-0045_OPEN"
+    tag = _exp_tag(exp)
+    dig = str(exp.get("dig_tag", "OPEN"))
+    role = str(exp.get("role", "NQ"))
+    out = root / "results" / f"{tag}_{dig}"
     out.mkdir(parents=True, exist_ok=True)
     months = ["2026-10"] + list(exp.get("oos_months", ["2026-09", "2026-05"]))
     reports = {}
     for m in months:
-        p = root / "results" / f"EXP-0045{_month_tag(m)}" / "report.json"
+        p = root / "results" / f"{tag}{_month_tag(m)}" / "report.json"
         if p.exists():
             reports[m] = json.loads(p.read_text(encoding="utf-8"))
 
     L = [
-        "# EXP-0045 dig — open-book standout levels (H36)",
+        f"# {tag} dig — open-book standout levels ({role}, {exp.get('hypothesis', '')})",
         "",
         "Oct = develop. Sep and May = frozen OOS (read once).",
         "",
@@ -422,6 +471,12 @@ def run_dig(exp: dict, root: Path) -> Path:
             f"| {m} | {_fmt_arm(a['T0']['all'])} | {_fmt_arm(a['T0']['old'])} | {_fmt_arm(a['T0']['fresh'])} | "
             f"{_fmt_arm(r['placebo_arms']['T0'])} | {_fmt_arm(a['T2']['all'])} | {_fmt_arm(a['R0']['all'])} |"
         )
+    # bracket grid on T0 for train month if present
+    oct_br = reports.get("2026-10", {}).get("t0_brackets") or {}
+    if oct_br:
+        L += ["", "## Oct T0 bracket grid", "", "| bracket | n/net/avg/days+/days/maxDD |", "|---|---|"]
+        for bn, st in oct_br.items():
+            L.append(f"| {bn} | {_fmt_arm(st)} |")
 
     # Verdict from registered claims
     oct_r = reports.get("2026-10", {})
@@ -477,33 +532,36 @@ def run_dig(exp: dict, root: Path) -> Path:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--config", default="EXP-0045.yaml", help="Experiment yaml under research/experiments/")
     ap.add_argument("--month", default=None)
     ap.add_argument("--out", default=None)
     ap.add_argument("--smoke", action="store_true")
     ap.add_argument("--dig", action="store_true")
     ap.add_argument("--standout-pct", type=float, default=None, help="Override standout percentile")
     args = ap.parse_args()
-    exp = yaml.safe_load((ROOT / "research" / "experiments" / "EXP-0045.yaml").read_text(encoding="utf-8"))
+    cfg_path = ROOT / "research" / "experiments" / args.config
+    exp = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     if args.standout_pct is not None:
         exp["standout_pct"] = float(args.standout_pct)
+    tag = _exp_tag(exp)
 
     if args.dig:
         run_dig(exp, ROOT)
         return
 
     month = args.month or exp.get("month_prefix", "2026-10")
-    out = Path(args.out) if args.out else ROOT / "results" / f"EXP-0045{_month_tag(month)}"
+    out = Path(args.out) if args.out else ROOT / "results" / f"{tag}{_month_tag(month)}"
     rep = run_month(exp, month, out, smoke=args.smoke)
     # auto-loosen on Oct if thin
     if month.startswith("2026-10") and not args.smoke and rep.get("n_touch", 0) < 40 and float(exp.get("standout_pct", 99)) >= 99:
         print(f"Oct touches={rep['n_touch']} < 40 — re-running with standout_pct=98", flush=True)
         exp["standout_pct"] = 98.0
-        out98 = ROOT / "results" / "EXP-0045"
+        out98 = ROOT / "results" / tag
         rep = run_month(exp, month, out98, smoke=False)
         note = out98 / "P98_NOTE.txt"
         note.write_text(
             f"Loosened standout_pct 99→98 because Oct first-touches were <40 under p99.\n"
-            f"Final Oct touches={rep.get('n_touch')}. Frozen for Sep/May.\n",
+            f"Final Oct touches={rep.get('n_touch')}. Frozen for Sep/May. role={exp.get('role')}.\n",
             encoding="utf-8",
         )
 

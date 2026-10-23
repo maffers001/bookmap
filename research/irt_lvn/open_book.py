@@ -61,7 +61,7 @@ class OpenBookConfig:
     sl_cap: float = 15.0
     primary_rr: float = 2.0
     placebo_shift_pts: float = 40.0
-    # fixed context brackets [tp, sl]
+    # fixed context brackets [tp, sl] — override per market in yaml
     fixed_brackets: tuple[tuple[float, float], ...] = (
         (30.0, 15.0), (20.0, 10.0), (40.0, 10.0), (10.0, 20.0),
     )
@@ -129,15 +129,32 @@ def _pack_cluster(px: list[int], sz: list[int]) -> dict[str, Any]:
 
 def snapshot_clusters(
     bids: dict[int, int], asks: dict[int, int], *, mid_tick: int, cfg: OpenBookConfig,
+    min_price_size: float = 0.0,
 ) -> list[dict[str, Any]]:
+    """Cluster resting size in ±book_radius of mid.
+
+    If ``min_price_size`` > 0, only prices at/above that size are kept, then
+    merged within ``cluster_ticks``. That matches Bookmap "bright" bands: a
+    dense ES book must not collapse into one mega-cluster per side.
+    """
     rad = int(round(cfg.book_radius_pts / PTS_PER_TICK))
     lo, hi = mid_tick - rad, mid_tick + rad
     rows: list[dict[str, Any]] = []
     for side, book in (("BID", bids), ("ASK", asks)):
-        for c in _cluster_side(book, lo=lo, hi=hi, cluster_ticks=cfg.cluster_ticks):
-            c["side"] = side
-            c["dist_mid_pts"] = abs(c["centre_tick"] - mid_tick) * PTS_PER_TICK
-            rows.append(c)
+        if min_price_size > 0:
+            book = {p: s for p, s in book.items() if s >= min_price_size and lo <= p <= hi}
+            if not book:
+                continue
+            # cluster only the bright prices (may have gaps)
+            for c in _cluster_side(book, lo=lo, hi=hi, cluster_ticks=cfg.cluster_ticks):
+                c["side"] = side
+                c["dist_mid_pts"] = abs(c["centre_tick"] - mid_tick) * PTS_PER_TICK
+                rows.append(c)
+        else:
+            for c in _cluster_side(book, lo=lo, hi=hi, cluster_ticks=cfg.cluster_ticks):
+                c["side"] = side
+                c["dist_mid_pts"] = abs(c["centre_tick"] - mid_tick) * PTS_PER_TICK
+                rows.append(c)
     return rows
 
 

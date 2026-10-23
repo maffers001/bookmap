@@ -408,3 +408,20 @@ Develop on Oct; Sep and May read once. NQ book only.
 Oct T0 net −88 ≤ placebo; old stratum nearly empty (n≤1); Sep T0 flips to
 +88; May T0 −82. Age claims fail on train. Retest arms thin/negative.
 **Status: reject / park.** See `results/EXP-0045_OPEN/`.
+
+## H37 — ES open-book standout resting orders as levels
+
+Same construction as H36 on **ES**: snapshot ES book at 14:35 UK; age-weighted
+standout resting clusters (compact ~1.5 pt bands matching discretionary open
+liquidity shades); trade **ES** first-touch fades and break-retests with
+ES-scaled pad/break/reject and asymmetric brackets (primary vol 2:1,
+SL∈[2,6]). Distinct from NQ H36 — ES point scale and denser ES book.
+
+**Test:** EXP-0046. Runner:
+`python -m research.irt_lvn.run_open_book_levels --config EXP-0046.yaml`.
+Develop on Oct; Sep and May read once.
+**Result:** Bright-price clustering (p99 snap prices → 1.5 pt bands) at
+14:30. Oct T0 n=16 net **−27** (all ES brackets negative); Sep −27; May −31.
+Old ≰ placebo on Oct; R0 negative every month. Pull fresh>old on Oct (spoof
+direction OK) but not a trade. **Status: reject / park.** See
+`results/EXP-0046_OPEN_ES/`.

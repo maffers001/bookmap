@@ -58,8 +58,17 @@
 | EXP-0043_CONFIRM_DIG | H34 follow-ups (b) approach-leg book, (a) confirm sweep + 2nd filter | **null (b); (a) robust to k, no filter adopted** | Oct+Sep train, May frozen | StackTrend_pre ≈ placebo; fade +ve 12/12 k×month; `after 15 min` Δavg +0.29 < 1 SE on May; see notes |
 | EXP-0044 | H35 dwell + intact break-side wall | **reject / park** | 14d Oct + 14d Sep + 17d May | duration claim fails train; Arm A May +241 but Oct ≪ placebo; Arm B/protect null; see notes |
 | EXP-0045 | H36 open-book standout resting levels | **reject / park** | 14d Oct + 15d Sep + 17d May | thin n (~12 touches/mo); T0 Oct/May ≪0 and ≤placebo; Sep +88 flip; old stratum empty; see notes |
+| EXP-0046 | H37 ES open-book standout resting levels | **reject / park** | 14d Oct + 15d Sep + 17d May | T0 −27/−27/−31 all months; all ES brackets ≤0 on Oct; R0 null; see notes |
 
 ## Run notes
+
+### 2026-10-22 — EXP-0046 ES open-book standout resting orders (H37)
+
+- Same arms as EXP-0045 but **ES book + ES path**. Snapshot **14:30 UK**. Detector: prices with size ≥ p99 of the snap book in ±60 pt, merge within **6 ticks** (1.5 pt bands matching discretionary blue/pink open clusters), top 8/side by age-weighted size. ES-scaled pad 1 / break floor 3 / reject 12; primary vol 2:1 SL∈[2,6]; fixed grid 8/4, 6/3, 12/4, 4/8. Runner: `python -m research.irt_lvn.run_open_book_levels --config EXP-0046.yaml`.
+- **Detector note:** naive clustering on a dense ES book mega-merged each side; frozen after bright-price-first clustering. Early p99+2×large_thr (large_thr~150–200) yielded ≤5 touches — not used for OOS.
+- **Oct (train):** 39 levels / 16 touches / 8 retests; Hold@60 0.56. T0 n=16 net **−27** (placebo −24); old −18 vs fresh −9 (old>fresh but not >placebo). T2 −5 (better than T0, still ≤0). R0 −16. **All brackets negative** (least bad: inverse 4/8 −9.75). Pull fresh 0.29 > old 0.09.
+- **Sep OOS:** T0 −27 (placebo −12); May OOS: T0 −31 (placebo −60 — beats placebo avg but still loses). R0 negative both months.
+- **Decision: reject / park.** Chart-visible open ES clusters do not produce a first-touch fade edge under this causal detector; sign is negative every month on the primary bracket. Keep H34 NQ StackConsume dig. Results: `results/EXP-0046/`, `…_202609/`, `…_202605/`, `results/EXP-0046_OPEN_ES/`.
 
 ### 2026-10-22 — EXP-0045 open-book standout resting orders (H36)
 

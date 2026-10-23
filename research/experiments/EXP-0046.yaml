@@ -1,0 +1,74 @@
+name: EXP-0046
+hypothesis: H37
+title: ES open-book standout resting orders as levels
+description: >
+  Same detector as EXP-0045 / H36 but on ES: snapshot the ES book at 14:35 UK,
+  age-weighted standout resting clusters (compact bands matching discretionary
+  blue/pink open liquidity), trade ES first-touch fades (T0/T2) and break-retest
+  continuations (R0/R2). ES-scaled pad/break/reject and asymmetric brackets.
+  Develop on Oct; Sep and May read once. ES book + ES path only.
+
+role: ES
+month_prefix: "2026-10"
+snap_time: "14:30"            # RTH open — matches discretionary open-liquidity shades
+window_end: "17:00"
+vol_start: "14:00"
+vol_end: "14:30"
+
+# Snapshot / clustering — ES bands in the chart are ~1.5–2 pt thick
+book_radius_pts: 60.0
+cluster_ticks: 6              # 1.5 pt merge (matches shaded open clusters)
+standout_pct: 50.0            # among bright clusters (already size-filtered)
+standout_size_pct: 99.0       # bright = price size ≥ p99 of snap book in radius
+large_mult: 0.0               # no second floor; bright filter is the size gate
+top_n_per_side: 8
+near_mid_exclude_pts: 1.5
+large_size_pct: 99.9          # OF scorer only
+large_size_min: 20
+
+# Age weighting (same as H36)
+age_scale_s: 900.0
+age_w_min: 0.25
+age_w_max: 1.0
+old_age_s: 900.0
+age_cap_s: 7200.0
+frac_old_thr: 0.5
+
+# Lifecycle
+alive_frac: 0.5
+pull_size_frac: 0.25
+pull_trade_frac: 0.25
+
+# Touch / break / retest — ES point scale (~⅓ of NQ)
+pad_pts: 1.0
+break_floor_pts: 3.0          # break pierce = max(break_floor, u)
+retest_horizon_ms: 1200000
+reject_pts: 12.0
+extension_pts: 12.0
+
+# Arms / OF gates
+confirm_ms: 2000
+stack_consume_thr: -0.25
+take_at_thr: 0.25
+tick_radius: 8
+far_band_ticks: 20
+z_lookback_ms: 1800000
+
+# Brackets — ES-scaled asymmetric grid; primary = vol 2:1
+horizon_ms: 180000
+slip_ticks: 1.0
+commission_pts_rt: 0.125
+sl_floor: 2.0
+sl_cap: 6.0
+primary_rr: 2.0
+fixed_brackets:
+  - [8.0, 4.0]
+  - [6.0, 3.0]
+  - [12.0, 4.0]
+  - [4.0, 8.0]              # inverse sanity
+
+# Controls
+placebo_shift_pts: 15.0
+exclude_sessions: []
+oos_months: ["2026-09", "2026-05"]
+dig_tag: OPEN_ES
