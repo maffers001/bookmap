@@ -151,12 +151,19 @@ def _prefer_single_feed(table: pa.Table, parquet_dir: Path, sid: str, role: str)
     return table.take(np.where(mask)[0])
 
 
-def load_pair(parquet_dir: Path, sid: str) -> Pair | None:
+def load_pair(
+    parquet_dir: Path,
+    sid: str,
+    *,
+    start: time = time(14, 30),
+    end: time = time(17, 0),
+) -> Pair | None:
+    """Load NQ/ES for ``sid`` clipped to UK ``start``–``end`` (default 14:30–17:00)."""
     nq0 = _prefer_single_feed(_load_trades(parquet_dir, sid, "NQ"), parquet_dir, sid, "NQ")
     if nq0.num_rows == 0:
         return None
     ts = nq0.column("ts_ns").to_numpy()
-    b = uk_bounds(int(ts[len(ts) // 2]))
+    b = uk_bounds(int(ts[len(ts) // 2]), start=start, end=end)
     nq = filter_window(nq0, b)
     if nq.num_rows == 0:
         return None

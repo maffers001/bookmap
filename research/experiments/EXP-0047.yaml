@@ -1,0 +1,29 @@
+name: EXP-0047
+hypothesis: H38
+title: MAT confirm at causal LVN fade (asym R:R)
+description: >
+  Price approaches a causal NQ LVN (from below → short fade / from above → long).
+  Enter when MAT causal same-side burst confirms within confirm_window after the
+  touch, preferably still near/just on the fade side of the LVN. Asymmetric
+  brackets (rr 1:2, 1:3, struct). Arms: no gates vs trend+VWAP. May OOS.
+
+detector: lvn_mat_fade
+lookback_ms: 1800000
+refresh_ms: 30000
+lvn_frac_of_peak: 0.40
+min_lvn_width_ticks: 2
+max_lvn_width_ticks: 12
+min_sep_from_poc_ticks: 4
+require_hvn_sandwich: false
+min_profile_volume: 0
+edge_margin_ticks: 0
+touch_cooldown_ms: 5000
+confirm_windows_sec: [30, 60, 120, 300]
+primary_confirm_window_sec: 60
+near_lvn_pts: 5.0
+rth_uk_only: true
+commission_pts_rt: 0.25
+slip_ticks: 1.0
+es_stamp: causal
+max_es_lag_ms: 250
+sync_ms: 1500

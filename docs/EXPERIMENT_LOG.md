@@ -61,8 +61,17 @@
 | EXP-0044 | H35 dwell + intact break-side wall | **reject / park** | 14d Oct + 14d Sep + 17d May | duration claim fails train; Arm A May +241 but Oct ≪ placebo; Arm B/protect null; see notes |
 | EXP-0045 | H36 open-book standout resting levels | **reject / park** | 14d Oct + 15d Sep + 17d May | thin n (~12 touches/mo); T0 Oct/May ≪0 and ≤placebo; Sep +88 flip; old stratum empty; see notes |
 | EXP-0046 | H37 ES open-book standout resting levels | **reject / park** | 14d Oct + 15d Sep + 17d May | T0 −27/−27/−31 all months; all ES brackets ≤0 on Oct; R0 null; see notes |
+| EXP-0047 | H38 MAT confirm at causal LVN fade | ran — **reject / park** | train + May + Aug OOS | primary none+rr1:2 @60s train −495 / May −344; asym worse; see notes |
 
 ## Run notes
+
+### 2026-10-24 — EXP-0047 MAT × causal LVN fade (asym R:R)
+
+- Geometry: NQ causal LVN touch (EXP-0011-style, no sandwich) → MAT causal same-side within confirm window; prefer entry still near LVN (±5 pts). Cross from below → short (user example) and mirror.
+- Arms: gates **none** vs **trend+VWAP**; brackets sym_k1 / rr_1_2 / rr_1_3 / struct_1_2; windows 30/60/120/300 (primary 60). Runner: `python -m research.lvn_mat.run_exp_0047`.
+- **Primary** `w60_none_rr_1_2`: train n=299 net **−495** avg −1.66; May −344; Aug −163. Trend+VWAP same cell also negative. Asym RR worse than sym_k1.
+- Window 30s none rr_1_2 train +62 but May −279 (flip). `from_below_short` (user geometry) is the loser; `from_above_long` post-hoc + on train/May — **not shipped** (not pre-registered as sole side).
+- **Verdict: reject / park.** Results: `results/EXP-0047/`.
 
 ### 2026-10-23 — MAT August 2026 OOS (vol k=1, UK 14:30–17:00)
 

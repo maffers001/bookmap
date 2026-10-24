@@ -431,3 +431,16 @@ Old ≰ placebo on Oct; R0 negative every month. Pull fresh>old on Oct (spoof
 direction OK) but not a trade. **Status: reject / park.** See
 `results/EXP-0046_OPEN_ES/`.
 2026-10-23 rebook (depth-seed fix): Oct T0 −31, all brackets ≤0, n=20 — reject unchanged (`results/EXP-0046_REBOOK_ES/`).
+
+## H38 — MAT confirm at causal LVN fade (asym R:R)
+
+After price approaches a causal NQ LVN (from below → short fade / from above →
+long), a MAT causal same-side burst within ~60s that is still near the LVN is a
+better fade entry than unconditional MAT, especially with asymmetric RR (1:2).
+
+Distinct from H7 (dual LVN touch event-study, no MAT) and H19/H31 (swing S/R × MAT).
+
+**Test:** EXP-0047. Runner: `python -m research.lvn_mat.run_exp_0047`.
+**Result:** Reject. Primary none+rr_1_2 @60s train −495 / May −344 / Aug −163.
+Trend+VWAP does not rescue. User geometry (from below → short) is the worse
+side. **Status: reject / park.**
