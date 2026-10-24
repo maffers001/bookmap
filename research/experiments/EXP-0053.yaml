@@ -1,0 +1,82 @@
+name: EXP-0053
+hypothesis: H44
+title: Cross-market large-print clustering — both-market large-print burst gate on MAT (CFADE stratum)
+description: >
+  Tier A / A3 (CORRELATED_IDEAS S4.3). Bursts of large prints in BOTH
+  markets mark institutional participation; one-market bursts are
+  single-market events. Extends EXP-0044 Arm B (dual large take, thin at
+  IRT levels) off the level machinery onto proven trigger sets.
+  CONSTRUCTION (all frozen before any large-print P&L):
+  - Large print, per market: trade size >= that market's CAUSAL large
+    threshold = p99 of its own print sizes over the trailing 30 COMPLETED
+    minutes (current minute excluded; constant within a minute). This is
+    a deliberate deviation from the literal "session p99" of S4.3 /
+    TIER_A A3: a whole-session percentile uses future prints and can
+    never ship live. Threshold undefined (warmup) until >= 5 completed
+    minutes with >= 100 prints exist in the trailing window.
+  - Per market: large_cnt = number of large prints in the trailing 5 s
+    of completed 1 s seconds ending at/before the trigger stamp.
+  - Burst per market: large_cnt >= 2. Strata: both / nq_only / es_only /
+    none (burst in neither) / warmup (either threshold undefined).
+  PRIMARY (MAT, institutional-continuation claim): keep MAT signals
+    whose stratum is "both". Comparator is the frozen MAT book
+    (vol k=1, trend+VWAP, causal ES). Gate must beat comparator on avg by
+    >= 1.0 pt, retain >= 60% of comparator net, not worsen train/hold
+    avg or maxDD, and beat a random-keep placebo (1,000 draws, p90).
+  SECONDARY (CFADE; descriptive, no ship from this EXP): joined
+    comparator-trade net/avg by both/nq_only/es_only/none strata.
+  Sequential: Stage 0 causality (truncation + direct-count hand-check)
+    + coverage + power (both-burst among MAT signal events >= 20, else
+    park with counts as the result; Arm B rarity is the known risk);
+    Stage 1 discovery MAT gate P&L; Stage 2 May MAT books read once
+    only after Stage 1 pass. No retune of percentile, window, burst
+    cut, or thresholds anywhere; no stratum swap after seeing P&L.
+
+detector: correlated_large_prints  # runner: research/correlated/exp_0053_large_prints.py
+bar_ms: 100
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+signal_cooldown_sec: 5.0
+horizons_ms: [10000, 60000]
+point_targets: [5, 10, 20]
+
+# Power / MDE
+target_n_mat_book_discovery: 502  # frozen MAT trades on DIG4 23d (EXP-0050/0052)
+min_both_signals: 20
+min_kept_trades: 20
+min_dropped_trades: 20
+mde_avg_lift_pts: 1.0
+
+large_prints:
+  grid_sec: 1
+  window_sec: 5
+  large_q: 0.99
+  baseline_lookback_min: 30
+  baseline_warmup_min: 5
+  min_baseline_prints: 100
+  burst_min_count: 2
+  placebo_draws: 1000
+  placebo_seed: 53
+
+kill:
+  min_kept_n: 20
+  min_dropped_n: 20
+  min_avg_lift_pts: 1.0
+  min_net_retained_frac: 0.60
+  max_dd_must_not_worsen: true
+
+cfade_exhaust:
+  nq_min_imbalance: 0.55
+  nq_min_vol: 25
+  nq_min_trades: 6
+  es_imb_max: -0.4
+  es_min_vol: 0
+  use_imb: true
+  use_vol: false
+  max_wait_sec: 0
+  skip_bars: 0
+cfade_max_wait_sec: 5.0
+cfade_er_max: 0.30
+
+exclude_sessions: []
+run_may: false  # May read once only after Stage 1 passes

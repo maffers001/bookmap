@@ -9,6 +9,11 @@ _DETECTORS = {
     "correlated_exhaust_fade_dig": "research.correlated.exp_0036_fade_dig",
     "correlated_exhaust_fade_freeze": "research.correlated.exp_0036_fade_freeze",
     "correlated_divergence": "research.correlated.exp_0049_divergence",
+    "correlated_corr_gate": "research.correlated.exp_0050_corr_gate",
+    "correlated_vol_ratio": "research.correlated.exp_0051_vol_ratio",
+    "correlated_aggr_flow": "research.correlated.exp_0052_aggr_flow",
+    "correlated_large_prints": "research.correlated.exp_0053_large_prints",
+    "correlated_book_agreement": "research.correlated.exp_0054_book_agreement",
 }
 
 

@@ -1,0 +1,71 @@
+name: EXP-0051
+hypothesis: H42
+title: Volume-ratio shock gate — keep CFADE only when NQ volume is idiosyncratic (NQ/ES ratio shocked)
+description: >
+  Tier A / A1 (CORRELATED_IDEAS S2.7). Causal trailing 10 s aggressor volume
+  per market on a dense 1 s grid; log-ratio log(vol_NQ / vol_ES) z-scored
+  robustly (median / IQR) against the trailing 30 completed minutes of the
+  same session. This session-causal trailing z replaces the literal
+  cross-day minute-of-day z of S2.7 a priori (live-feasible, no cross-session
+  leakage; same deviation precedent as EXP-0049). Shock = z >= 1.0.
+  Claim (frozen before any ratio P&L): an NQ spike with a shocked ratio is
+  NQ-specific and reverts, so the frozen CFADE fade works there; an NQ spike
+  with a normal ratio is market-wide and continues, so the fade fails there.
+  Primary gate: keep CFADE candidates with z >= 1.0 only (warmup dropped).
+  Comparator is the ER60 CFADE book itself (incremental test, as EXP-0050).
+  MAT (vol k=1, trend+VWAP, causal) stratified as secondary only -- the
+  mirror claim (continuation better when NOT shocked) is descriptive here;
+  no MAT ship decision from this experiment alone.
+  Sequential: Stage 0 coverage/causality + power (shock candidates >= 20
+  and non-shock candidates >= 20, else park with counts as the result);
+  Stage 1 discovery gate P&L vs comparator + random-keep placebo;
+  Stage 2 May read once only after a Stage 1 pass. No retune anywhere.
+
+detector: correlated_vol_ratio  # runner: research/correlated/exp_0051_vol_ratio.py
+bar_ms: 1000
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+signal_cooldown_sec: 5.0
+horizons_ms: [10000, 60000]
+point_targets: [5, 10, 20]
+
+# Power / MDE
+target_n_book_discovery: 87  # CFADE ER60 book on DIG4 23d (EXP-0050 comparator)
+min_shock_candidates: 20
+min_kept_trades: 20
+min_dropped_trades: 20
+mde_avg_lift_pts: 1.0
+
+vol_ratio:
+  grid_sec: 1
+  window_sec: 10
+  baseline_lookback_min: 30
+  baseline_warmup_min: 5
+  shock_z: 1.0
+  strata_z: [0.0, 1.0]  # report low z<0 / mid 0-1 / shock >=1 / warmup NaN
+  nq_spike_mult: 2.0  # NQ 10s vol >= 2x trailing-30m-median NQ 10s vol (descriptive split)
+  placebo_draws: 1000
+  placebo_seed: 51
+
+kill:
+  min_kept_n: 20
+  min_dropped_n: 20
+  min_avg_lift_pts: 1.0
+  min_net_retained_frac: 0.60
+  max_dd_must_not_worsen: true
+
+cfade_exhaust:
+  nq_min_imbalance: 0.55
+  nq_min_vol: 25
+  nq_min_trades: 6
+  es_imb_max: -0.4
+  es_min_vol: 0
+  use_imb: true
+  use_vol: false
+  max_wait_sec: 0
+  skip_bars: 0
+cfade_max_wait_sec: 5.0
+cfade_er_max: 0.30
+
+exclude_sessions: []
+run_may: false  # May read once only after Stage 1 passes

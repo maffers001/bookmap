@@ -1,0 +1,72 @@
+name: EXP-0052
+hypothesis: H43
+title: Aggressor count vs size — few-large-both gate on MAT (many-small-NQ stratum on CFADE)
+description: >
+  Tier A / A2 (CORRELATED_IDEAS S2.3, founding handoff idea, never built).
+  Per market, trailing 5 s of completed 1 s seconds: cnt = distinct
+  aggressor_order_id count, mean_per_aggr = window volume / cnt. Per-market
+  state vs trailing-30-completed-minute medians of the same quantities
+  (session-causal): few = cnt <= median, many = cnt > median;
+  large = mean_per_aggr >= median, small = mean_per_aggr < median.
+  Warmup until 5 completed baseline minutes exist or cnt == 0.
+  Two carried cells only (frozen before any cell P&L; the other 14 combined
+  cells are count-descriptive only):
+    PRIMARY (MAT, continuation claim): few-large in BOTH markets (FLB).
+      Keep MAT signals in FLB; comparator is the frozen MAT book
+      (vol k=1, trend+VWAP, causal). Gate must beat comparator + random-keep
+      placebo.
+    SECONDARY (CFADE, fade claim; descriptive, no ship from this EXP):
+      many-small NQ AND ES-quiet (MSQ = NQ many+small, ES window volume
+      <= its trailing median). Reported as joined comparator-trade
+      net/avg vs rest only. A secondary pass motivates a separate future
+      preregistration; it cannot promote inside EXP-0052.
+  Sequential: Stage 0 causality + 16-cell counts + power (FLB among MAT
+  signal events >= 20, else park with counts as the result);
+  Stage 1 discovery MAT gate P&L; Stage 2 May read once (MAT books) only
+  after a Stage 1 pass. No retune anywhere; no cell mining.
+
+detector: correlated_aggr_flow  # runner: research/correlated/exp_0052_aggr_flow.py
+bar_ms: 100
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+signal_cooldown_sec: 5.0
+horizons_ms: [10000, 60000]
+point_targets: [5, 10, 20]
+
+# Power / MDE
+target_n_mat_book_discovery: 502  # frozen MAT trades on DIG4 23d (EXP-0050 stratum total)
+min_flb_signals: 20
+min_kept_trades: 20
+min_dropped_trades: 20
+mde_avg_lift_pts: 1.0
+
+aggr_flow:
+  grid_sec: 1
+  window_sec: 5
+  baseline_lookback_min: 30
+  baseline_warmup_min: 5
+  placebo_draws: 1000
+  placebo_seed: 52
+
+kill:
+  min_kept_n: 20
+  min_dropped_n: 20
+  min_avg_lift_pts: 1.0
+  min_net_retained_frac: 0.60
+  max_dd_must_not_worsen: true
+
+cfade_exhaust:
+  nq_min_imbalance: 0.55
+  nq_min_vol: 25
+  nq_min_trades: 6
+  es_imb_max: -0.4
+  es_min_vol: 0
+  use_imb: true
+  use_vol: false
+  max_wait_sec: 0
+  skip_bars: 0
+cfade_max_wait_sec: 5.0
+cfade_er_max: 0.30
+
+exclude_sessions: []
+run_may: false  # May read once only after Stage 1 passes

@@ -1,0 +1,83 @@
+name: EXP-0054
+hypothesis: H45
+title: Opening Range Breakout validated by orderflow — ES and NQ (UK 14:30-14:45 OR)
+description: >
+  15-minute opening range (UK 14:30-14:45, Europe/London) per market.
+  Primary breakout: first trade print beyond ORH (bullish OR only) or ORL
+  (bearish OR only) by >= 1 tick; doji OR -> no event; one event per market
+  per session. Inspiration: Zarattini & Aziz (2023) direction-of-OR rule and
+  R = OR width; Zarattini-Barbon-Aziz (2024) causal prior-14-session
+  Relative Volume; Holmberg et al. (2013) OR-width contraction state.
+  ARMS (all frozen before any ORB outcome is read):
+    A price-only: every primary breakout (Zarattini control).
+    B immediate OF-validated (PRIMARY GATE): traded-market trailing-5s
+      aggressor imbalance in break direction >= 0.30 AND other-market
+      trailing-5s imbalance >= 0 (not opposing), computed from completed
+      100ms tape bars ending at/before the break stamp. Entry at break.
+    C reaction-confirmed (SECONDARY, cannot be promoted over a failed B):
+      Arm B conditions first met on completed bars in (break, break+5s],
+      price not back inside the OR; entry at that bar end.
+  SESSION STATE (causal, prior sessions only): RelVol = OR volume / mean
+  OR volume of prior 14 sessions (same market); contraction = OR width /
+  median prior-14-session 14:30-17:00 range. Warmup until 14 prior
+  sessions exist. Strata only; never gates in EXP-0054.
+  BOOKS (simulate_session events override, flat-only, 1-tick slip,
+  0.25 pt/RT): Book 1 paper-faithful SL at far OR extreme, TP = 2R,
+  time exit 17:00 UK. Book 2 house yardstick vol RR SL1/TP2
+  (make_vol_bracket_rr k=1, clip 4-40). No bracket grid search.
+  Sequential: Stage 0 causality (truncation invariance + OR hand-check)
+  + coverage + power (Arm B kept >= 20 AND Arm A-minus-B dropped >= 20 on
+  discovery, else park with counts as the result); Stage 1 event study
+  (Arms A/B/C vs time-matched random, shifted-ES +60s placebo, and
+  own-market-only OF twin); Stage 2 discovery P&L gate bar; Stage 3
+  Sep-Oct 2026 holdout read ONCE only after Stages 1-2 pass, thresholds
+  unchanged. Any failure = reject/park, no retune on this sample.
+  Deviation from the papers, stated a priori: positions exit by 17:00 UK
+  (recorded/house window), not at the US close.
+
+detector: orb_breakout  # runner: research/orb/exp_0054_orb.py
+bar_ms: 100
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+signal_cooldown_sec: 5.0
+horizons_ms: [10000, 60000, 300000]
+point_targets_nq: [5, 10, 20]
+point_targets_es: [2, 4, 8]
+
+opening_range:
+  start_uk: "14:30"
+  end_uk: "14:45"
+  window_end_uk: "17:00"
+  pierce_ticks: 1
+  direction_of_or_only: true
+  first_break_only: true
+  max_first_print_delay_sec: 60
+  prior_sessions: 14
+
+orb_flow:
+  bar_ms: 100
+  windows_sec: [5, 10]
+  primary_window_sec: 5
+  traded_imb_min: 0.30
+  cross_imb_min: 0.0
+  confirm_window_sec: 5
+  large_q: 0.99
+  large_baseline_lookback_min: 30
+  shifted_es_placebo_sec: 60
+  placebo_draws: 1000
+  placebo_seed: 54
+
+kill:
+  min_kept_n: 20
+  min_dropped_n: 20
+  min_avg_lift_pts_nq: 1.0
+  min_avg_lift_pts_es: 0.5
+  min_net_retained_frac: 0.60
+  max_dd_must_not_worsen: true
+
+# Discovery Apr-Aug 2026; holdout Sep-Oct 2026 read once (Stage 3).
+# Session lists are resolved by month suffix in the runner.
+discovery_months: ["0426", "0526", "0626", "0726", "0826"]
+holdout_months: ["0926", "1026"]
+exclude_sessions: ["smoke_synthetic"]
+run_holdout: false  # flipped only by --stage3 after a discovery pass, once

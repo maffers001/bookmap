@@ -1,0 +1,58 @@
+name: EXP-0050
+hypothesis: H41
+title: Correlation-regime gate — skip CFADE (and stratify MAT) when ES/NQ decouple
+description: >
+  Causal rolling Pearson rho of ES vs NQ 1s close-to-close returns on a dense
+  1s grid (last close carried, zero return on empty seconds), trailing 300s
+  ending at the last completed second before the trigger stamp. Undefined
+  until >=120 paired seconds exist (skip + log as rho_warmup).
+  Primary: frozen CFADE (against_m04 + ER60<=0.30, vol RR SL1/TP2) with
+  skip when rho<0.30. Comparator is the ER60 book itself (incremental test).
+  MAT (vol k=1, trend+VWAP, causal) stratified as secondary only.
+  Kill: skipped stratum n>=20; gated avg >= ER60-book avg + 1.0pt; gated net
+  retained >=60%; train+hold avg not worse; maxDD not worse; beat random-skip
+  placebo p90 (1000 draws). Freeze on DIG4 23d, read May once. No retune.
+
+detector: correlated_corr_gate  # not yet implemented — runner is next step
+bar_ms: 100
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+signal_cooldown_sec: 5.0
+horizons_ms: [10000, 60000]
+point_targets: [5, 10, 20]
+
+# Power / MDE
+target_n_book_discovery: 91  # CFADE ER60 book on DIG4 23d
+min_skipped_stratum_n: 20
+mde_avg_lift_pts: 1.0
+
+corr_gate:
+  grid_sec: 1
+  window_sec: 300
+  min_obs: 120
+  skip_below: 0.30
+  strata: [0.30, 0.60]  # report <0.3 / 0.3-0.6 / >0.6
+  placebo_draws: 1000
+  placebo_seed: 50
+
+kill:
+  min_skipped_n: 20
+  min_avg_lift_pts: 1.0
+  min_net_retained_frac: 0.60
+  max_dd_must_not_worsen: true
+
+cfade_exhaust:
+  nq_min_imbalance: 0.55
+  nq_min_vol: 25
+  nq_min_trades: 6
+  es_imb_max: -0.4
+  es_min_vol: 0
+  use_imb: true
+  use_vol: false
+  max_wait_sec: 0
+  skip_bars: 0
+cfade_max_wait_sec: 5.0
+cfade_er_max: 0.30
+
+exclude_sessions: []
+run_may: false  # May read once only after discovery passes

@@ -6,3 +6,7 @@ MAT reversal - when price fails to move past MAT price, sometimes double bottoms
 StackConsume-intact fade
 Could export signals to BA and run genetic algo on them?
 Placing stops the otherside of nearest large liquidity.
+
+
+*LVN + Large Order confluence might work on other futures markets*
+Big delta at turning point is key trigger for entry (this is what you are looking for in bookmap)

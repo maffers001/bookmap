@@ -482,3 +482,189 @@ sample; May read once only if Stages A–C pass. Kill bars in YAML.
 dose-response not monotone (lo |D| @60s +7.5 > mid −0.2). Neighbour
 `persist0` n=508 but cannot be promoted over a failed primary (pre-registered).
 Causality (truncation) passed. Stages B–D not run. See `results/EXP-0049/`.
+
+## H41 — Correlation-regime gate on frozen CFADE (MAT secondary)
+
+CFADE and MAT both assume ES/NQ are coupled. Causal rolling Pearson ρ of ES
+vs NQ 1 s returns (dense 1 s grid, trailing 300 s, ≥120 paired seconds)
+defines a coupling state at each trigger. Skip CFADE when ρ < 0.30.
+EXP-0049's shifted-ES diagnostic (placebo fires 10× more than real ES when
+decoupled) motivates coupling strength as a state variable. The gate must
+improve on the ER60-gated CFADE book *incrementally* and beat a random-skip
+placebo (same number of trades dropped, 1,000 draws, p90).
+
+**Primary:** frozen CFADE (`against_m04` + ER60 ≤ 0.30, vol RR SL1/TP2),
+skip ρ < 0.30; strata <0.3 / 0.3–0.6 / >0.6. MAT stratified secondarily;
+no MAT ship decision from this experiment alone.
+
+**Test:** EXP-0050 (`research/features/cross_regime.py`,
+`research/correlated/exp_0050_corr_gate.py`). Discovery = DIG4 23d; May
+read once after a discovery pass.
+**Result:** Reject / park at Stage 1. Causality PASS. Fade candidates n=132
+with **rho&lt;0.3 = 0** (warmup 11 / mid 18 / hi 103) — skip stratum empty
+(n_skipped comparator trades = 0 ≪ 20). Gated vs ER60 comparator: avg
++8.70 vs +7.63 (Δ +1.07 from dropping warmup, not low-ρ), but fails
+placebo p90 (+8.87). May not read; no Java. See `results/EXP-0050/`.
+
+## H42 — Volume-ratio shock gate on frozen CFADE (MAT secondary)
+
+An NQ aggressor-volume spike is market-wide and continues when ES volume
+spikes with it (NQ/ES volume ratio normal), but NQ-specific and reverts when
+the ratio itself is shocked. Causal trailing 10 s aggressor volume per
+market (dense 1 s grid); log-ratio z-scored robustly (median/IQR) against
+the trailing 30 completed minutes of the same session — a session-causal
+trailing z replacing the literal cross-day minute-of-day z of
+CORRELATED_IDEAS §2.7 a priori (live-feasible, no cross-session leakage;
+same deviation precedent as EXP-0049). Shock = z ≥ 1.0. Motivating stratum:
+CFADE's low burst-ES-vol tercile (+427 vs high −78, EXP-0036_DIG3).
+
+**Primary:** frozen CFADE (`against_m04` + ER60 ≤ 0.30, vol RR SL1/TP2),
+keep candidates with z ≥ 1.0 only; must improve on the ER60 book
+incrementally and beat a random-keep placebo (1,000 draws, p90). Strata
+low (z<0) / mid (0–1) / shock (≥1) / warmup. MAT stratified secondarily
+(mirror claim descriptive); no MAT ship decision from this experiment.
+
+**Test:** EXP-0051 (`research/features/vol_ratio.py`,
+`research/correlated/exp_0051_vol_ratio.py`). Discovery = DIG4 23d; May
+read once after a Stage 1 pass.
+**Result:** Reject / park at Stage 0 (power). Causality PASS (truncation +
+raw-trade hand-check). Fade candidates n=132: warmup 17 / low (z<0) 82 /
+mid (0–1) 19 / **shock (z≥1) 14 < 20** — the keep-shock gate stratum cannot
+reach the frozen minimum, so no P&L was run and May was not read. Candidate
+ratio median 0.37, p90 0.76. No retune of the shock cut on this sample.
+See `results/EXP-0051/`.
+
+## H43 — Aggressor count vs size (few-large-both on MAT; many-small-NQ on CFADE)
+
+Per market, trailing 5 s: distinct `aggressor_order_id` count and mean
+volume per aggressor, stated few/many × small/large against trailing-30 m
+session-causal medians. "Few-large in both" is institutional and continues;
+"many-small NQ, nothing in ES" is chop and fades (CORRELATED_IDEAS §2.3,
+founding idea, never built). Only two combined cells are carried (frozen):
+few-large-both (FLB) as the **primary MAT keep-gate**, and many-small-NQ +
+ES-quiet (MSQ) as a **descriptive CFADE stratum only** — the other 14
+cells are counts only, and no cell may be swapped after seeing P&L.
+
+**Primary:** frozen MAT (vol k=1, trend+VWAP, causal), keep signals in
+FLB; must improve on the frozen MAT book incrementally and beat a
+random-keep placebo (1,000 draws, p90).
+
+**Test:** EXP-0052 (`research/features/aggr_flow.py`,
+`research/correlated/exp_0052_aggr_flow.py`). Discovery = DIG4 23d; May
+(MAT books) read once after a Stage 1 pass.
+**Result:** Reject / park at Stage 1. Causality PASS; Stage 0 power PASS
+(FLB = 160 of 1,956 MAT signals). MAT gated (keep FLB) n=64 avg **+0.59**
+vs frozen MAT comparator n=502 avg **+1.55** (comparator reproduced
+exactly: net +779); net retained 5 %, placebo p90 +4.92 — avg-lift,
+retention and placebo checks FAIL (train/hold avg passed, new cohort was
+−118). Secondary: MSQ cell **empty** at CFADE candidates (0/132; CFADE
+fires in many-large tape, 73/132 in many_large__* cells) and FLB on CFADE
+n=3 candidates / 1 trade. May not read; no Java. See `results/EXP-0052/`.
+
+## H44 — Cross-market large-print clustering (both-market burst gate on MAT)
+
+Bursts of large prints in **both** ES and NQ mark institutional
+participation and should improve the frozen MAT continuation book;
+one-market bursts are single-market events. Large print = size ≥ the
+market's own **causal** p99 of print sizes over the trailing 30 completed
+minutes (whole-session p99 rejected a priori: it uses future prints and
+cannot ship live). Burst = ≥ 2 large prints in the trailing 5 s of
+completed seconds. Strata: both / nq_only / es_only / none / warmup
+(CORRELATED_IDEAS §4.3; extends EXP-0044 Arm B off IRT levels onto
+proven triggers).
+
+**Primary:** frozen MAT (vol k=1, trend+VWAP, causal), keep signals in
+the both-burst stratum; must improve on the frozen MAT book incrementally
+and beat a random-keep placebo (1,000 draws, p90). CFADE strata are
+descriptive only; no CFADE ship decision from this experiment.
+
+**Test:** EXP-0053 (`research/features/large_prints.py`,
+`research/correlated/exp_0053_large_prints.py`). Discovery = DIG4 23d;
+May (MAT books) read once after a Stage 1 pass.
+**Result:** Reject / park at Stage 1. Causality PASS (truncation +
+direct-count hand-check); power PASS (both-burst = 741/1,956 MAT
+signals — Arm B's rarity does **not** recur on trigger sets; median
+causal thresholds NQ ≥ 3, ES ≥ 5). MAT gated (keep both) n=241 avg
+**+1.13** vs comparator n=502 avg **+1.55** (net +779 reproduced);
+checks FAIL on avg lift, net retained (35 %), hold avg (gated hold
+−87/52), maxDD (368 > 290) and placebo p90 (+2.95). Joined strata say
+why: on MAT trades, `both` avg 1.58 ≈ book avg while `nq_only` (n=46)
+was 4.11 — both-market bursting is not the special cell, and `nq_only`
+may not be promoted post-hoc. On CFADE trades, `both` avg 6.93 <
+comparator 7.63; tiny `nq_only` (n=5) / `none` (n=3) cells are noise
+and are not a dig. May not read; no Java. See `results/EXP-0053/`.
+
+## H45 — BBO/top-3 imbalance agreement state at frozen triggers (stratum only)
+
+Two-market book-imbalance agreement at a frozen MAT/CFADE trigger,
+never read (single-market imbalance as a predictor was falsified in
+H15/EXP-0020; its `dual_magnet` cell is legacy-queue, not this test).
+Per market: top-3 imbalance from a depth-replayed book, averaged over
+the trailing 5 completed seconds; lean bid/ask at |imb| ≥ 0.20.
+Primary read is side-relative: `agree_with` (both books lean toward the
+trade side) vs rest, per book. A state **matters** only with n ≥ 20
+trades, avg ≥ rest + 1.0 pt, and the same direction in train **and**
+hold. Stratum only — even a matters verdict ships nothing; it only
+entitles the state to feed the Tier B execution-timer preregistration.
+
+**Test:** EXP-0054 (`research/features/book_agreement.py`,
+`research/correlated/exp_0054_book_agreement.py`). Discovery = DIG4
+23d (depth subset; uncovered triggers reported, not dropped).
+**Result:** Reject / park at the frozen matters bar. Causality PASS
+(truncation invariance: 238 event imbalances over 2 sessions, 0 diffs;
+chunked vs brute-force book replay exact on NQ +0.250000 and ES
+−0.178571). All 23 sessions had usable depth and all 2,088 triggers
+were defined, but the agreement state was essentially absent: MAT
+triggers `mixed` 1,949/1,956 (agree_ask 5, disagree 2, agree_bid 0);
+CFADE triggers `mixed` 132/132. On the exactly reproduced frozen books
+(MAT n=502, net +779.25, avg +1.552; CFADE n=87, net +663.38, avg
++7.625), `agree_with` had **0 trades on either book**, so all four
+matters checks fail (n, avg lift, train direction, hold direction).
+MAT `agree_against` n=2 avg −18.5 is a two-trade cell, not a finding.
+No May read, no retune of window/depth/lean cut, no Java. The Tier B
+execution timer is **not** entitled to use this state; if preregistered
+at all, it proceeds microprice-only under its own kill bar. This closes
+Tier A (A1–A4 all reject/park). See `results/EXP-0054/`.
+
+## H45 — Opening Range Breakout validated by orderflow (ES + NQ)
+
+The first 15 minutes of RTH (UK 14:30–14:45) define an opening range per
+market. A breakout in the direction of the OR candle (bullish OR → break of
+ORH only; bearish OR → break of ORL only; doji → no trade) continues more
+reliably when causal orderflow at the break validates it: the traded market's
+trailing-5 s aggressor imbalance is in the break direction (≥ 0.30) and the
+other market's trailing-5 s imbalance is not opposing (≥ 0). Zarattini &
+Aziz (2023) supply the direction-of-OR rule and \(R\) = OR width;
+Zarattini–Barbon–Aziz (2024) supply the causal prior-14-session Relative
+Volume session state (RelVol ≥ 1); Holmberg et al. (2013) / Crabel supply
+the OR-width contraction state and the warning that ORB profits can be a
+volatility-regime artifact.
+
+**Primary (frozen a priori):** Arm B (immediate OF-validated breakouts)
+beats Arm A (all primary breakouts) on forward outcomes and on both
+preregistered books. Arms: A price-only, B immediate-validated, C
+reaction-confirmed within 5 s (secondary; cannot be promoted over a
+failed B). Nulls: time-matched random, shifted-ES (+60 s) placebo,
+own-market-only twin, random-skip placebo for the P&L gate.
+
+**Test:** EXP-0054 (`research/features/opening_range.py`,
+`research/features/orb_flow.py`, `research/orb/exp_0054_orb.py`).
+Discovery = Apr–Aug 2026; Sep–Oct 2026 holdout read once after a
+discovery pass. Stage 0 power floor: Arm B kept ≥ 20 and dropped ≥ 20
+events on discovery, else park with counts as the result. No retune of
+OR window, pierce, imbalance cuts, windows, or brackets on this sample.
+
+---
+
+## Unregistered candidates (no H-number yet)
+
+The complete post-EXP-0050 dig map — every remaining correlated idea as
+OPEN / CONDITIONAL / CLOSED, in dig order — is **`docs/CORRELATED_IDEAS_2026-10-23.md` §8**
+(Tiers A–D + closed list + adjacent legacy queue EXP-0033 / EXP-0020).
+Tier A (A1–A4) is **complete**: all four items were preregistered and
+closed reject/park on 2026-10-24 (EXP-0051–EXP-0054 / H42–H45); its
+tracker home is **`docs/TIER_A.md`** (status board, shared count-first
+rules, one section per item, completion summary). Next in queue: Tier B
+B1 (§1.3 Claim B execution timer) in microprice-only fallback form,
+which earns its own H-number and frozen YAML only at preregistration —
+do not cite Tier B–D items as hypotheses until then.

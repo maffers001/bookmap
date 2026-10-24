@@ -116,7 +116,8 @@ def _load_month_levels(ann_path: Path, *, near_pts: float, market: str = "ES") -
             "session_id": r["session_id"],
             "side": r["side"],
             "centre": float(r["centre_price"]),
-            "lvn_dist": float(r["lvn_dist"]) if r.get("lvn_dist") else None,
+            "lvn_px": float(r["lvn_px"]) if r.get("lvn_px") not in (None, "") else None,
+            "lvn_dist": float(r["lvn_dist"]) if r.get("lvn_dist") not in (None, "") else None,
             "rank": int(float(r["rank_in_side"])),
             "snap_time_uk": r.get("snap_time_uk") or "14:30",
         })

@@ -11,7 +11,14 @@
 The best edge is the **correlated-exhaustion fade (CFADE, EXP-0036 DIG4)** — the
 only idea that made money on untouched May 2026 in the same regime where MAT
 lost. Dig backlog: EXP-0014_PNL and EXP-0017_REOPEN both **reject/park**
-(2026-10-23). Next dig: EXP-0033 high-vol overlay. Depth / LVN / level ideas are
+(2026-10-23). Two queues now: the **correlated queue** (EXP-0049/H40 and
+EXP-0050/H41 rejected; **Tier A A1–A4 all rejected 2026-10-24** —
+EXP-0051 Stage 0, EXP-0052/0053 Stage 1, EXP-0054 matters bar with
+`agree_with` n=0; next: Tier B B1 microprice-only CFADE execution timer)
+outranks the **legacy queue** (EXP-0033 high-vol overlay → EXP-0020
+dual_magnet one-shot). Full audited map: `CORRELATED_IDEAS_2026-10-23.md` §8;
+Tier A tracker (complete): `docs/TIER_A.md`.
+Depth / LVN / level ideas are
 dead (one narrow construction exception). The deliverable is increasingly a
 **two-book portfolio** (MAT continuation + CFADE fade), not a single strategy.
 
@@ -228,6 +235,8 @@ directly monetisable.
    combined-book correlation / DD study (A).
 2. **Next experiments** (each ≤ a day, pre-registered kill bars):
    ~~EXP-0014 standalone P&L~~ / ~~EXP-0017 sweeps~~ (both reject/park) →
+   ~~Tier A A1–A4~~ (all reject/park 2026-10-24, EXP-0051–0054) →
+   Tier B B1 microprice-only CFADE execution timer (`CORRELATED_IDEAS` §8) →
    EXP-0033 high-vol overlay → dual_magnet one-shot.
 3. **Then:** CFADE May anatomy strata (B) and MAT May diagnosis (C) — look once,
    freeze or drop.
