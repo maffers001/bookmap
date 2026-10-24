@@ -457,3 +457,28 @@ Primary cell: A, T=20, X=0, fixed 10/10. Train discover; May/Aug/Apr OOS
 (April observation-contaminated — one-shot confirm only).
 **Result:** Reject / park. Primary train avg −2.5; all A cells train ≤0;
 best-train B flips on May. See `results/EXP-0048/`.
+
+## H40 — Cumulative ES/NQ tape divergence (dose-response CFADE)
+
+CFADE (H29) fires on one 100 ms ES bar against while NQ still pushes. Dose
+extension: over a rolling window W ∈ {5, 10, 30} s, NQ signed aggressor
+imbalance stays with a direction *and* NQ price progresses, while ES
+imbalance is flat/against, sustained for a persistence run T. Fade NQ against
+the NQ push. Scale-free per-market imbalance; activity gate = each market's
+W-volume ≥ trailing-30-min median; empty ES windows never count as against.
+
+**Primary (frozen a priori):** W=10 s, nq_imb ≥ 0.30, es_imb ≤ 0.0, D ≥ 0.30,
+NQ progress ≥ 2 pts, persist = 5 s, cooldown 30 s. Neighbours W∈{5,30} /
+persist∈{0,10} are robustness only.
+
+**Nulls (mandatory):** NQ-only twin (no ES condition); no-progress twin
+(same |D|, NQ progress below threshold); random time-matched null; shifted-ES
+(+60 s) placebo; frozen CFADE against_m04 as P&L yardstick.
+
+**Test:** EXP-0049 (`research/features/corr_divergence.py`,
+`research/correlated/exp_0049_divergence.py`). Discovery = 23d CFADE freeze
+sample; May read once only if Stages A–C pass. Kill bars in YAML.
+**Result:** Reject / park at Stage A. Primary n=10 ≪ 200; |D| and persistence
+dose-response not monotone (lo |D| @60s +7.5 > mid −0.2). Neighbour
+`persist0` n=508 but cannot be promoted over a failed primary (pre-registered).
+Causality (truncation) passed. Stages B–D not run. See `results/EXP-0049/`.

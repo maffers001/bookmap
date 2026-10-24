@@ -8,6 +8,7 @@ _DETECTORS = {
     "correlated_exhaust": "research.correlated.exp_0036_exhaust",
     "correlated_exhaust_fade_dig": "research.correlated.exp_0036_fade_dig",
     "correlated_exhaust_fade_freeze": "research.correlated.exp_0036_fade_freeze",
+    "correlated_divergence": "research.correlated.exp_0049_divergence",
 }
 
 

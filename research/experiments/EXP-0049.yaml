@@ -1,0 +1,77 @@
+name: EXP-0049
+hypothesis: H40
+title: Cumulative ES/NQ tape divergence — dose-response CFADE (fade)
+description: >
+  Rolling W-second signed aggressor imbalance per market on a dense 100 ms grid.
+  Fire a fade when NQ cumulative keeps pushing (imbalance + price progress) while
+  ES cumulative is flat/against, sustained for a persistence run. Primary cell
+  fixed a priori: W=10s, nq_imb>=0.30, es_imb<=0.0, D>=0.30, NQ progress>=2pts,
+  persistence=5s, 30s cooldown. Neighbours (W in {5,30}, persist in {0,10}) are
+  robustness only and cannot be promoted over a failed primary.
+  Comparators: NQ-only twin, no-progress twin, random null, frozen CFADE
+  against_m04, shifted-ES (+60s) placebo. Discovery = 23d CFADE freeze sample;
+  May read once only if Stages A–C pass. No retuning on May.
+
+detector: correlated_divergence
+bar_ms: 100
+horizons_ms: [250, 500, 1000, 2000, 5000, 10000, 20000, 30000, 60000]
+point_targets: [5, 10, 20, 30]
+pts_per_tick: 0.25
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+signal_cooldown_sec: 5.0
+
+# Power / MDE (RESEARCH_REVIEW §8)
+target_n_discovery: 200
+target_n_may: 80
+mde_hit10_pp: 5.0
+mde_ret60_pts: 1.5
+
+# Kill bars (sequential; stop at first failure)
+kill:
+  stage_a_min_n: 200
+  stage_b_min_ret60: 1.5
+  stage_b_min_hit10_lift_vs_nq_only_pp: 5.0
+  stage_c_min_days_pos: 14
+  stage_c_max_top3_share: 0.55
+  stage_c_max_loo_neg: 2
+  stage_c_min_avg_frac_of_cfade: 0.50
+
+divergence:
+  bar_ms: 100
+  window_sec: 10.0
+  persist_sec: 5.0
+  nq_min_imb: 0.30
+  es_imb_max: 0.0
+  min_D: 0.30
+  nq_min_progress_pts: 2.0
+  cooldown_sec: 30.0
+  activity_lookback_min: 30
+  activity_warmup_min: 5
+  activity_q: 0.50
+  pts_per_tick: 0.25
+
+# Primary is the default above. Neighbours: robustness only.
+neighbours:
+  W5: {window_sec: 5.0}
+  W30: {window_sec: 30.0}
+  persist0: {persist_sec: 0.0}
+  persist10: {persist_sec: 10.0}
+
+# CFADE freeze comparator (against_m04)
+cfade_exhaust:
+  nq_min_imbalance: 0.55
+  nq_min_vol: 25
+  nq_min_trades: 6
+  es_imb_max: -0.4
+  es_min_vol: 0
+  use_imb: true
+  use_vol: false
+  max_wait_sec: 0
+  skip_bars: 0
+cfade_max_wait_sec: 5.0
+
+exclude_sessions: []
+# Discovery = DIG4 23d freeze sample (hardcoded in exp_0049_divergence.DIG4_23).
+# May is Stage D only (auto after Stage C pass).
+run_may: false

@@ -63,8 +63,21 @@
 | EXP-0046 | H37 ES open-book standout resting levels | **reject / park** | 14d Oct + 15d Sep + 17d May | T0 −27/−27/−31 all months; all ES brackets ≤0 on Oct; R0 null; see notes |
 | EXP-0047 | H38 MAT confirm at causal LVN fade | ran — **reject / park** | train + May + Aug OOS | primary none+rr1:2 @60s train −495 / May −344; asym worse; see notes |
 | EXP-0048 | H39 MAT fail-fade (A fail / B double) | ran — **reject / park** | train + May + Aug + Apr | primary A T20 X0 fixed10 train avg **−2.5**; all A train ≤0; best-train B flips May; see notes |
+| EXP-0049 | H40 cumulative ES/NQ tape divergence | ran — **reject / park** (Stage A) | DIG4 23d discovery | primary n=10 ≪200; dose-response not monotone; May not read; see notes |
 
 ## Run notes
+
+### 2026-10-24 — EXP-0049 cumulative tape divergence (H40)
+
+- Idea: dose-response CFADE — rolling W=10 s NQ push + ES flat/against, persist 5 s.
+- Plumbing: `research/features/corr_divergence.py`; runner
+  `detector: correlated_divergence` / `exp_0049_divergence.py`.
+- Discovery = DIG4 23d freeze sample. Causality truncation (persist=0) **PASS**.
+- **Stage A FAIL:** primary n=**10** (kill ≥200); |D| tercile @60s lo +7.5 / mid −0.2 / hi +0.4
+  (not monotone); persist 0/5/10 s not monotone. Neighbour `persist0` n=508
+  hit10 0.33 / @60s +0.82 — robustness only, **not promoted**.
+- Stages B–D not run (sequential kill). No threshold retune. **Reject / park.**
+- Results: `results/EXP-0049/`.
 
 ### 2026-10-24 — EXP-0048 MAT fail-fade (H39)
 
