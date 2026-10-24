@@ -4,20 +4,20 @@ Custom Bookmap Layer 1 add-ons for NQ scalping with ES confirmation:
 
 | Add-on name in Bookmap | Purpose |
 |---|---|
-| **Orderflow Hello** | Load-test only ‚Äî confirm the JAR installs |
-| **Session Extractor** | Replay ‚Üí NDJSON trades/full depth/MBO for research |
+| **Orderflow Hello** | Load-test only ó confirm the JAR installs |
+| **Session Extractor** | Replay ? NDJSON trades/full depth/MBO for research |
 | **Aggressive Flow** | Buy/sell volume & orders per window, avg size, delta |
 | **Effort vs Result** | Aggression vs price progress (absorption / exhaustion) |
 | **Liquidity Reaction** | Large-order attract / repel / absorb / dwell / withdraw |
 | **ES/NQ Flow Confirm** | Normalized ES vs NQ flow agreement (attach on NQ; keep ES open) |
-| **Momentum AutoTrade (ES+NQ)** | v1 ‚Äî EXP-0008 tape momentum signals (+ optional CD pullback); optional bracket orders |
-| **Momentum AutoTrade v3 (ES+NQ)** | v1 + regime/trend/VWAP gates + vol-scaled brackets (EXP-0034); leave v1 unchanged (was labelled v2) |
-| **Correlated Fade AutoTrade (ES+NQ)** | H29 / EXP-0036_DIG4 frozen test auto-trade: fade an ES+NQ burst when NQ keeps pushing but ES flips against it; ER ‚â§ 0.30 gate; vol RR brackets SL 1R / TP 2R |
-| **MAT Hotkeys v3** | Classic companion: always-on-top **MAT Side v3** panel + keyboard shortcuts for long/short side filter |
-| **Pitch and Catch** | High-vol peak/trough (‚Äúpitch‚Äù) then low-vol move away (‚Äúcatch‚Äù); chart markers |
-| **HV Extreme Move AutoTrade** | HV tip ‚Üí clean Move pts leg ‚Üí tip markers; optional market + TP/SL brackets |
-| **Trapped Retest** | HV peak ‚Üí weak lower-vol retest ‚Üí fire on break beyond 2nd swing |
-| **Stop Run** | Inferred stop-run fingerprint beyond swing/session/overnight levels (EXP-0041 / H32); visual markers only ‚Äî no auto-trade |
+| **Momentum AutoTrade (ES+NQ)** | v1 ó EXP-0008 tape momentum signals (+ optional CD pullback); optional bracket orders |
+| **Momentum AutoTrade v4 (ES+NQ)** | v1 + regime/trend/VWAP gates + vol-scaled brackets (EXP-0034); leave v1 unchanged (was labelled v2) |
+| **Correlated Fade AutoTrade (ES+NQ)** | H29 / EXP-0036_DIG4 frozen test auto-trade: fade an ES+NQ burst when NQ keeps pushing but ES flips against it; ER = 0.30 gate; vol RR brackets SL 1R / TP 2R |
+| **MAT Hotkeys v4** | Classic companion: always-on-top **MAT Side v4** panel + keyboard shortcuts for long/short side filter |
+| **Pitch and Catch** | High-vol peak/trough (ìpitchî) then low-vol move away (ìcatchî); chart markers |
+| **HV Extreme Move AutoTrade** | HV tip ? clean Move pts leg ? tip markers; optional market + TP/SL brackets |
+| **Trapped Retest** | HV peak ? weak lower-vol retest ? fire on break beyond 2nd swing |
+| **Stop Run** | Inferred stop-run fingerprint beyond swing/session/overnight levels (EXP-0041 / H32); visual markers only ó no auto-trade |
 
 ## Prerequisites
 
@@ -60,26 +60,26 @@ $cp = "C:\Program Files\Bookmap\lib\bm-l1api.jar;C:\Program Files\Bookmap\lib\bm
 $out = "build\classes\java\main"
 $sources = Get-ChildItem -Recurse -Filter "*.java" -Path "src\main\java" | % FullName
 javac -encoding UTF-8 -cp $cp -d $out @sources
-Push-Location $out; jar cf "..\..\..\libs\bookmap-orderflow-mat-v3.jar" .; Pop-Location
+Push-Location $out; jar cf "..\..\..\libs\bookmap-orderflow-mat-v4.jar" .; Pop-Location
 ```
 
-For a named MAT v3 build with Gradle: `$env:ORDERFLOW_JAR_NAME='bookmap-orderflow-mat-v3.jar'; .\gradlew.bat jar`
+For a named MAT v4 build with Gradle: `$env:ORDERFLOW_JAR_NAME='bookmap-orderflow-mat-v4.jar'; .\gradlew.bat jar`
 
 
 The build compiles against your installed Bookmap API jars (`%BOOKMAP_HOME%\lib\bm-l1api.jar` and `bm-simplified-api-wrapper.jar`, default `C:\Program Files\Bookmap`) so the add-on matches your Bookmap runtime.
 
 ## Install in Bookmap
 
-1. Launch Bookmap (**Replay** recommended for first tests). Use an NQ recording from `C:\Bookmap\Feeds` that covers 14:30‚Äì17:00 UK if possible. For **ES/NQ Flow Confirm**, open both NQ and ES.
-2. Open **Settings ‚Üí Api plugins configuration** (or the Configure API plugins toolbar button).
-3. Click **Add‚Ä¶** and select:
+1. Launch Bookmap (**Replay** recommended for first tests). Use an NQ recording from `C:\Bookmap\Feeds` that covers 14:30ñ17:00 UK if possible. For **ES/NQ Flow Confirm**, open both NQ and ES.
+2. Open **Settings ? Api plugins configuration** (or the Configure API plugins toolbar button).
+3. Click **AddÖ** and select:
    `c:\Work\Mat\bookmap\bookmap-addon\build\libs\bookmap-orderflow.jar`
-4. In the popup, pick an add-on (e.g. `Aggressive Flow`). Repeat **Add‚Ä¶** for each add-on you want from the same JAR.
+4. In the popup, pick an add-on (e.g. `Aggressive Flow`). Repeat **AddÖ** for each add-on you want from the same JAR.
 5. Enable each module with the **checkbox** on the left.
 6. Open the settings panel via the button next to the checkbox to tune windows / thresholds (`@Parameter` fields).
 7. After rebuilding: `.\gradlew.bat jar`, then remove/re-add the JAR (or restart Bookmap) so classes reload.
 
-Logs (including Liquidity Reaction event lines and Hello load messages) appear under **File ‚Üí Show log file** / `C:\Bookmap\Logs`.
+Logs (including Liquidity Reaction event lines and Hello load messages) appear under **File ? Show log file** / `C:\Bookmap\Logs`.
 
 Official references:
 
@@ -90,7 +90,7 @@ Official references:
 
 ### Aggressive Flow
 - **AF Buy** / **AF Sell**: volume (or order counts) per window  
-- **AF Delta**: buy ‚àí sell  
+- **AF Delta**: buy - sell  
 - **AF Avg Buy/Sell Size**: average aggressive order size  
 - Parameters: window ms (maps to 100/250/500/1000 ms), EMA on/off, show orders vs volume  
 - **Plot AF Buy / Sell / Delta / Avg Buy Size / Avg Sell Size**: toggle which series appear in the bottom pane (avg sizes off by default)  
@@ -98,8 +98,8 @@ Official references:
 
 
 ### Effort vs Result
-- **ER Buy/Sell Effort**: aggressive volume √∑ price progress (ticks)  
-- **ER ‚Ä¶ Accel**: change in effort vs prior window  
+- **ER Buy/Sell Effort**: aggressive volume ˜ price progress (ticks)  
+- **ER Ö Accel**: change in effort vs prior window  
 - **ER Exhaustion**: `1` when trend-side volume rises while progress collapses  
 - Parameters: window, lookback, epsilon ticks, trend lookback  
 
@@ -126,7 +126,7 @@ Research lead from **EXP-0008** (tape momentum + ES sync). Optional **CD pullbac
 | **MAT ES lag ms** | Lag to matching ES burst (`-1` if none) |
 | **MAT CD trend** | `+1` / `-1` / `0` from 22-tick CD SMA |
 
-**Optional trade management** (all default **OFF** ‚Äî unchanged behavior until enabled):
+**Optional trade management** (all default **OFF** ó unchanged behavior until enabled):
 
 | Param | Meaning |
 |---|---|
@@ -136,9 +136,9 @@ Research lead from **EXP-0008** (tape momentum + ES sync). Optional **CD pullbac
 | **TP extend proximity (pts)** | Distance to TP that arms an extend (default `2`) |
 | **Max TP extends (0=unlimited)** | Cap per trade (default `3`; `0` = no cap) |
 
-Reverse always respects **Allow longs/shorts**. Logs: `MAT REVERSE ‚Ä¶`, `MAT TP EXTEND ‚Ä¶`.
+Reverse always respects **Allow longs/shorts**. Logs: `MAT REVERSE Ö`, `MAT TP EXTEND Ö`.
 
-**Side filter console + hotkeys (MAT v3):** the always-on-top **MAT Side v3** window opens when you **attach Momentum AutoTrade v3 (or v1) on the chart** (and also when **MAT Hotkeys v3** is enabled in API plugins). Buttons: Both / Longs / Shorts / Off + Longs/Shorts toggles. Closing hides it (filter unchanged). Re-open: detach/reattach MAT, or enable **MAT Hotkeys v3**, or bind Bookmap action **Show MAT Side panel**. Check the Bookmap log for `MAT Side v3 panel shown` / `MAT Hotkeys v3 loaded`.
+**Side filter console + hotkeys (MAT v4):** the always-on-top **MAT Side v4** window opens when you **attach Momentum AutoTrade v4 (or v1) on the chart** (and also when **MAT Hotkeys v4** is enabled in API plugins). Buttons: Both / Longs / Shorts / Off + Longs/Shorts toggles. Closing hides it (filter unchanged). Re-open: detach/reattach MAT, or enable **MAT Hotkeys v4**, or bind Bookmap action **Show MAT Side panel**. Check the Bookmap log for `MAT Side v4 panel shown` / `MAT Hotkeys v4 loaded`.
 
 With MAT attached and **Enable Ctrl+Shift side hotkeys = true** (default), or with the console focused:
 
@@ -152,83 +152,86 @@ With MAT attached and **Enable Ctrl+Shift side hotkeys = true** (default), or wi
 (Ctrl+Alt clashes with Windows / Evernote / Snipping Tool.) Log example: `MAT side filter: SHORTS only  [longs=false shorts=true]  (toggled longs)`. Panel **Allow longs/shorts** still seed/sync the same filter when changed.
 
 **Replay test (recommended first):**
-1. Rebuild JAR, remove/re-add the plugin in Bookmap if already loaded; enable **MAT Hotkeys v3** and **Momentum AutoTrade v3 (ES+NQ)** (or v1 for classic).
+1. Rebuild JAR, remove/re-add the plugin in Bookmap if already loaded; enable **MAT Hotkeys v4** and **Momentum AutoTrade v4 (ES+NQ)** (or v1 for classic).
 2. Open **Replay**, load a feed with **both NQ and ES**.
-3. Add **Momentum AutoTrade v3 (ES+NQ)** on the **NQ** chart; leave **Enable trading = false**.
-4. Defaults match the study: 100ms bars, min 6 trades, vol‚â•25, |imb|‚â•0.55, ES sync 1500ms.
+3. Add **Momentum AutoTrade v4 (ES+NQ)** on the **NQ** chart; leave **Enable trading = false**.
+4. Defaults match the study: 100ms bars, min 6 trades, vol=25, |imb|=0.55, ES sync 1500ms.
 5. Optional: set **Max ES lag ms = 250** (stronger subset from research) or **Require CD pullback to MA = true**.
 6. Run replay; watch markers + `MAT Signal`. Logs: `MAT SIGNAL` / `MAT2 SIGNAL` in Bookmap log.
 7. Only after signals look right: use a **simulation / paper** connection, set **Enable trading = true**, size/TP/SL. Brackets are absolute TP/SL in **price points**.
 
 **Safety:** trading defaults **OFF**. Do not enable on a live account until you have validated on replay/sim.
 
-### Momentum AutoTrade v3 (ES+NQ)
+### Momentum AutoTrade v4 (ES+NQ)
 
-Same core as v1 (EXP-0008 tape + ES sync, reverse-on-stop, TP extend, Ctrl+Shift side hotkeys), plus optional **regime / trend / VWAP** gates and **vol-scaled brackets** from **EXP-0034**. User-visible name is **v3** (control panel); log tags remain `MAT2 ‚Ä¶` for replay tooling.
+Same core as v1 (EXP-0008 tape + ES sync, reverse-on-stop, TP extend, Ctrl+Shift side hotkeys), plus optional **regime / trend / VWAP** gates and **vol-scaled brackets** from **EXP-0034**, plus **v4 open-vol calibration**: in the first N minutes after UK session open, brackets use the **prior-session** median 1-min range (persisted under `~/.bookmap-orderflow/mat_prior_vol_median.txt`); if none is stored, a **fixed open bracket** (default 10). After the open period, live vol k=1 as before. Log tags remain `MAT2 ?` for replay tooling.
 
-Do **not** enable trading on v1 and v3 at the same time ‚Äî they share `MatSideFilter`.
+Do **not** enable trading on v1 and v4 at the same time ? they share `MatSideFilter`. CFADE is **unchanged** (own `resolveBracketPts`).
 
-JAR: `bookmap-addon/build/libs/bookmap-orderflow-mat-v3.jar` (or default `bookmap-orderflow.jar` from `gradle jar`). Remove any old mat-v2 plugin entry before installing.
+JAR: `bookmap-addon/build/libs/bookmap-orderflow-mat-v4.jar` (or default `bookmap-orderflow.jar` from `gradle jar`). Remove any old mat-v2 plugin entry before installing.
 
-**Look-ahead note:** research now stamps bursts at **bar end** (corrected 2026-10-18). Older ~85% hit+10 tick figures used bar-start entry and are invalid vs live MAT. Corrected EXP-0008 `p_hit_10pts` ‚âà **0.56**.
+**Look-ahead note:** research now stamps bursts at **bar end** (corrected 2026-10-18). Older ~85% hit+10 tick figures used bar-start entry and are invalid vs live MAT. Corrected EXP-0008 `p_hit_10pts` ò **0.56**.
 
 **New params** (EXP-0034 defaults baked in):
 
 | Param | Default | Meaning |
 |---|---|---|
 | **Regime window min** | 60 | Rolling 1-min bars for day-type |
-| **Regime gate: max range pts (0=off)** | **0** (off) | Skip when range exceeds this; leave off by default ‚Äî 60m NQ range is usually ‚â´80 so this starved signals when stacked |
+| **Regime gate: max range pts (0=off)** | **0** (off) | Skip when range exceeds this; leave off by default ó 60m NQ range is usually ª80 so this starved signals when stacked |
 | **Regime gate: max efficiency ratio (0=off)** | 0 (off) | Same for `\|net\| / path` |
 | **Regime hot action (0=skip 1=counter)** | 0 (skip) | When hot: skip all, or only allow against-trend |
 | **Trend window min** | 30 | Net lookback for trend mode |
 | **Trend mode (0=off 1=with 2=against)** | **1** (with) | Require burst with rolling net |
-| **Require VWAP side** | **true** | Long only ‚â• session VWAP; short only ‚â§ |
-| **Vol-scaled brackets** | **true** | TP=SL = k √ó median 1-min range (floor/cap) ‚Äî frozen base |
-| **Vol multiple k** / **Vol window min** / **Bracket min/max pts** | **1** / 30 / 6‚Äì30 | **k=1** (OOS 2026-10-18); clip 6‚Äì30 |
+| **Require VWAP side** | **true** | Long only = session VWAP; short only = |
+| **Vol-scaled brackets** | **true** | TP=SL = k ◊ median 1-min range (floor/cap) ó frozen base |
+| **Vol multiple k** / **Vol window min** / **Bracket min/max pts** | **1** / 30 / 6?30 | **k=1** (OOS 2026-10-18); clip 6?30 |
+| **Enable open vol anchor** | **true** | v4: open period uses prior-session median (else fixed) |
+| **Open vol period min** | **20** | Minutes after VWAP UK open for open-vol path |
+| **Open fixed bracket pts** | **10** | Used in open period when no prior median file |
 | **ES confirm mode (0=causal 1=confirm)** | 0 | 1 = NQ-first: pending NQ burst fires when ES confirms within Max ES lag |
 | **VWAP session open UK min-of-day** | 870 | UK 14:30 |
 
-Logs: `MAT2 SIGNAL ‚Ä¶`, `MAT2 SIGNAL(confirm) nqTs=‚Ä¶ esTs=‚Ä¶ lagMs=‚Ä¶`, `MAT2 REJECT regime_hot_skip|trend_mode_fail|vwap_side_fail ‚Ä¶`.
+Logs: `MAT2 SIGNAL Ö`, `MAT2 SIGNAL(confirm) nqTs=Ö esTs=Ö lagMs=Ö`, `MAT2 REJECT regime_hot_skip|trend_mode_fail|vwap_side_fail Ö`.
 
 Defaults are **with-trend + VWAP + vol-scaled k=1** (range gate off). Trend uses **completed 1-minute bars only** (no intra-minute hindsight). VWAP is a running trade VWAP.
 
 **Replay check vs offline reference:**  
 `python -m research.export_mat2_ref --session 021026 --stamp confirm --bracket vol_k1`  
-Install `bookmap-orderflow-mat-v3.jar` (or a confirm-tagged build), set **ES confirm mode=1**, **Vol-scaled=true**, **k=1**, Verbose=true; grep `MAT2 SIGNAL` / `MAT2 SIGNAL(confirm)` and match with `python -m research.compare_replay_ref`.
+Install `bookmap-orderflow-mat-v4.jar` (or a confirm-tagged build), set **ES confirm mode=1**, **Vol-scaled=true**, **k=1**, Verbose=true; grep `MAT2 SIGNAL` / `MAT2 SIGNAL(confirm)` and match with `python -m research.compare_replay_ref`.
 
 ### Correlated Fade AutoTrade (ES+NQ)
 
-Frozen H29 fade from **EXP-0036_DIG4** (`results/EXP-0036_DIG4/TEST_AUTOTRADE_SPEC.md`). A *separate book* from MAT: MAT trades **with** the ES+NQ burst; this trades **against** it once ES stops participating. Both can run together as independent signals (DIG3 ¬ß6: additive), but do not enable trading on both against the same account until the fade has its own live record.
+Frozen H29 fade from **EXP-0036_DIG4** (`results/EXP-0036_DIG4/TEST_AUTOTRADE_SPEC.md`). A *separate book* from MAT: MAT trades **with** the ES+NQ burst; this trades **against** it once ES stops participating. Both can run together as independent signals (DIG3 ß6: additive), but do not enable trading on both against the same account until the fade has its own live record.
 
 JAR: `bookmap-addon/build/libs/bookmap-orderflow-cfade.jar` (contains every add-on). Classes: `trade/CorrFadeAutoTradeModule` (panel, gates, orders) over `core/CorrFadeDetector` (Bookmap-free signal; `core/TapeBarSeries` gives per-slot NQ/ES bars).
 
 **Signal (all 100 ms tape bars, causal):**
-1. ES+NQ **confirm** burst ‚Äî EXP-0008 rules (6 trades, vol 25, |imb| 0.55, progress 1 tick, cooldown 3), ES same side within ¬±1500 ms and |lag| ‚â§ 250 ms, stamp = max(NQ bar end, ES bar end). Pairing is by bar **stamp** with a short history on both legs, because Bookmap bars close lazily (on the next print) so either leg can become known after the other.
-2. From the stamp, first complete bar (‚â§ **5 s**) where NQ is still bursting with the trade (side√óimb ‚â• 0.55, vol ‚â• 25, trades ‚â• 6) **and** ES is against it (side√óimb ‚â§ **‚àí0.4** on a bar with ES prints).
-3. **Fade** (side = ‚àíburst side) at that bar's close. Two bursts resolving on the same bar ‚Üí one fade.
+1. ES+NQ **confirm** burst ó EXP-0008 rules (6 trades, vol 25, |imb| 0.55, progress 1 tick, cooldown 3), ES same side within ±1500 ms and |lag| = 250 ms, stamp = max(NQ bar end, ES bar end). Pairing is by bar **stamp** with a short history on both legs, because Bookmap bars close lazily (on the next print) so either leg can become known after the other.
+2. From the stamp, first complete bar (= **5 s**) where NQ is still bursting with the trade (side◊imb = 0.55, vol = 25, trades = 6) **and** ES is against it (side◊imb = **-0.4** on a bar with ES prints).
+3. **Fade** (side = -burst side) at that bar's close. Two bursts resolving on the same bar ? one fade.
 
-**Gates:** UK **14:30‚Äì17:00**; **Max efficiency ratio 0.30** on the 60-min regime (`|net| / path` over completed minutes; tracker resets at window open so the first hour matches research); flat-only; 5 s cooldown from the last *taken* signal; Allow longs/shorts. **No** trend/VWAP gate ‚Äî DIG3 showed those hurt the fade.
+**Gates:** UK **14:30ñ17:00**; **Max efficiency ratio 0.30** on the 60-min regime (`|net| / path` over completed minutes; tracker resets at window open so the first hour matches research); flat-only; 5 s cooldown from the last *taken* signal; Allow longs/shorts. **No** trend/VWAP gate ó DIG3 showed those hurt the fade.
 
-**Brackets (default after CFADE_ASYM_RR):** `unit = k √ó median 30-min 1-minute range` (**k = 1**); **SL = clip(1R √ó unit, 4, 40)**, **TP = clip(2R √ó unit, 4, 40)** ‚Äî same formula as `make_vol_bracket_rr`. Panel: Vol multiple k, SL R / TP R multiples, Bracket min/max pts.
+**Brackets (default after CFADE_ASYM_RR):** `unit = k ◊ median 30-min 1-minute range` (**k = 1**); **SL = clip(1R ◊ unit, 4, 40)**, **TP = clip(2R ◊ unit, 4, 40)** ó same formula as `make_vol_bracket_rr`. Panel: Vol multiple k, SL R / TP R multiples, Bracket min/max pts.
 
 | Panel | Meaning |
 |---|---|
-| **CF Signal** | `+1` fade long / `‚àí1` fade short / `0` |
+| **CF Signal** | `+1` fade long / `-1` fade short / `0` |
 | **CF Fade Long / Short** | Primary-chart markers at the fade bar close |
 | **CF ER60** | Current 60-min efficiency ratio (gate at 0.30) |
 | **CF Pending fades** | Confirmed bursts still being watched for an ES-against bar |
 
-**Trading / ops params:** Enable trading (default **off**), Use selected account, Order size (default 1), **Kill switch: max session loss pts** (default 150 ‚Äî no more orders that UK day once realised net ‚â§ ‚àí150; signals still plot), Verbose log.
+**Trading / ops params:** Enable trading (default **off**), Use selected account, Order size (default 1), **Kill switch: max session loss pts** (default 150 ó no more orders that UK day once realised net = -150; signals still plot), Verbose log.
 
-Logs: `CFADE CONFIRM#‚Ä¶`, `CFADE PROBE ‚Ä¶` (partial NQ-still / ES-against while waiting), `CFADE EXPIRE ‚Ä¶` (slot counts + best `side*esImb` / `side*nqImb`), `CFADE AGG sample ‚Ä¶` (first tape prints after realtime ‚Äî aggressor polarity), `CFADE FADE PASS|REJECT ‚Ä¶`, `CFADE SIGNAL ‚Ä¶`, `CFADE ORDER ‚Ä¶`, `CFADE TRADE CLOSED ‚Ä¶`, `CFADE KILL SWITCH`. Reject reasons: `outside_window`, `regime_er_skip`, `signal_cooldown`, `not_flat(...)`, `longs_disabled` / `shorts_disabled`.
+Logs: `CFADE CONFIRM#Ö`, `CFADE PROBE Ö` (partial NQ-still / ES-against while waiting), `CFADE EXPIRE Ö` (slot counts + best `side*esImb` / `side*nqImb`), `CFADE AGG sample Ö` (first tape prints after realtime ó aggressor polarity), `CFADE FADE PASS|REJECT Ö`, `CFADE SIGNAL Ö`, `CFADE ORDER Ö`, `CFADE TRADE CLOSED Ö`, `CFADE KILL SWITCH`. Reject reasons: `outside_window`, `regime_er_skip`, `signal_cooldown`, `not_flat(...)`, `longs_disabled` / `shorts_disabled`.
 
-**Replay parity note:** fade slots wait for both NQ and ES watermarks (or +1 bar grace) before evaluating ‚Äî otherwise an ES print can close a 100 ms slot before NQ prints for that slot arrive, and the confirm expires with `nqStillHits=0` while research (sorted full tape) still has the fade.
+**Replay parity note:** fade slots wait for both NQ and ES watermarks (or +1 bar grace) before evaluating ó otherwise an ES print can close a 100 ms slot before NQ prints for that slot arrive, and the confirm expires with `nqStillHits=0` while research (sorted full tape) still has the fade.
 
 **Offline parity (2026-10-19):** `CorrFadeDetector` + `RegimeTracker` replayed on the 23 research sessions reproduce the research fade list **132 / 132** exactly (stamp, side, `es_imb_x`, `wait_ms`, close) and identical `er60` / bracket at every fade.
 
-**Replay check:** `python -m research.export_cfade_ref --session 021026` ‚Üí `results/CFADE_REF_021026.md` lists every candidate with its ER verdict and the expected `CFADE SIGNAL` rows; grep the Bookmap log and match `tsNs=`.
+**Replay check:** `python -m research.export_cfade_ref --session 021026` ? `results/CFADE_REF_021026.md` lists every candidate with its ER verdict and the expected `CFADE SIGNAL` rows; grep the Bookmap log and match `tsNs=`.
 
-**Not implemented (ops rules in the spec):** no auto-flatten at 17:00 and no cross-session "3 losing sessions" stop ‚Äî handle manually.
+**Not implemented (ops rules in the spec):** no auto-flatten at 17:00 and no cross-session "3 losing sessions" stop ó handle manually.
 
 ### Pitch and Catch
 Warns when a **high-volume** rotation peak/trough is followed by a **low-volume** move of **Catch pts** (default 20) without reclaiming the extreme.
@@ -236,39 +239,39 @@ Warns when a **high-volume** rotation peak/trough is followed by a **low-volume*
 | Panel | Meaning |
 |---|---|
 | **PC Pitch Long / Short** | Pitch price **while armed** (setup in play) |
-| **PC Target Long / Short** | Catch level (pitch ¬± Catch pts) while armed |
+| **PC Target Long / Short** | Catch level (pitch ± Catch pts) while armed |
 | **PC Fire Long / Short** | Marker when the catch **completes** |
-| **PC Armed** | `+1` / `‚àí1` / `0` while a setup is in play |
-| **PC Signal** | Brief `+1` / `‚àí1` when catch fires |
-| **PC Peak ratio** | Pitch-band volume √∑ (avg vol/tick √ó band); ‚â• **High vol mult** to arm |
-| **PC Path ratio** | Catch-leg volume √∑ (avg √ó catch pts); ‚â§ **Low vol frac** to fire |
+| **PC Armed** | `+1` / `-1` / `0` while a setup is in play |
+| **PC Signal** | Brief `+1` / `-1` when catch fires |
+| **PC Peak ratio** | Pitch-band volume ˜ (avg vol/tick ◊ band); = **High vol mult** to arm |
+| **PC Path ratio** | Catch-leg volume ˜ (avg ◊ catch pts); = **Low vol frac** to fire |
 
 **Volume definition:** rolling profile over **Profile lookback min**.  
-`avg vol/tick = total volume / (profile high ‚àí low + 1)`.  
+`avg vol/tick = total volume / (profile high - low + 1)`.  
 Peak uses volume in **Peak band pts** around the extreme; catch uses the **Catch pts** price span away from it.
 
 **Suggested start (NQ):** Catch pts `20`, Peak band `2`, Confirm `5`, High vol mult `1.5`, Low vol frac `0.70`. Tighten Low vol frac (e.g. `0.50`) for quieter catches only. Toggle **Show in-play lines** off if the pitch/target lines clutter the chart.
 
 ### Stop Run
 - **SR Level High / Low**: nearest live unpierced reference level (pullaway swing, locked session H/L, overnight H/L)
-- **SR Run Long / Short**: fire marker when the 2s fingerprint scores ‚â• min score after a pierce (continuation side)
-- **SR Fade Long / Short**: reclaim (stall) marker within reclaim seconds ‚Äî informational only
-- **SR Score** / **SR Signal**: last score 0‚Äì4 and brief +/-1 on fire
+- **SR Run Long / Short**: fire marker when the 2s fingerprint scores = min score after a pierce (continuation side)
+- **SR Fade Long / Short**: reclaim (stall) marker within reclaim seconds ó informational only
+- **SR Score** / **SR Signal**: last score 0ñ4 and brief +/-1 on fire
 - Attach on NQ with ES open for ES-burst confirm. MBO pull used when the feed provides MBO.
-- Frozen defaults from EXP-0041 / H32 ‚Äî **visual only, no auto-trade**
-- Logs: `SR RUN ‚Ä¶`, `SR RESOLVE stall|continue ‚Ä¶`
+- Frozen defaults from EXP-0041 / H32 ó **visual only, no auto-trade**
+- Logs: `SR RUN Ö`, `SR RESOLVE stall|continue Ö`
 
 ### Stop Run
-Inferred stop-run fingerprint beyond swing / session / overnight levels (EXP-0041 / H32). **Visual only ‚Äî no auto-trade.** Attach on NQ with ES open.
+Inferred stop-run fingerprint beyond swing / session / overnight levels (EXP-0041 / H32). **Visual only ó no auto-trade.** Attach on NQ with ES open.
 
 | Panel | Meaning |
 |---|---|
 | **SR Level High / Low** | Nearest live unpierced reference level |
-| **SR Run Long / Short** | Fire marker after pierce + 2s fingerprint (score ‚â• min) |
+| **SR Run Long / Short** | Fire marker after pierce + 2s fingerprint (score = min) |
 | **SR Fade Long / Short** | Reclaim (stall) marker within reclaim seconds |
-| **SR Score** / **SR Signal** | Last score 0‚Äì4 / brief `¬±1` on fire |
+| **SR Score** / **SR Signal** | Last score 0ñ4 / brief `±1` on fire |
 
-Logs: `SR RUN ‚Ä¶`, `SR RESOLVE stall|continue ‚Ä¶`. Replay parity: `python -m research.stop_run.dump_session_events --session <sid>`.
+Logs: `SR RUN Ö`, `SR RESOLVE stall|continue Ö`. Replay parity: `python -m research.stop_run.dump_session_events --session <sid>`.
 
 ### Trapped Retest
 Two-swing trapped-size fade: **high-volume** extreme (peak1), then a **lower-volume** failed retest (peak2), then fire when price breaks **Break pts** beyond peak2.
@@ -278,37 +281,37 @@ Two-swing trapped-size fade: **high-volume** extreme (peak1), then a **lower-vol
 | **TR Peak1 Long / Short** | First HV extreme while in play |
 | **TR Peak2 Long / Short** | Weak retest extreme while waiting for break |
 | **TR Fire Long / Short** | Marker when break completes |
-| **TR Phase** | `0` idle / `¬±1` after peak1 / `¬±2` after peak2 |
-| **TR Peak ratio** | Peak1 band vol √∑ avg; ‚â• **High vol mult** to arm |
-| **TR Retest ratio** | Peak2 √∑ peak1 vol (live while seeking); ‚â§ **Max retest frac** to accept |
-| **TR Signal** | Brief `¬±1` on fire |
+| **TR Phase** | `0` idle / `±1` after peak1 / `±2` after peak2 |
+| **TR Peak ratio** | Peak1 band vol ˜ avg; = **High vol mult** to arm |
+| **TR Retest ratio** | Peak2 ˜ peak1 vol (live while seeking); = **Max retest frac** to accept |
+| **TR Signal** | Brief `±1` on fire |
 
-**Logic (short):** confirm HV local high ‚Üí min pullback ‚Üí lower high with retest vol ‚â§ frac √ó peak1 ‚Üí fire when price drops **Break pts** from peak2. Long is mirrored. Distinct from Pitch and Catch (one-swing quiet path).
+**Logic (short):** confirm HV local high ? min pullback ? lower high with retest vol = frac ◊ peak1 ? fire when price drops **Break pts** from peak2. Long is mirrored. Distinct from Pitch and Catch (one-swing quiet path).
 
 **Suggested start (NQ):** Confirm `5`, Peak band `2`, Min pullback `5`, Break `4`, High vol mult `1.5`, Max retest frac `0.60`. Tighten Max retest frac (e.g. `0.45`) for quieter second peaks only.
 
 ### HV Extreme Move AutoTrade
-HV tip ‚Üí **Move pts** leg (optional clean gates) ‚Üí tip markers. Optional **market entry** with fixed or **vol-scaled asymmetric** TP/SL brackets. Strategy name: **HV Extreme Move AutoTrade**. Default: signals only (`Enable trading` off).
+HV tip ? **Move pts** leg (optional clean gates) ? tip markers. Optional **market entry** with fixed or **vol-scaled asymmetric** TP/SL brackets. Strategy name: **HV Extreme Move AutoTrade**. Default: signals only (`Enable trading` off).
 
 | Panel | Meaning |
 |---|---|
 | **HV Ext Peak / Trough** | Extreme while watching (**Show in-play lines**) |
-| **HV Ext Target** | Extreme ¬± Move pts while watching |
+| **HV Ext Target** | Extreme ± Move pts while watching |
 | **HV Ext Fire Long / Short** | Marker at the **HV tip** when the move completes |
-| **HV Ext Signal** | Brief `¬±1` fire pulse |
+| **HV Ext Signal** | Brief `±1` fire pulse |
 | **HV Ext Path ER** | Live path efficiency while armed |
 
-**Signal defaults (EXP-0037 frozen, parked):** Move `20`, Confirm `15`, Peak band `2`, High vol mult `2`, Min path efficiency `0` (off), Max pullback `5`, Max leg sec `60`, Lookback `15`, Cooldown `30`. Final-test ship threshold **not** met ‚Äî see `results/EXP-0037/summary.md`.
+**Signal defaults (EXP-0037 frozen, parked):** Move `20`, Confirm `15`, Peak band `2`, High vol mult `2`, Min path efficiency `0` (off), Max pullback `5`, Max leg sec `60`, Lookback `15`, Cooldown `30`. Final-test ship threshold **not** met ó see `results/EXP-0037/summary.md`.
 
-**Clean-leg gates:** Min path efficiency (`disp / path length`, `0`=off), Max pullback pts, Max leg sec, quiet-leg volume (prints *outside* Peak band): **Max leg vol vs avg** (Gate B: `< thr √ó avgVolPerTick √ó (moveTicks ‚àí bandHalf)`, default `1.0`) and **Max leg vol vs tip** (Gate A: `< thr √ó tip extremeVol`, default `0`=off). Fail ‚Üí cancel watch (no fire).
+**Clean-leg gates:** Min path efficiency (`disp / path length`, `0`=off), Max pullback pts, Max leg sec, quiet-leg volume (prints *outside* Peak band): **Max leg vol vs avg** (Gate B: `< thr ◊ avgVolPerTick ◊ (moveTicks - bandHalf)`, default `1.0`) and **Max leg vol vs tip** (Gate A: `< thr ◊ tip extremeVol`, default `0`=off). Fail ? cancel watch (no fire).
 
 **Brackets:**
-- Fixed (default ‚Äî **Vol-scaled brackets** off): **Take profit pts** `30`, **Stop loss pts** `10` (EXP-0037 freeze).
-- Vol-scaled (optional): `unit = k √ó max(median 1-min range over Vol window min, 0.25)`; `SL = clip(SL R √ó unit, min, max)`, `TP = clip(TP R √ó unit, min, max)`. Defaults: k=`1`, SL R=`1`, TP R=`2.5`, floor=`4`, cap=`40` (matches `make_vol_bracket_rr`).
+- Fixed (default ó **Vol-scaled brackets** off): **Take profit pts** `30`, **Stop loss pts** `10` (EXP-0037 freeze).
+- Vol-scaled (optional): `unit = k ◊ max(median 1-min range over Vol window min, 0.25)`; `SL = clip(SL R ◊ unit, min, max)`, `TP = clip(TP R ◊ unit, min, max)`. Defaults: k=`1`, SL R=`1`, TP R=`2.5`, floor=`4`, cap=`40` (matches `make_vol_bracket_rr`).
 
 **Trading params:** Enable trading (default **off**), Use selected account, Order size, Use brackets, Flat-only. Orders only after realtime. LONG after HV trough + move up; SHORT after HV peak + move down.
 
-Logs: `HVEXT AT init`, `HV EXT FIRE ‚Ä¶ tp= sl= medR30= volScaled=`, `HVEXT AT ORDER sent ‚Ä¶`, `HVEXT AT TRADE CLOSED ‚Ä¶`.
+Logs: `HVEXT AT init`, `HV EXT FIRE Ö tp= sl= medR30= volScaled=`, `HVEXT AT ORDER sent Ö`, `HVEXT AT TRADE CLOSED Ö`.
 
 ## Project layout
 
@@ -318,12 +321,12 @@ bookmap-addon/
   src/main/java/com/bookmap/orderflow/
     core/         shared flow / stats / tape burst / CD / large-level / pitch / hv-move
     hello/        load test
-    extract/      Session Extractor (Replay ‚Üí NDJSON)
+    extract/      Session Extractor (Replay ? NDJSON)
     flow/         Aggressive Flow
     effort/       Effort vs Result
     liquidity/    Liquidity Reaction
     crossmarket/  ES/NQ Flow Confirm
-    trade/        Momentum AutoTrade v1 + v3 (ES+NQ) + MAT Hotkeys v3 / MatControlPanel + Correlated Fade AutoTrade
+    trade/        Momentum AutoTrade v1 + v4 (ES+NQ) + MAT Hotkeys v4 / MatControlPanel + Correlated Fade AutoTrade
     pitch/        Pitch and Catch
     hvmove/       HV Extreme Move
     retest/       Trapped Retest
@@ -336,17 +339,17 @@ Order submission is in **Momentum AutoTrade** (v1/v2), **Correlated Fade AutoTra
 Use this to dump **full** ES+NQ trades and depth from a `.bmf` into the research pipeline.
 
 1. Build/install the JAR (see above). In API plugins, **Add** `Session Extractor` and enable it.
-2. Open Bookmap **Replay**, load a feed from `C:\Bookmap\Feeds` that includes RTH (UK 14:30‚Äì17:00).
+2. Open Bookmap **Replay**, load a feed from `C:\Bookmap\Feeds` that includes RTH (UK 14:30ñ17:00).
 3. Ensure **both NQ and ES** instruments from the recording are open/subscribed.
 4. Open Session Extractor settings **before enabling**:
    - **Output root directory:** `C:/Work/Mat/bookmap/data/raw`
-   - **Session id override:** set once (e.g. `210926`) ‚Äî do **not** change it mid-replay (that reloads into a new folder)
+   - **Session id override:** set once (e.g. `210926`) ó do **not** change it mid-replay (that reloads into a new folder)
    - **Skip MNQ / micros:** leave **true** (default) so only full-size NQ + ES are written
 5. Enable the extractor, set replay to **maximum speed**, let it run to the end (or through RTH).
 6. **Disable** the extractor when done (forces flush + `finished: true` in `meta.json`).
-7. Confirm sizes in Explorer (**F5**) or PowerShell ‚Äî while replay is running, Explorer often shows **0 KB** for open files even though data is writing. After disable, sizes should be hundreds of MB / GB.
+7. Confirm sizes in Explorer (**F5**) or PowerShell ó while replay is running, Explorer often shows **0 KB** for open files even though data is writing. After disable, sizes should be hundreds of MB / GB.
 8. Confirm folder: `data/raw/<session_id>/trades.ndjson`, `depth.ndjson`, `meta.json` (and `mbo.ndjson` if MBO was present).
-9. Repeat for 5‚Äì10 **RTH** days (UK 14:30‚Äì17:00), then:
+9. Repeat for 5ñ10 **RTH** days (UK 14:30ñ17:00), then:
 
 ```powershell
 cd c:\Work\Mat\bookmap
@@ -357,7 +360,7 @@ python -m research.run_experiment EXP-0002 --sessions all
 
 **Note:** Full depth extracts are large (multi-GB per day with MBO). Prefer a drive with free space.
 
-**Note:** Do not enable the extractor twice / change session id mid-run ‚Äî you can get a partial folder plus a second folder.
+**Note:** Do not enable the extractor twice / change session id mid-run ó you can get a partial folder plus a second folder.
 
 ## Sanity checks on replay
 

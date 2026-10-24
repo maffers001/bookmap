@@ -217,4 +217,57 @@ public final class RegimeTracker {
         }
         return snapshotFromBars(closed, windowMin);
     }
+
+    /**
+     * Median 1-min range of completed bars with minute start ≥ session open
+     * and minute end ≤ asof. {@link Double#NaN} if session open not marked or
+     * fewer than {@code minBars} bars.
+     */
+    public double medianRangeSinceSessionOpen(long asofNs, int minBars) {
+        if (sessionVwapFromNs < 0) {
+            return Double.NaN;
+        }
+        long openSlot = (sessionVwapFromNs / MINUTE_NS) * MINUTE_NS;
+        List<MinuteBar> closed = new ArrayList<>();
+        for (MinuteBar b : bars) {
+            if (b.tsNs >= openSlot && b.endNs() <= asofNs) {
+                closed.add(b);
+            }
+        }
+        if (current != null && current.tsNs >= openSlot && current.endNs() <= asofNs) {
+            closed.add(current);
+        }
+        if (closed.size() < Math.max(1, minBars)) {
+            return Double.NaN;
+        }
+        double[] ranges = new double[closed.size()];
+        for (int i = 0; i < closed.size(); i++) {
+            MinuteBar b = closed.get(i);
+            ranges[i] = b.high - b.low;
+        }
+        Arrays.sort(ranges);
+        double med = ranges[ranges.length / 2];
+        if (ranges.length % 2 == 0 && ranges.length >= 2) {
+            med = 0.5 * (ranges[ranges.length / 2 - 1] + ranges[ranges.length / 2]);
+        }
+        return med;
+    }
+
+    /** Completed minute bars counted toward {@link #medianRangeSinceSessionOpen}. */
+    public int sessionBarsCount(long asofNs) {
+        if (sessionVwapFromNs < 0) {
+            return 0;
+        }
+        long openSlot = (sessionVwapFromNs / MINUTE_NS) * MINUTE_NS;
+        int n = 0;
+        for (MinuteBar b : bars) {
+            if (b.tsNs >= openSlot && b.endNs() <= asofNs) {
+                n++;
+            }
+        }
+        if (current != null && current.tsNs >= openSlot && current.endNs() <= asofNs) {
+            n++;
+        }
+        return n;
+    }
 }

@@ -14,6 +14,7 @@ import java.util.Set;
 import com.bookmap.orderflow.core.CumulativeDeltaRange;
 import com.bookmap.orderflow.core.InstrumentClassifier;
 import com.bookmap.orderflow.core.PriceTicks;
+import com.bookmap.orderflow.core.MatOpenVolAnchor;
 import com.bookmap.orderflow.core.RegimeTracker;
 import com.bookmap.orderflow.core.TapeBurstTracker;
 import com.bookmap.orderflow.core.TapeBurstTracker.Burst;
@@ -58,10 +59,16 @@ import velox.api.layer1.simplified.TimeListener;
 import velox.api.layer1.simplified.TradeDataListener;
 
 /**
- * Momentum AutoTrade <b>v3</b> (class still {@code MomentumAutoTradeV2Module}) —
+ * Momentum AutoTrade <b>v4</b> (class still {@code MomentumAutoTradeV2Module}) —
  * EXP-0008 tape momentum plus optional regime / trend / VWAP gates and
  * vol-scaled brackets (EXP-0034). Side filter console via {@link MatControlPanel}
- * when <b>MAT Hotkeys v3</b> is enabled.
+ * when <b>MAT Hotkeys v4</b> is enabled.
+ *
+ * <p><b>v4 open-vol:</b> for the first {@code Open vol period min} after UK
+ * session open, brackets use a <em>prior-session</em> median 1-min range
+ * ({@link com.bookmap.orderflow.core.MatOpenVolAnchor}); if none is stored,
+ * fall back to fixed {@code Open fixed bracket pts}. After the open period,
+ * live vol k=1 (clip 6–30) as before. Does not change CFADE.
  *
  * Leave v1 ({@code Momentum AutoTrade (ES+NQ)}) unchanged; do not enable trading
  * on both at once (they share {@link MatSideFilter}). Log tags stay {@code MAT2}
@@ -77,7 +84,7 @@ import velox.api.layer1.simplified.TradeDataListener;
 @Layer1SimpleAttachable
 @Layer1TradingStrategy
 @Layer1MultiAccountTradingSupported
-@Layer1StrategyName("Momentum AutoTrade v3 (ES+NQ)")
+@Layer1StrategyName("Momentum AutoTrade v4 (ES+NQ)")
 @Layer1ApiVersion(Layer1ApiVersionValue.VERSION2)
 public class MomentumAutoTradeV2Module implements
         CustomModule,
@@ -242,6 +249,20 @@ public class MomentumAutoTradeV2Module implements
     @Parameter(name = "Bracket max pts", step = 1.0)
     Double bracketMaxPts = 30.0;
 
+    /**
+     * v4: during the first N minutes after VWAP session open, use prior-session
+     * median range for vol brackets (or fixed open size if no prior).
+     */
+    @Parameter(name = "Open vol period min", step = 1.0)
+    Double openVolPeriodMin = 20.0;
+
+    /** Fixed TP=SL (pts) when in open period and no prior median is available. */
+    @Parameter(name = "Open fixed bracket pts", step = 0.5)
+    Double openFixedBracketPts = 10.0;
+
+    @Parameter(name = "Enable open vol anchor")
+    Boolean enableOpenVolAnchor = true;
+
     /** UK minute-of-day for VWAP session open (14*60+30 = 870). 0 = first trade. */
     @Parameter(name = "VWAP session open UK min-of-day", step = 1.0)
     Double vwapSessionOpenUkMin = 870.0;
@@ -339,6 +360,11 @@ public class MomentumAutoTradeV2Module implements
 
     /** Live bracket size used for extend (updated on each entry). */
     private double liveBracketPts = 10.0;
+
+    /** Cached prior-session median (NaN until first load attempt). */
+    private double priorVolMedian = Double.NaN;
+    private boolean priorVolLoaded;
+    private long lastPriorPersistNs;
 
     @Override
     public void initialize(String alias, InstrumentInfo info, Api api, InitialState initialState) {
@@ -1050,12 +1076,77 @@ public class MomentumAutoTradeV2Module implements
         if (asof <= 0) {
             return baseTp;
         }
-        RegimeTracker.Snapshot sv = nqState.regime.snapshot(vw, asof);
         double k = volMultipleK == null ? 1.0 : volMultipleK;
         double floor = bracketMinPts == null ? 6.0 : bracketMinPts;
         double cap = bracketMaxPts == null ? 30.0 : bracketMaxPts;
-        double raw = k * Math.max(sv.medianMinuteRange, 0.25);
+
+        int openMin = vwapSessionOpenUkMin == null ? 870 : vwapSessionOpenUkMin.intValue();
+        int openPeriod = openVolPeriodMin == null ? 20 : Math.max(1, openVolPeriodMin.intValue());
+        boolean openAnchor = Boolean.TRUE.equals(enableOpenVolAnchor)
+                && openMin > 0
+                && MatOpenVolAnchor.inOpenPeriod(asof, openMin, openPeriod);
+
+        double med;
+        if (openAnchor) {
+            ensurePriorVolLoaded();
+            if (Double.isFinite(priorVolMedian) && priorVolMedian > 0) {
+                med = priorVolMedian;
+            } else {
+                // No prior session file — fixed open brackets (user fallback).
+                double fixed = openFixedBracketPts == null ? 10.0 : openFixedBracketPts;
+                return Math.max(floor, Math.min(cap, fixed));
+            }
+        } else {
+            RegimeTracker.Snapshot sv = nqState.regime.snapshot(vw, asof);
+            med = sv.medianMinuteRange;
+        }
+        double raw = k * Math.max(med, 0.25);
         return Math.max(floor, Math.min(cap, raw));
+    }
+
+    private void ensurePriorVolLoaded() {
+        if (priorVolLoaded) {
+            return;
+        }
+        priorVolMedian = MatOpenVolAnchor.loadPriorMedian();
+        priorVolLoaded = true;
+        if (Double.isFinite(priorVolMedian)) {
+            Log.info(String.format("MAT4 open-vol: loaded prior median=%.2f from %s",
+                    priorVolMedian, MatOpenVolAnchor.storePath()));
+        } else {
+            Log.info("MAT4 open-vol: no prior median; open period will use fixed brackets");
+        }
+    }
+
+    /** Persist today's post-open session median for tomorrow's open anchor. */
+    private void maybePersistPriorVol(InstrumentState nqState) {
+        if (!Boolean.TRUE.equals(enableOpenVolAnchor) || nqState == null || nqState.regime == null) {
+            return;
+        }
+        long asof = nowNs > 0 ? nowNs : 0;
+        if (asof <= 0) {
+            return;
+        }
+        // Throttle: at most once per minute of exchange time
+        if (lastPriorPersistNs > 0 && asof - lastPriorPersistNs < 60_000_000_000L) {
+            return;
+        }
+        int openMin = vwapSessionOpenUkMin == null ? 870 : vwapSessionOpenUkMin.intValue();
+        int openPeriod = openVolPeriodMin == null ? 20 : Math.max(1, openVolPeriodMin.intValue());
+        if (openMin > 0 && MatOpenVolAnchor.inOpenPeriod(asof, openMin, openPeriod)) {
+            return; // still in open — do not overwrite prior with thin tape
+        }
+        int minBars = volWindowMin == null ? 30 : Math.max(15, volWindowMin.intValue() / 2);
+        int n = nqState.regime.sessionBarsCount(asof);
+        if (n < minBars) {
+            return;
+        }
+        double med = nqState.regime.medianRangeSinceSessionOpen(asof, minBars);
+        if (!Double.isFinite(med) || med <= 0) {
+            return;
+        }
+        MatOpenVolAnchor.savePriorMedian(med, n);
+        lastPriorPersistNs = asof;
     }
 
     /** Entry check using the latest NQ burst of the requested side (for reverse / extend). */
@@ -1385,6 +1476,9 @@ public class MomentumAutoTradeV2Module implements
         if (es != null && nq != null && nq.burst.getLastBurst() != null) {
             long lag = es.burst.lagMsTo(nq.burst.getLastBurst().side, nowNs);
             esLagIndicator.addPoint(lag >= Long.MAX_VALUE / 2 ? -1.0 : lag);
+        }
+        if (nq != null) {
+            maybePersistPriorVol(nq);
         }
     }
 

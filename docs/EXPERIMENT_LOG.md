@@ -62,8 +62,32 @@
 | EXP-0045 | H36 open-book standout resting levels | **reject / park** | 14d Oct + 15d Sep + 17d May | thin n (~12 touches/mo); T0 Oct/May ≪0 and ≤placebo; Sep +88 flip; old stratum empty; see notes |
 | EXP-0046 | H37 ES open-book standout resting levels | **reject / park** | 14d Oct + 15d Sep + 17d May | T0 −27/−27/−31 all months; all ES brackets ≤0 on Oct; R0 null; see notes |
 | EXP-0047 | H38 MAT confirm at causal LVN fade | ran — **reject / park** | train + May + Aug OOS | primary none+rr1:2 @60s train −495 / May −344; asym worse; see notes |
+| EXP-0048 | H39 MAT fail-fade (A fail / B double) | ran — **reject / park** | train + May + Aug + Apr | primary A T20 X0 fixed10 train avg **−2.5**; all A train ≤0; best-train B flips May; see notes |
 
 ## Run notes
+
+### 2026-10-24 — EXP-0048 MAT fail-fade (H39)
+
+- Arms: **A** fade at T if no break of `mat_px±X`; **B** held retest after A-fail.
+- Seeds: gated MAT (causal, trend+VWAP). Fade ungated. UK 14:30–17:00.
+- Runner: `python -m research.run_mat_fail_fade` → `results/EXP-0048/`.
+- Primary `A_T20_X0_fixed_10_10`: train n=60 avg **−2.5** net −150; May −64 / Aug +42 / Apr −60 — **reject**.
+- All arm-A cells train avg ≤ 0. Best-train B (`B_T10_X0_tol1_vol_k1`) train +4.3 but May −56 (flip) — no ship. Do not promote post-hoc OOS-looking B cells.
+- April one-shot only (observation-contaminated).
+
+### 2026-10-24 — MAT April 2026 OOS (vol k=1)
+
+- Converted 17 new April raw extracts → trades parquet (`--only trades`); `030426` already present.
+- Runner: `research/run_mat_april.py` → `results/MAT2_APR2026_VOLK1/`. Frozen base UK 14:30–17:00.
+- **18/18** sessions: n=490 WR 0.50 net **−449**, days+ 6/18, port high +15 then maxDD 620. Another losing OOS month (with May/Aug).
+
+### 2026-10-24 — MAT v4 open-vol calibration (ship)
+
+- Problem: live median 1-min range at UK open is too quiet → undersized brackets.
+- Live: `Momentum AutoTrade v4` — first **20 min** after VWAP UK open (870): prefer prior-session median from `~/.bookmap-orderflow/mat_prior_vol_median.txt` (k=1, clip 6–30); else **fixed 10**. After open: live vol k=1. Persist session median post-open via `MatOpenVolAnchor` / `RegimeTracker.medianRangeSinceSessionOpen`.
+- Research mirror: `make_vol_bracket_open_anchor` + `python -m research.run_mat_open_vol` → `results/MAT2_OPEN_VOL_V4/`.
+- Dig (UK 14:30–17:00, causal, trend+VWAP): open_anchor train n=1237 avg **+0.28** (base +0.24); May −0.90 / Aug −1.35 (base −0.58 / −1.12) — OOS still red; ship is for live open sizing, not avg lift.
+- **CFADE unaffected** (separate `resolveBracketPts` / asym RR). JAR: `bookmap-orderflow-mat-v4.jar` (addon version 1.2.0).
 
 ### 2026-10-24 — EXP-0047 MAT × causal LVN fade (asym R:R)
 

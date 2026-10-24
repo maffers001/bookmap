@@ -409,6 +409,10 @@ def simulate_session(
         ):
             tp_pts, sl_pts = float(ev_tp[i]), float(ev_sl[i])
         elif bracket_fn is not None:
+            # MAT v4 open-vol: bracket helpers may expose .state["entry_ts_ns"]
+            br_state = getattr(bracket_fn, "state", None)
+            if isinstance(br_state, dict):
+                br_state["entry_ts_ns"] = int(t0)
             tp_pts, sl_pts = bracket_fn(sv)
         else:
             tp_pts, sl_pts = cfg.tp_pts, cfg.sl_pts
@@ -627,6 +631,45 @@ def make_vol_bracket(k: float, floor: float = 6.0, cap: float = 30.0):
         raw = k * max(sv.median_minute_range, 0.25)
         pts = float(np.clip(raw, floor, cap))
         return pts, pts
+    return fn
+
+
+def make_vol_bracket_open_anchor(
+    k: float = 1.0,
+    *,
+    floor: float = 6.0,
+    cap: float = 30.0,
+    prior_median: float | None = None,
+    open_period_sec: float = 20 * 60,
+    session_open_ns: int | None = None,
+    open_fixed_pts: float = 10.0,
+):
+    """MAT v4 open-vol: prior-session median in open period, else fixed, else live.
+
+    ``bracket_fn`` still receives only ``RegimeSnapshot``; open timing is closed
+    over via a mutable ``entry_ts_ns`` attribute set by the caller before each
+    trade (``simulate_session`` stamps ``bracket_fn.state["entry_ts_ns"]``).
+    """
+    state = {"entry_ts_ns": 0}
+
+    def fn(sv: RegimeSnapshot) -> tuple[float, float]:
+        ts = int(state.get("entry_ts_ns") or 0)
+        in_open = False
+        if session_open_ns is not None and ts > 0:
+            in_open = 0 <= (ts - int(session_open_ns)) < int(open_period_sec * 1e9)
+        if in_open:
+            if prior_median is not None and np.isfinite(prior_median) and prior_median > 0:
+                med = float(prior_median)
+            else:
+                pts = float(np.clip(open_fixed_pts, floor, cap))
+                return pts, pts
+        else:
+            med = float(sv.median_minute_range)
+        raw = k * max(med, 0.25)
+        pts = float(np.clip(raw, floor, cap))
+        return pts, pts
+
+    fn.state = state  # type: ignore[attr-defined]
     return fn
 
 

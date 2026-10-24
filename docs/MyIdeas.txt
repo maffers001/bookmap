@@ -1,0 +1,8 @@
+Combined CFADE or MAT or LVN with market profile.
+Machine learning for regime detection.
+Fix MAT issue with vol targets - they are not calibrated correctly for open. [DONE MAT v4: prior-session median → fixed 10 in first 20m]
+MAT move TP doesn't work
+MAT reversal - when price fails to move past MAT price, sometimes double bottoms, then reverses 30pts - as if traders are being trapped
+StackConsume-intact fade
+Could export signals to BA and run genetic algo on them?
+Placing stops the otherside of nearest large liquidity.

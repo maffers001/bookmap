@@ -444,3 +444,16 @@ Distinct from H7 (dual LVN touch event-study, no MAT) and H19/H31 (swing S/R × 
 **Result:** Reject. Primary none+rr_1_2 @60s train −495 / May −344 / Aug −163.
 Trend+VWAP does not rescue. User geometry (from below → short) is the worse
 side. **Status: reject / park.**
+
+## H39 — MAT fail-fade (failed push / double)
+
+After a gated MAT stamp (causal ES, trend+VWAP), if price fails to break the
+MAT entry extreme (`mat_px`) within T seconds, fade opposite (arm A). Arm B
+waits for a held retest within tol of `mat_px` after the fail (double
+top/bottom). Distinct from CFADE (ES exhaustion) and MAT `reverseOnStop`.
+
+**Test:** EXP-0048. Runner: `python -m research.run_mat_fail_fade`.
+Primary cell: A, T=20, X=0, fixed 10/10. Train discover; May/Aug/Apr OOS
+(April observation-contaminated — one-shot confirm only).
+**Result:** Reject / park. Primary train avg −2.5; all A cells train ≤0;
+best-train B flips on May. See `results/EXP-0048/`.

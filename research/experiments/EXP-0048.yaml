@@ -1,0 +1,24 @@
+name: EXP-0048
+hypothesis: H39
+title: MAT fail-fade (failed push / double retest)
+description: >
+  After a gated MAT stamp (causal ES, trend+VWAP), if price fails to break
+  mat_px (the push extreme / entry) within T seconds, fade opposite (arm A).
+  Arm B waits for a held retest within retest_tol (double top/bottom) after
+  the fail. Discovery on train; May/Aug/Apr OOS; do not retune on April.
+  Primary freeze cell: A, T=20, X=0, fixed 10/10.
+
+detector: mat_fail_fade
+primary_arm: A
+primary_fail_sec: 20
+primary_beyond_pts: 0.0
+primary_bracket: fixed_10_10
+hold_sec: 2
+retest_max_sec: 60
+rth_uk_only: true
+commission_pts_rt: 0.25
+slip_ticks: 1.0
+es_stamp: causal
+mat_gate: trend_vwap
+fade_gate: none
+runner: python -m research.run_mat_fail_fade

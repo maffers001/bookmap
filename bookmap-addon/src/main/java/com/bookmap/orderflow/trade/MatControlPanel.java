@@ -26,9 +26,9 @@ import javax.swing.WindowConstants;
 import velox.api.layer1.common.Log;
 
 /**
- * Always-on-top MAT side-filter console (MAT v3). Buttons and Ctrl+Shift L/K/B/X
+ * Always-on-top MAT side-filter console (MAT v4). Buttons and Ctrl+Shift L/K/B/X
  * when the window is focused; {@link MatSideHotkeys} still covers Bookmap focus.
- * Opens when MAT attaches or when {@code MAT Hotkeys v3} loads.
+ * Opens when MAT attaches or when {@code MAT Hotkeys v4} loads.
  */
 public final class MatControlPanel {
 
@@ -42,7 +42,7 @@ public final class MatControlPanel {
     private boolean updatingUi;
 
     private MatControlPanel() {
-        frame = new JFrame("MAT Side v3");
+        frame = new JFrame("MAT Side v4");
         frame.setAlwaysOnTop(true);
         frame.setDefaultCloseOperation(WindowConstants.HIDE_ON_CLOSE);
         frame.setResizable(false);
@@ -186,7 +186,7 @@ public final class MatControlPanel {
         frame.setVisible(true);
         frame.toFront();
         frame.requestFocus();
-        Log.info("MAT Side v3 panel shown (visible=" + frame.isVisible()
+        Log.info("MAT Side v4 panel shown (visible=" + frame.isVisible()
                 + " loc=" + frame.getX() + "," + frame.getY() + ")");
     }
 
@@ -202,7 +202,7 @@ public final class MatControlPanel {
                 }
                 instance.showNow();
             } catch (Throwable t) {
-                Log.info("MAT Side v3 panel FAILED to show: " + t);
+                Log.info("MAT Side v4 panel FAILED to show: " + t);
                 t.printStackTrace();
             }
         };
@@ -218,12 +218,12 @@ public final class MatControlPanel {
         SwingUtilities.invokeLater(() -> {
             if (instance != null) {
                 instance.frame.setVisible(false);
-                Log.info("MAT Side v3 panel hidden");
+                Log.info("MAT Side v4 panel hidden");
             }
         });
     }
 
-    /** Dispose and clear singleton (call when MAT Hotkeys v3 finishes). */
+    /** Dispose and clear singleton (call when MAT Hotkeys v4 finishes). */
     public static void disposePanel() {
         SwingUtilities.invokeLater(() -> {
             if (instance == null) {
@@ -232,7 +232,7 @@ public final class MatControlPanel {
             MatSideFilter.removeListener(instance.listener);
             instance.frame.dispose();
             instance = null;
-            Log.info("MAT Side v3 panel disposed");
+            Log.info("MAT Side v4 panel disposed");
         });
     }
 }
