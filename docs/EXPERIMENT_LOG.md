@@ -89,6 +89,34 @@
 - **Verdict: reject / park.** Sep–Oct holdout not read (no freeze).
 - Dig `--bracket rr_1_2` (TP=2R SL=1R vol unit) → `results/EXP-0056_RR_1_2/`: base avg −0.19;
   best prior arm `vol` avg **+0.30** net +184 but lift &lt; +0.5 vs base — still no freeze.
+- **Percentile/contrarian dig** (`research/run_mat_range_bars_dig.py` → `results/EXP-0056_DIG/`):
+  original arms are fixed cutoffs, not percentiles. Top-percentile volume (p80/p90/p95)
+  and aligned-delta percentiles do **not** work. What screens well is the opposite:
+  **mid-volume** prior bar (vol_ratio 0.8–1.4) whose **direction/delta ran against MAT**
+  (`vol_mid_bar_against`, `bar_against_delta_contra`, `delta_contra`). Best faithful
+  candidate: gated + symmetric `vol_mid_bar_against` n=181 avg **+2.48** net +449
+  (Apr–Jul +, Aug −). Exploratory only — needs its own freeze + Sep–Oct holdout.
+- **Freeze + one-shot Sep–Oct holdout** (`frozen.json` +
+  `research/run_mat_range_bars_holdout.py`): gated `vol_mid_bar_against` rr1_1.
+  Holdout n=81 avg **−2.81** net **−228** (Sep −191 / Oct −37); base holdout
+  avg +0.64. Discovery sign flipped. **Verdict: holdout FAIL — reject / park.**
+  See `results/EXP-0056_DIG/holdout_summary.md`.
+- **Two-bar trapped-traders dig** (`research/run_mat_range_bars_twobar.py` →
+  `results/EXP-0056_TWOBAR/`; discovery only, Sep–Oct already burned): B2
+  (bar before prior) `vol_ratio>=1.5`, B1 (prior) `vol_ratio<=1.4`, B1 low vs
+  B2 VPOC in MAT direction. Literal: n=282 avg **−0.18** net −51 (only Jul net+);
+  strict short leg (B1 high < VPOC): n=184 avg −1.58. Stacking `bar_against`
+  collapses n to 29/8. **No variant passes — reject / park.** New causal
+  `prior2_*` + `prior_high/low` context added to `range_bar_profile.py`.
+- **All-month filter search** (`run_mat_allmonth_search.py` +
+  `run_mat_allmonth_triples.py` → `results/EXP-0056_ALLMONTH/`): mined causal
+  burst/ES/regime/range-bar/time filters Apr–Oct (**in-sample; Sep–Oct already
+  read, no holdout left**). No single or pair passes all 7 months on exact
+  resim. One triple does: **`va_inside & tod_after60 & delta_contra`** (entry
+  inside prior bar's VA, ≥60 min after 14:30 UK, prior-bar aligned delta < 0):
+  n=121 avg **+5.16** net +625, WR 61%, PF 1.74, all 7 months net+ — but Sep
+  only +4.5 (n=19). Heavy multiple-testing; needs future/unseen data, do not
+  treat as validated.
 
 ### 2026-10-24 — EXP-0055 Opening Range Breakout validated by orderflow (H46)
 

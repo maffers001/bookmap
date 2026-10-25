@@ -23,6 +23,8 @@ class RangeBarProfileConfig:
     tick_size: float = 1.0
     va_frac: float = 0.70
     vol_median_n: int = 20  # prior completed bars for volume median
+    percentile_n: int = 50  # prior completed bars for rolling percentiles
+    percentile_min_n: int = 10
 
 
 def _empty_bars() -> pa.Table:
@@ -52,6 +54,7 @@ def _empty_bars() -> pa.Table:
         "vwap": pa.array([], type=pa.float64()),
         "vol_median_prior": pa.array([], type=pa.float64()),
         "vol_ratio": pa.array([], type=pa.float64()),
+        "vol_percentile": pa.array([], type=pa.float64()),
         "completed": pa.array([], type=pa.bool_()),
     })
 
@@ -226,6 +229,7 @@ def build_range_bars_with_profile(
         "vwap": [],
         "vol_median_prior": [],
         "vol_ratio": [],
+        "vol_percentile": [],
         "completed": [],
     }
     prof_bar: list[int] = []
@@ -260,13 +264,18 @@ def build_range_bars_with_profile(
             ticks, tot_v, va_frac=cfg.va_frac, vwap=vwap
         )
 
-        # causal median of prior completed bar totals
+        # Causal statistics use only bars completed before this bar.
         if len(totals_for_median) >= 3:
             window = totals_for_median[-cfg.vol_median_n :]
             med = float(np.median(window))
         else:
             med = float("nan")
         vol_ratio = (tot / med) if np.isfinite(med) and med > 0 else float("nan")
+        if len(totals_for_median) >= cfg.percentile_min_n:
+            refs = np.asarray(totals_for_median[-cfg.percentile_n :], dtype=np.float64)
+            vol_pct = float(np.mean(refs <= tot) * 100.0)
+        else:
+            vol_pct = float("nan")
         totals_for_median.append(tot)
 
         rows["bar_id"].append(bid)
@@ -296,6 +305,7 @@ def build_range_bars_with_profile(
         rows["vwap"].append(vwap)
         rows["vol_median_prior"].append(med)
         rows["vol_ratio"].append(vol_ratio)
+        rows["vol_percentile"].append(vol_pct)
         rows["completed"].append(True)
 
         for j in range(len(ticks)):
@@ -332,6 +342,7 @@ def build_range_bars_with_profile(
         "vwap": pa.array(rows["vwap"], type=pa.float64()),
         "vol_median_prior": pa.array(rows["vol_median_prior"], type=pa.float64()),
         "vol_ratio": pa.array(rows["vol_ratio"], type=pa.float64()),
+        "vol_percentile": pa.array(rows["vol_percentile"], type=pa.float64()),
         "completed": pa.array(rows["completed"], type=pa.bool_()),
     })
     profile = pa.table({
@@ -456,13 +467,23 @@ def _nan_row(cols: dict[str, list]) -> None:
     cols["prior_end_ts_ns"].append(0)
     for k in (
         "prior_total_vol", "prior_delta", "prior_delta_frac", "prior_vol_ratio",
+        "prior_vol_percentile", "prior_delta_percentile",
+        "prior_abs_delta_percentile",
         "prior_vpoc", "prior_vah", "prior_val",
         "prior_vpoc_pts", "prior_vah_pts", "prior_val_pts",
-        "prior_aligned_delta_frac",
+        "prior_aligned_delta_frac", "prior_high", "prior_low",
     ):
         cols[k].append(float("nan"))
     cols["prior_direction"].append(0)
     cols["prior_pos"].append("unknown")
+    cols["prior2_ok"].append(False)
+    cols["prior2_bar_id"].append(-1)
+    for k in (
+        "prior2_vol_ratio", "prior2_vol_percentile", "prior2_vpoc",
+        "prior2_high", "prior2_low",
+    ):
+        cols[k].append(float("nan"))
+    cols["prior2_direction"].append(0)
     cols["partial_ok"].append(False)
     for k in (
         "partial_total_vol", "partial_delta", "partial_delta_frac",
@@ -507,13 +528,24 @@ def attach_mat_range_context(
         if bars.num_rows
         else np.array([], dtype=np.int64)
     )
+    bar_delta_fracs = (
+        bars.column("delta_frac").to_numpy().astype(np.float64)
+        if bars.num_rows
+        else np.array([], dtype=np.float64)
+    )
 
     col_names = (
         "mat_px", "mat_px_ticks",
         "prior_bar_id", "prior_end_ts_ns", "prior_total_vol", "prior_delta",
-        "prior_delta_frac", "prior_vol_ratio", "prior_vpoc", "prior_vah", "prior_val",
+        "prior_delta_frac", "prior_vol_ratio", "prior_vol_percentile",
+        "prior_delta_percentile", "prior_abs_delta_percentile",
+        "prior_vpoc", "prior_vah", "prior_val",
         "prior_vpoc_pts", "prior_vah_pts", "prior_val_pts",
         "prior_aligned_delta_frac", "prior_direction", "prior_pos", "prior_ok",
+        "prior_high", "prior_low",
+        "prior2_bar_id", "prior2_vol_ratio", "prior2_vol_percentile",
+        "prior2_vpoc", "prior2_high", "prior2_low", "prior2_direction",
+        "prior2_ok",
         "partial_total_vol", "partial_delta", "partial_delta_frac",
         "partial_vol_ratio", "partial_vpoc", "partial_vah", "partial_val",
         "partial_vpoc_pts", "partial_vah_pts", "partial_val_pts",
@@ -546,6 +578,24 @@ def attach_mat_range_context(
                 cols["prior_delta_frac"].append(float(b["delta_frac"]))
                 vr = b["vol_ratio"]
                 cols["prior_vol_ratio"].append(float(vr) if vr is not None else float("nan"))
+                vp = b["vol_percentile"]
+                cols["prior_vol_percentile"].append(
+                    float(vp) if vp is not None else float("nan")
+                )
+                # Side-aligned delta percentile vs bars before the prior bar.
+                if idx >= cfg.percentile_min_n:
+                    refs = bar_delta_fracs[max(0, idx - cfg.percentile_n) : idx]
+                    aligned_refs = refs * (1.0 if side > 0 else -1.0)
+                    aligned_cur = float(b["delta_frac"]) * (1.0 if side > 0 else -1.0)
+                    cols["prior_delta_percentile"].append(
+                        float(np.mean(aligned_refs <= aligned_cur) * 100.0)
+                    )
+                    cols["prior_abs_delta_percentile"].append(
+                        float(np.mean(np.abs(refs) <= abs(float(b["delta_frac"])) * 100.0))
+                    )
+                else:
+                    cols["prior_delta_percentile"].append(float("nan"))
+                    cols["prior_abs_delta_percentile"].append(float("nan"))
                 cols["prior_vpoc"].append(float(b["vpoc"]))
                 cols["prior_vah"].append(float(b["vah"]))
                 cols["prior_val"].append(float(b["val"]))
@@ -559,18 +609,56 @@ def attach_mat_range_context(
                 cols["prior_pos"].append(_entry_position(
                     mat_px_ticks, float(b["vah"]), float(b["val"]), float(b["vpoc"])
                 ))
+                cols["prior_high"].append(float(b["high"]))
+                cols["prior_low"].append(float(b["low"]))
+                # Bar before the prior bar (two-bar trapped-traders context).
+                if idx >= 1:
+                    b2 = {name: bars.column(name)[idx - 1].as_py() for name in bars.column_names}
+                    cols["prior2_ok"].append(True)
+                    cols["prior2_bar_id"].append(int(b2["bar_id"]))
+                    vr2 = b2["vol_ratio"]
+                    cols["prior2_vol_ratio"].append(
+                        float(vr2) if vr2 is not None else float("nan")
+                    )
+                    vp2 = b2["vol_percentile"]
+                    cols["prior2_vol_percentile"].append(
+                        float(vp2) if vp2 is not None else float("nan")
+                    )
+                    cols["prior2_vpoc"].append(float(b2["vpoc"]))
+                    cols["prior2_high"].append(float(b2["high"]))
+                    cols["prior2_low"].append(float(b2["low"]))
+                    cols["prior2_direction"].append(int(b2["direction"]))
+                else:
+                    cols["prior2_ok"].append(False)
+                    cols["prior2_bar_id"].append(-1)
+                    for k in (
+                        "prior2_vol_ratio", "prior2_vol_percentile", "prior2_vpoc",
+                        "prior2_high", "prior2_low",
+                    ):
+                        cols[k].append(float("nan"))
+                    cols["prior2_direction"].append(0)
         if not prior_ok:
             cols["prior_bar_id"].append(-1)
             cols["prior_end_ts_ns"].append(0)
             for k in (
                 "prior_total_vol", "prior_delta", "prior_delta_frac", "prior_vol_ratio",
+                "prior_vol_percentile", "prior_delta_percentile",
+                "prior_abs_delta_percentile",
                 "prior_vpoc", "prior_vah", "prior_val",
                 "prior_vpoc_pts", "prior_vah_pts", "prior_val_pts",
-                "prior_aligned_delta_frac",
+                "prior_aligned_delta_frac", "prior_high", "prior_low",
             ):
                 cols[k].append(float("nan"))
             cols["prior_direction"].append(0)
             cols["prior_pos"].append("unknown")
+            cols["prior2_ok"].append(False)
+            cols["prior2_bar_id"].append(-1)
+            for k in (
+                "prior2_vol_ratio", "prior2_vol_percentile", "prior2_vpoc",
+                "prior2_high", "prior2_low",
+            ):
+                cols[k].append(float("nan"))
+            cols["prior2_direction"].append(0)
         cols["prior_ok"].append(prior_ok)
 
         part = _partial_bar_at(ts, price, size, buy, bars, t0, cfg=cfg)
@@ -611,12 +699,15 @@ def attach_mat_range_context(
     out = mat_events
     type_map = {
         "prior_bar_id": pa.int32(),
+        "prior2_bar_id": pa.int32(),
         "prior_end_ts_ns": pa.int64(),
         "prior_direction": pa.int8(),
+        "prior2_direction": pa.int8(),
         "partial_direction": pa.int8(),
         "prior_pos": pa.string(),
         "partial_pos": pa.string(),
         "prior_ok": pa.bool_(),
+        "prior2_ok": pa.bool_(),
         "partial_ok": pa.bool_(),
     }
     for name, vals in cols.items():

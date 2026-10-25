@@ -554,7 +554,15 @@ def run_discover(
     return report
 
 
-def run_holdout(cfg: dict, out: Path, *, bracket: str = "vol_k1") -> dict:
+def run_holdout(
+    cfg: dict,
+    out: Path,
+    *,
+    tp_r: float = 1.0,
+    sl_r: float = 1.0,
+    trend: bool = True,
+    vwap: bool = True,
+) -> dict:
     frozen_path = out / "frozen.json"
     if not frozen_path.exists():
         msg = "No frozen.json — discovery did not freeze an arm. Holdout refused."
@@ -565,12 +573,19 @@ def run_holdout(cfg: dict, out: Path, *, bracket: str = "vol_k1") -> dict:
     freeze = json.loads(frozen_path.read_text(encoding="utf-8"))
     arm = freeze["arm"]
     context = freeze.get("context", PRIMARY_CTX)
-    bracket = freeze.get("bracket", bracket)
-    print(f"Holdout frozen arm={arm} context={context} bracket={bracket}", flush=True)
+    tp_r = float(freeze.get("tp_r", tp_r))
+    sl_r = float(freeze.get("sl_r", sl_r))
+    trend = bool(freeze.get("mat_trend", trend))
+    vwap = bool(freeze.get("mat_vwap", vwap))
+    print(
+        f"Holdout frozen arm={arm} context={context} "
+        f"tp_r={tp_r} sl_r={sl_r} trend={trend} vwap={vwap}",
+        flush=True,
+    )
 
-    data = _load_discovery_sessions(cfg, HOLDOUT_MMYY)
-    base = run_arm(data, "base", context, bracket=bracket)
-    frozen = run_arm(data, arm, context, bracket=bracket)
+    data = _load_discovery_sessions(cfg, HOLDOUT_MMYY, trend=trend, vwap=vwap)
+    base = run_arm(data, "base", context, tp_r=tp_r, sl_r=sl_r)
+    frozen = run_arm(data, arm, context, tp_r=tp_r, sl_r=sl_r)
     same_sign = (
         base.get("avg") is not None
         and frozen.get("avg") is not None
@@ -618,27 +633,63 @@ def main() -> None:
         default="discover",
     )
     ap.add_argument(
+        "--tp-r",
+        type=float,
+        default=1.0,
+        help="Take-profit multiple of vol unit (default 1 → symmetric with --sl-r 1)",
+    )
+    ap.add_argument(
+        "--sl-r",
+        type=float,
+        default=1.0,
+        help="Stop-loss multiple of vol unit (default 1). R:R = sl_r : tp_r",
+    )
+    ap.add_argument(
+        "--no-trend",
+        action="store_true",
+        help="Disable MAT with-trend gate (trend mode off)",
+    )
+    ap.add_argument(
+        "--no-vwap",
+        action="store_true",
+        help="Disable MAT VWAP-side gate",
+    )
+    # Back-compat shorthand
+    ap.add_argument(
         "--bracket",
         choices=("vol_k1", "rr_1_2"),
-        default="vol_k1",
-        help="vol_k1 = symmetric k×med; rr_1_2 = TP=2R SL=1R on same unit",
+        default=None,
+        help="Deprecated shorthand: vol_k1 → tp/sl 1; rr_1_2 → tp=2 sl=1",
     )
     args = ap.parse_args()
+    tp_r, sl_r = args.tp_r, args.sl_r
+    if args.bracket == "vol_k1":
+        tp_r, sl_r = 1.0, 1.0
+    elif args.bracket == "rr_1_2":
+        tp_r, sl_r = 2.0, 1.0
+    trend = not args.no_trend
+    vwap = not args.no_vwap
+
     cfg = load_config()
-    tag = "" if args.bracket == "vol_k1" else f"_{args.bracket.upper()}"
+    tag = run_tag(tp_r=tp_r, sl_r=sl_r, trend=trend, vwap=vwap)
     out = Path(cfg["results_dir"]) / f"EXP-0056{tag}"
     out.mkdir(parents=True, exist_ok=True)
+    print(
+        f"out={out.name}  bracket tp_r={tp_r:g} sl_r={sl_r:g}  "
+        f"MAT gates trend={trend} vwap={vwap}",
+        flush=True,
+    )
 
     if args.stage == "validate":
-        run_validate(cfg, out)
+        run_validate(cfg, out, trend=trend, vwap=vwap)
     elif args.stage == "discover":
-        v = run_validate(cfg, out)
+        v = run_validate(cfg, out, trend=trend, vwap=vwap)
         if not v.get("ok"):
             print("Stage 0 FAILED — aborting discovery", flush=True)
             return
-        run_discover(cfg, out, bracket=args.bracket)
+        run_discover(cfg, out, tp_r=tp_r, sl_r=sl_r, trend=trend, vwap=vwap)
     else:
-        run_holdout(cfg, out, bracket=args.bracket)
+        run_holdout(cfg, out, tp_r=tp_r, sl_r=sl_r, trend=trend, vwap=vwap)
 
 
 if __name__ == "__main__":
