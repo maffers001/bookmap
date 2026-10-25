@@ -256,6 +256,33 @@ def _dedupe_same_entry(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def _flat_only(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep trades that only enter when flat (no overlapping holds).
+
+    Per session, sort by entry time and greedily accept the next trade whose
+    ``t_entry_s`` is at/after the previous trade's exit (``t_entry_s + duration_s``).
+    Matches live Bookmap behaviour: one position at a time; re-arm when flat.
+    """
+    by_sess: dict[Any, list[dict[str, Any]]] = {}
+    for t in trades:
+        by_sess.setdefault(t.get("session_id"), []).append(t)
+    kept: list[dict[str, Any]] = []
+    for sid in sorted(by_sess.keys(), key=lambda x: str(x)):
+        rows = sorted(
+            by_sess[sid],
+            key=lambda r: (float(r.get("t_entry_s") or 0), float(r.get("duration_s") or 0)),
+        )
+        free_at = -1.0
+        for r in rows:
+            t0 = float(r.get("t_entry_s") or 0)
+            if t0 + 1e-9 < free_at:
+                continue
+            kept.append(r)
+            free_at = t0 + float(r.get("duration_s") or 0)
+    kept.sort(key=lambda r: (r.get("date") or "", float(r.get("t_entry_s") or 0), r.get("bracket") or ""))
+    return kept
+
+
 def run(
     *,
     out_dir: Path,
@@ -270,6 +297,7 @@ def run(
     market: str,
     min_size: float,
     month_paths: dict[str, Path] | None = None,
+    flat_only: bool = True,
 ) -> None:
     if level_mode not in LEVEL_MODES:
         raise ValueError(f"--level-mode must be one of {LEVEL_MODES}, got {level_mode!r}")
@@ -302,6 +330,7 @@ def run(
         f"Min |level − open mid|: **{min_open_dist:g}** pts "
         f"(0 = no filter).",
         f"Level mode: **`{level_mode}`** — {mode_desc}.",
+        f"Overlaps: **{'flat-only (no concurrent holds)' if flat_only else 'allowed'}**.",
         f"Brackets: **{br_desc}** · commission {commission} pt/RT.",
         "",
     ]
@@ -390,6 +419,8 @@ def run(
             # Outer-wall collapse: several clusters near one LVN share the same
             # entry — keep one trade per (session, side, entry) or P&L double-counts.
             trades = _dedupe_same_entry(trades)
+            if flat_only:
+                trades = _flat_only(trades)
             p = _pack(trades)
             exits = {"tp": 0, "sl": 0, "endofsession": 0}
             for t in trades:
@@ -608,6 +639,15 @@ def main() -> None:
         help="Min resting cluster size in contracts (default 0 = off)",
     )
     ap.add_argument(
+        "--flat-only",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Only take a new trade when flat (no overlapping holds). "
+            "Default on; use --no-flat-only to allow concurrent positions."
+        ),
+    )
+    ap.add_argument(
         "--ann-template",
         default=None,
         help=(
@@ -637,6 +677,7 @@ def main() -> None:
         market=args.market,
         min_size=args.min_size,
         month_paths=month_paths,
+        flat_only=bool(args.flat_only),
     )
 
 

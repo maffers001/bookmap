@@ -130,20 +130,34 @@ public class LvnConfluenceAutoTradeModule implements
     private Indicator hvn1Marker;
     private Indicator hvn2Marker;
     private Indicator hvn3Marker;
+    private Indicator openMarker;
+    private Indicator vpocMarker;
     /** Last price we stamped an on-chart text icon for (re-stamp when it changes). */
     private double lvn2IconPx = Double.NaN;
     private double lvn3IconPx = Double.NaN;
     private double hvn1IconPx = Double.NaN;
     private double hvn2IconPx = Double.NaN;
     private double hvn3IconPx = Double.NaN;
+    private double openIconPx = Double.NaN;
+    private double vpocIconPx = Double.NaN;
     private boolean signalThisInterval;
     private long lastBookLogNs;
     private boolean loggedLvnPlot;
+    /** Session volume by price tick since 14:30 snap (for VPOC). */
+    private final Map<Integer, Long> sessionVolByTick = new HashMap<>();
+    private double sessionVpocPts = Double.NaN;
+    private long sessionVpocVol;
 
     /** All LVN lines — cyan. */
     private static final Color COL_LVN = new Color(0, 255, 255);
     /** All HVN lines — bright green. */
     private static final Color COL_HVN = new Color(0, 255, 80);
+    /** Next Long / Next Short. */
+    private static final Color COL_NEXT = new Color(220, 40, 40);
+    /** 14:30 session open mid. */
+    private static final Color COL_OPEN = new Color(30, 120, 255);
+    /** Session volume POC. */
+    private static final Color COL_VPOC = new Color(255, 220, 0);
 
     private final LvnStrategyState.Flattener flattener = this::doFlatten;
     private final LvnStrategyState.CancelPending canceler = this::cancelPendingLimits;
@@ -188,21 +202,27 @@ public class LvnConfluenceAutoTradeModule implements
         hvn1Marker = api.registerIndicator("HVN1", GraphType.PRIMARY, Double.NaN, true, true);
         hvn2Marker = api.registerIndicator("HVN2", GraphType.PRIMARY, Double.NaN, true, true);
         hvn3Marker = api.registerIndicator("HVN3", GraphType.PRIMARY, Double.NaN, true, true);
+        openMarker = api.registerIndicator("Open 14:30", GraphType.PRIMARY, Double.NaN, true, true);
+        vpocMarker = api.registerIndicator("VPOC", GraphType.PRIMARY, Double.NaN, true, true);
         signalIndicator.setColor(new Color(255, 180, 40));
-        // Next Long / Next Short — both blue (distinct from cyan LVNs)
-        Color nextBlue = new Color(30, 120, 255);
-        longMarker.setColor(nextBlue);
-        shortMarker.setColor(nextBlue);
+        longMarker.setColor(COL_NEXT);
+        shortMarker.setColor(COL_NEXT);
         styleLevelLine(lvn2Marker, COL_LVN, 50);
         styleLevelLine(lvn3Marker, COL_LVN, 50);
         styleLevelLine(hvn1Marker, COL_HVN, 40);
         styleLevelLine(hvn2Marker, COL_HVN, 40);
         styleLevelLine(hvn3Marker, COL_HVN, 40);
+        styleLevelLine(openMarker, COL_OPEN, 55);
+        styleLevelLine(vpocMarker, COL_VPOC, 45);
         longMarker.setWidth(3);
         shortMarker.setWidth(3);
         longMarker.setRenderPriority(70);
         shortMarker.setRenderPriority(70);
         lvn2IconPx = lvn3IconPx = hvn1IconPx = hvn2IconPx = hvn3IconPx = Double.NaN;
+        openIconPx = vpocIconPx = Double.NaN;
+        sessionVolByTick.clear();
+        sessionVpocPts = Double.NaN;
+        sessionVpocVol = 0;
 
         installAccountListener(api);
         refreshTradingAccountId("init");
@@ -285,6 +305,10 @@ public class LvnConfluenceAutoTradeModule implements
         cancelPendingLimits();
         detector.resetDay();
         rebuildDetector("resetDay");
+        sessionVolByTick.clear();
+        sessionVpocPts = Double.NaN;
+        sessionVpocVol = 0;
+        openIconPx = vpocIconPx = Double.NaN;
         Log.info("LVN day reset — waiting for next 14:30 snap");
     }
 
@@ -346,6 +370,10 @@ public class LvnConfluenceAutoTradeModule implements
             }
         }
         detector.onTrade(tick, nowNs);
+        // Session volume profile (VPOC) accumulates from 14:30 snap onward
+        if (detector.isSnapped() && size > 0) {
+            accumulateSessionVolume(tick, size);
+        }
         if (!isEs() || !detector.isSnapped()) {
             return;
         }
@@ -438,6 +466,11 @@ public class LvnConfluenceAutoTradeModule implements
         snapDay = day;
         cancelledAtEntryUntil = false;
         flattenedAtEos = false;
+        // Fresh session profile from the open
+        sessionVolByTick.clear();
+        sessionVpocPts = Double.NaN;
+        sessionVpocVol = 0;
+        openIconPx = vpocIconPx = Double.NaN;
 
         Log.info(String.format(Locale.US,
                 "LVN SNAP %s openMid=%.2f lvn2=%.2f lvn3=%.2f clusters=%d armed=%d rank=%s %s | %s",
@@ -897,6 +930,8 @@ public class LvnConfluenceAutoTradeModule implements
         applyLevelsToDetector();
         plotLvnLines();
         plotHvnLines();
+        plotOpenLine();
+        plotVpocLine();
 
         // Next-trade highlights: nearest ARMED long below / short above mid
         // (shown whether flat or in a position — orders only when flat)
@@ -980,6 +1015,45 @@ public class LvnConfluenceAutoTradeModule implements
         hvn1IconPx = plotLevel(hvn1Marker, hvn1IconPx, lv.hvn1, COL_HVN);
         hvn2IconPx = plotLevel(hvn2Marker, hvn2IconPx, lv.hvn2, COL_HVN);
         hvn3IconPx = plotLevel(hvn3Marker, hvn3IconPx, lv.hvn3, COL_HVN);
+    }
+
+    /** Blue line at 14:30 open mid when console toggle is on. */
+    private void plotOpenLine() {
+        if (!LvnStrategyState.showOpenOnChart() || !detector.isSnapped()
+                || !(detector.openMidPts() > 0)) {
+            hideLine(openMarker);
+            return;
+        }
+        openIconPx = plotLevel(openMarker, openIconPx, detector.openMidPts(), COL_OPEN);
+    }
+
+    /** Yellow session VPOC (max volume price since 14:30) when toggle is on. */
+    private void plotVpocLine() {
+        if (!LvnStrategyState.showVpocOnChart() || !detector.isSnapped()
+                || Double.isNaN(sessionVpocPts)) {
+            hideLine(vpocMarker);
+            return;
+        }
+        vpocIconPx = plotLevel(vpocMarker, vpocIconPx, sessionVpocPts, COL_VPOC);
+    }
+
+    private void accumulateSessionVolume(int priceTick, int size) {
+        if (size <= 0) {
+            return;
+        }
+        long vol = sessionVolByTick.merge(priceTick, (long) size, Long::sum);
+        if (vol > sessionVpocVol
+                || (vol == sessionVpocVol && (Double.isNaN(sessionVpocPts)
+                    || Math.abs(priceTick * pips - sessionVpocPts) < 1e-9))) {
+            sessionVpocVol = vol;
+            sessionVpocPts = priceTick * (pips > 0 ? pips : 0.25);
+        } else if (vol == sessionVpocVol) {
+            // Tie-break: keep current POC (first / nearer open) — already set
+        } else {
+            // Volume at another tick may have fallen behind; only bump when this tick leads
+        }
+        // If current POC tick lost the lead after a recompute isn't needed — we only
+        // ever promote when vol >= current max, so POC is correct for streaming adds.
     }
 
     private static void hideLine(Indicator ind) {

@@ -55,6 +55,8 @@ public final class LvnControlPanel {
     private final JToggleButton tradingToggle;
     private final JToggleButton showChartToggle;
     private final JToggleButton showHvnToggle;
+    private final JToggleButton showOpenToggle;
+    private final JToggleButton showVpocToggle;
     private final JToggleButton longsToggle;
     private final JToggleButton shortsToggle;
     private final JTextField slField;
@@ -156,6 +158,26 @@ public final class LvnControlPanel {
             }
         });
 
+        showOpenToggle = new JToggleButton("Show Open");
+        showOpenToggle.setSelected(false);
+        showOpenToggle.setToolTipText(
+                "Plot the 14:30 UK session open mid in blue (set at the open-cluster snap).");
+        showOpenToggle.addActionListener(e -> {
+            if (!updatingUi) {
+                LvnStrategyState.setShowOpenOnChart(showOpenToggle.isSelected(), "panel");
+            }
+        });
+
+        showVpocToggle = new JToggleButton("Show VPOC");
+        showVpocToggle.setSelected(true);
+        showVpocToggle.setToolTipText(
+                "Plot session volume point of control (highest volume price since 14:30) in yellow.");
+        showVpocToggle.addActionListener(e -> {
+            if (!updatingUi) {
+                LvnStrategyState.setShowVpocOnChart(showVpocToggle.isSelected(), "panel");
+            }
+        });
+
         JButton applyBtn = new JButton("Apply settings");
         applyBtn.addActionListener(e -> applySettings());
 
@@ -211,6 +233,8 @@ public final class LvnControlPanel {
         controls.add(loadNqBtn);
         controls.add(showChartToggle);
         controls.add(showHvnToggle);
+        controls.add(showOpenToggle);
+        controls.add(showVpocToggle);
         controls.add(tradingToggle);
         controls.add(longsToggle);
         controls.add(shortsToggle);
@@ -398,6 +422,10 @@ public final class LvnControlPanel {
             showChartToggle.setText(snap.showLvnsOnChart ? "Show LVNs on chart ON" : "Show LVNs on chart OFF");
             showHvnToggle.setSelected(snap.showHvnsOnChart);
             showHvnToggle.setText(snap.showHvnsOnChart ? "Show HVNs on chart ON" : "Show HVNs on chart OFF");
+            showOpenToggle.setSelected(snap.showOpenOnChart);
+            showOpenToggle.setText(snap.showOpenOnChart ? "Show Open ON" : "Show Open OFF");
+            showVpocToggle.setSelected(snap.showVpocOnChart);
+            showVpocToggle.setText(snap.showVpocOnChart ? "Show VPOC ON" : "Show VPOC OFF");
             longsToggle.setSelected(snap.allowLongs);
             shortsToggle.setSelected(snap.allowShorts);
 

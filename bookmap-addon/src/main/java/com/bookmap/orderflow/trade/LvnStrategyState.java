@@ -57,6 +57,8 @@ public final class LvnStrategyState {
         public final boolean allowShorts;
         public final boolean showLvnsOnChart;
         public final boolean showHvnsOnChart;
+        public final boolean showOpenOnChart;
+        public final boolean showVpocOnChart;
         /** UK session/replay date used to resolve LVNs from chart exports (null = calendar today). */
         public final LocalDate sessionDate;
         public final boolean stale;
@@ -75,6 +77,7 @@ public final class LvnStrategyState {
                  Path esPath, Path nqPath, Settings settings,
                  boolean tradingEnabled, boolean allowLongs, boolean allowShorts,
                  boolean showLvnsOnChart, boolean showHvnsOnChart,
+                 boolean showOpenOnChart, boolean showVpocOnChart,
                  LocalDate sessionDate, boolean stale, String warning,
                  List<OpenClusterDetector.DisplayRow> rows, double midPts, int position, String lastEvent,
                  String liveBookMarket, boolean esAttached, boolean nqAttached) {
@@ -91,6 +94,8 @@ public final class LvnStrategyState {
             this.allowShorts = allowShorts;
             this.showLvnsOnChart = showLvnsOnChart;
             this.showHvnsOnChart = showHvnsOnChart;
+            this.showOpenOnChart = showOpenOnChart;
+            this.showVpocOnChart = showVpocOnChart;
             this.sessionDate = sessionDate;
             this.stale = stale;
             this.warning = warning;
@@ -122,6 +127,10 @@ public final class LvnStrategyState {
     private static final AtomicBoolean SHOW_LVNS_ON_CHART = new AtomicBoolean(true);
     /** When true, attached modules plot HVN1/2/3 from the same export row. */
     private static final AtomicBoolean SHOW_HVNS_ON_CHART = new AtomicBoolean(false);
+    /** When true, plot 14:30 session open mid (blue). */
+    private static final AtomicBoolean SHOW_OPEN_ON_CHART = new AtomicBoolean(false);
+    /** When true, plot session volume POC since 14:30 (yellow). */
+    private static final AtomicBoolean SHOW_VPOC_ON_CHART = new AtomicBoolean(true);
 
     private static final Settings SETTINGS = new Settings();
     private static volatile LvnLevelFile.Levels esLevels;
@@ -327,6 +336,28 @@ public final class LvnStrategyState {
         SHOW_HVNS_ON_CHART.set(on);
         Log.info("HVN show on chart=" + on + " (" + via + ")");
         lastEvent = on ? "Show HVNs on chart ON" : "Show HVNs on chart OFF";
+        fire();
+    }
+
+    public static boolean showOpenOnChart() {
+        return SHOW_OPEN_ON_CHART.get();
+    }
+
+    public static void setShowOpenOnChart(boolean on, String via) {
+        SHOW_OPEN_ON_CHART.set(on);
+        Log.info("Open mid show on chart=" + on + " (" + via + ")");
+        lastEvent = on ? "Show Open ON" : "Show Open OFF";
+        fire();
+    }
+
+    public static boolean showVpocOnChart() {
+        return SHOW_VPOC_ON_CHART.get();
+    }
+
+    public static void setShowVpocOnChart(boolean on, String via) {
+        SHOW_VPOC_ON_CHART.set(on);
+        Log.info("VPOC show on chart=" + on + " (" + via + ")");
+        lastEvent = on ? "Show VPOC ON" : "Show VPOC OFF";
         fire();
     }
 
@@ -709,6 +740,7 @@ public final class LvnStrategyState {
                 status, statusDetail, esLevels, nqLevels, esPath, nqPath, settings(),
                 TRADING.get(), ALLOW_LONGS.get(), ALLOW_SHORTS.get(),
                 SHOW_LVNS_ON_CHART.get(), SHOW_HVNS_ON_CHART.get(),
+                SHOW_OPEN_ON_CHART.get(), SHOW_VPOC_ON_CHART.get(),
                 need, stale, warning,
                 new ArrayList<>(rows), midPts, position, lastEvent,
                 liveBookMarket, esAttached(), nqAttached());
