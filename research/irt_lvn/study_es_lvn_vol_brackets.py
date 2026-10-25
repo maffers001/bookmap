@@ -102,7 +102,13 @@ def _pack(trades: list[dict]) -> dict[str, Any]:
     }
 
 
-def _load_month_levels(ann_path: Path, *, near_pts: float, market: str = "ES") -> list[dict]:
+def _load_month_levels(
+    ann_path: Path,
+    *,
+    near_pts: float,
+    market: str = "ES",
+    min_size: float = 0.0,
+) -> list[dict]:
     rows = list(csv.DictReader(ann_path.open(encoding="utf-8")))
     key = f"confluence_{near_pts:g}"
     out = []
@@ -111,6 +117,9 @@ def _load_month_levels(ann_path: Path, *, near_pts: float, market: str = "ES") -
             continue
         if r.get(key) != "1":
             continue
+        size = float(r["size"]) if r.get("size") not in (None, "") else 0.0
+        if size < min_size:
+            continue
         out.append({
             "date": r["date"],
             "session_id": r["session_id"],
@@ -118,6 +127,7 @@ def _load_month_levels(ann_path: Path, *, near_pts: float, market: str = "ES") -
             "centre": float(r["centre_price"]),
             "lvn_px": float(r["lvn_px"]) if r.get("lvn_px") not in (None, "") else None,
             "lvn_dist": float(r["lvn_dist"]) if r.get("lvn_dist") not in (None, "") else None,
+            "size": size,
             "rank": int(float(r["rank_in_side"])),
             "snap_time_uk": r.get("snap_time_uk") or "14:30",
         })

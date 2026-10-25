@@ -182,11 +182,15 @@ def run_session(
     open_ns: int,
     end_ns: int,
     max_arm_s: float,
+    min_age_s: float = 0.0,
 ) -> tuple[list[dict], dict[str, int]]:
     """Detect + simulate one ES session. Returns trades and census."""
     y, m, d = session_id_to_ymd(sid)
     date_iso = f"{y:04d}-{m:02d}-{d:02d}"
-    census = {"armed": 0, "pulled": 0, "touched_pre": 0, "fills": 0, "expired": 0}
+    census = {
+        "armed": 0, "pulled": 0, "touched_pre": 0, "fills": 0, "expired": 0,
+        "too_young_touch": 0,
+    }
 
     # Depth from open-2h seed fold for clean book at open
     depth, init_b, init_a = load_depth_window_with_book(
@@ -229,6 +233,7 @@ def run_session(
 
     trades_out: list[dict] = []
     max_arm_ns = int(max_arm_s * 1e9)
+    min_age_ns = int(max(0.0, min_age_s) * 1e9)
     exit_slip = PTS_PER_TICK
     commission = 0.125
 
@@ -295,16 +300,21 @@ def run_session(
     def on_trade_print(t_ns: int, px_tick: int, px_pts: float) -> None:
         st.last_mid_tick = px_tick
         mark_touched(px_tick)
-        # check pendings for first touch
+        # check pendings for first eligible touch (must have sat ≥ min_age)
         hit = []
         for key, p in list(st.pending.items()):
             if p.side == "BID":
                 # touch when trade <= level (hits the bid)
-                if px_tick <= p.px_tick:
-                    hit.append(key)
+                if px_tick > p.px_tick:
+                    continue
             else:
-                if px_tick >= p.px_tick:
-                    hit.append(key)
+                if px_tick < p.px_tick:
+                    continue
+            if t_ns - p.birth_ns < min_age_ns:
+                # Still sitting — ignore early touches; keep arming until pull/expire
+                census["too_young_touch"] += 1
+                continue
+            hit.append(key)
         for key in hit:
             p = st.pending.pop(key)
             if key in st.traded_keys:
@@ -409,7 +419,7 @@ def estimate_large_thr(pq_dir: Path, sid: str, open_ns: int, *, pct: float, floo
 
 def run(*, month: str, out_dir: Path, min_dist: float, near_lvn: float,
         offset: float, tp: float, sl: float, large_pct: float, large_floor: int,
-        max_arm_min: float) -> None:
+        max_arm_min: float, until: str = "17:00", min_age_min: float = 0.0) -> None:
     cfg = load_config()
     pq_dir = Path(cfg["parquet_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -436,7 +446,7 @@ def run(*, month: str, out_dir: Path, min_dist: float, near_lvn: float,
     for sid in sessions:
         y, m, d = session_id_to_ymd(sid)
         open_ns = _hhmm_ns(y, m, d, "14:30")
-        end_ns = _hhmm_ns(y, m, d, "17:00")
+        end_ns = _hhmm_ns(y, m, d, until)
         bars, shift = _session_irt(irt, sid, pq_dir, "ES")
         if len(bars.ts_ns) == 0:
             print(f"  {sid}: no IRT", flush=True)
@@ -448,10 +458,12 @@ def run(*, month: str, out_dir: Path, min_dist: float, near_lvn: float,
             large_thr=thr, min_dist_pts=min_dist, near_lvn_pts=near_lvn,
             offset=offset, tp=tp, sl=sl, open_ns=open_ns, end_ns=end_ns,
             max_arm_s=max_arm_min * 60.0,
+            min_age_s=min_age_min * 60.0,
         )
         print(
             f"    armed={cen['armed']} fills={cen['fills']} pulled={cen['pulled']} "
-            f"expired={cen['expired']} pre-touched skip={cen['touched_pre']}",
+            f"expired={cen['expired']} too_young={cen['too_young_touch']} "
+            f"pre-touched skip={cen['touched_pre']}",
             flush=True,
         )
         all_trades.extend(trades)
@@ -465,12 +477,15 @@ def run(*, month: str, out_dir: Path, min_dist: float, near_lvn: float,
         f"# ES intraday fresh large ∩ LVN — first-touch fade ({month})",
         "",
         f"Arm when a **fresh** ES resting size ≥ session p{large_pct:g} (floor {large_floor}) "
-        f"appears during 14:30–17:00 UK that is:",
+        f"appears during 14:30–{until} UK that is:",
         f"- within **{near_lvn:g} pts** of as-of LVN2/LVN3,",
         f"- ≥ **{min_dist:g} pts** from mid at birth,",
         f"- at a price **not yet traded** since the open,",
-        f"- then **fade first touch** limit {offset:g} pts outside, SL{sl:g}/TP{tp:g}.",
+        f"- must sit **≥ {min_age_min:g} min** before a touch can fill,",
+        f"- then **fade first eligible touch** limit {offset:g} pts outside, SL{sl:g}/TP{tp:g}.",
         f"Disarm if size drops below thr or unarmed >{max_arm_min:g} min.",
+        "",
+        "P&L book = **fills only** (orders that were touched; pulled/expired arms are census-only).",
         "",
         f"## Results",
         "",
@@ -480,7 +495,8 @@ def run(*, month: str, out_dir: Path, min_dist: float, near_lvn: float,
         if p["n"] else f"- Fills: **0**",
         f"- Days+: {p['days_plus']}/{p['days']} · maxDD {p['maxDD']:.0f}" if p["n"] else "",
         f"- Pulled before touch: {sum(c['pulled'] for c in census_rows)} · "
-        f"expired: {sum(c['expired'] for c in census_rows)}",
+        f"expired: {sum(c['expired'] for c in census_rows)} · "
+        f"too-young touches: {sum(c.get('too_young_touch', 0) for c in census_rows)}",
         "",
         "Open-only ES∩LVN≤10 out2 8/16 baseline (prior): Oct n=27 net +147 — "
         "this run should produce **more fills** if the intraday net is wider.",
@@ -553,6 +569,14 @@ def main() -> None:
     ap.add_argument("--large-pct", type=float, default=99.0)
     ap.add_argument("--large-floor", type=int, default=40)
     ap.add_argument("--max-arm-min", type=float, default=90.0)
+    ap.add_argument(
+        "--min-age-min", type=float, default=0.0,
+        help="Min minutes a large order must rest before a touch can fill (default 0)",
+    )
+    ap.add_argument(
+        "--until", default="17:00",
+        help="UK clock: arm/fill window end (default 17:00)",
+    )
     args = ap.parse_args()
     run(
         month=args.month,
@@ -565,6 +589,8 @@ def main() -> None:
         large_pct=args.large_pct,
         large_floor=args.large_floor,
         max_arm_min=args.max_arm_min,
+        until=args.until,
+        min_age_min=args.min_age_min,
     )
 
 

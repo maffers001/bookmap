@@ -10,3 +10,21 @@ Placing stops the otherside of nearest large liquidity.
 
 *LVN + Large Order confluence might work on other futures markets*
 Big delta at turning point is key trigger for entry (this is what you are looking for in bookmap)
+Bookmap has missing session data - I should download tick data from IRT to double check LVN strategy
+
+python -m research.irt_lvn.study_es_lvn_bracket_8_24 --sl 8 --tp 24 --level-mode outer --eos 21:00 --out results/LVN_MANUAL_CHECKS
+.\.venv\Scripts\python.exe -m research.irt_lvn.study_es_lvn_bracket_8_24 --sl 8 --tp 32 --level-mode outer --min-open-dist 3 --out results/ES_LVN_OUTER_824_20261025
+
+LVN trades
+- plot lvn trades in IRT
+- get back test to use IRT data as BM is incomplete
+- see how this can be automated - can BM calculated levels or import from IRT or somewhere else?
+- is there anywhere that can provide this data for free
+- complete June BM data
+
+Idea
+- correlated large orders reversals
+
+MAT Indicator
+- make requirement that MAT happends over 40 ticks and that volume occurs in bar
+- stop other side of value of bar

@@ -98,14 +98,39 @@ def _age_stats(
     }
 
 
-def _ob_cfg(mkt: str) -> OpenBookConfig:
+def _ob_cfg(
+    mkt: str,
+    *,
+    cluster_pts: float | None = None,
+    max_width_pts: float | None = None,
+    large_size_min: int | None = None,
+    top_n_per_side: int | None = None,
+) -> OpenBookConfig:
     p = MARKET_CFG[mkt]
+    if cluster_pts is not None:
+        cluster_ticks = max(1, int(round(float(cluster_pts) / PTS_PER_TICK)))
+    else:
+        cluster_ticks = int(p["cluster_ticks"])
+    # When widening the merge gap, default max band width to the same span
+    # so chains cannot grow into 50–80 pt walls.
+    if max_width_pts is None and cluster_pts is not None:
+        max_width_pts = float(cluster_pts)
+    max_width_ticks = (
+        max(1, int(round(float(max_width_pts) / PTS_PER_TICK)))
+        if max_width_pts is not None
+        else None
+    )
     return OpenBookConfig(
         book_radius_pts=float(p["book_radius_pts"]),
-        cluster_ticks=int(p["cluster_ticks"]),
+        cluster_ticks=cluster_ticks,
+        max_width_ticks=max_width_ticks,
         near_mid_exclude_pts=float(p["near_mid_exclude_pts"]),
-        large_size_min=int(p["large_size_min"]),
-        top_n_per_side=int(p["top_n_per_side"]),
+        large_size_min=int(
+            p["large_size_min"] if large_size_min is None else large_size_min
+        ),
+        top_n_per_side=int(
+            p["top_n_per_side"] if top_n_per_side is None else top_n_per_side
+        ),
         standout_pct=50.0,  # unused — we rank all bright clusters
         large_mult=0.0,
         age_scale_s=900.0,
@@ -137,6 +162,11 @@ def session_clusters(
     role: str,
     *,
     snap_hhmm: str = "14:30",
+    cluster_pts: float | None = None,
+    max_width_pts: float | None = None,
+    bright_size_pct: float | None = None,
+    large_size_min: int | None = None,
+    top_n_per_side: int | None = None,
 ) -> list[dict[str, Any]]:
     """Snapshot resting book at snap via a full depth fold (no SOF window bug).
 
@@ -148,7 +178,13 @@ def session_clusters(
     """
     y, m, d = session_id_to_ymd(sid)
     snap_ns = _hhmm_ns(y, m, d, snap_hhmm)
-    ob = _ob_cfg(role)
+    ob = _ob_cfg(
+        role,
+        cluster_pts=cluster_pts,
+        max_width_pts=max_width_pts,
+        large_size_min=large_size_min,
+        top_n_per_side=top_n_per_side,
+    )
     age_lo = snap_ns - int(ob.age_cap_s * 1e9)
     date_iso = f"{y:04d}-{m:02d}-{d:02d}"
 
@@ -182,7 +218,10 @@ def session_clusters(
         [s for p, s in list(bids.items()) + list(asks.items()) if abs(p - mid_tick) <= rad_t],
         dtype=np.float64,
     )
-    bright_pct = float(MARKET_CFG[role]["bright_size_pct"])
+    bright_pct = float(
+        MARKET_CFG[role]["bright_size_pct"]
+        if bright_size_pct is None else bright_size_pct
+    )
     bright_floor = int(max(
         ob.large_size_min,
         float(np.percentile(nz, bright_pct)) if len(nz) else ob.large_size_min,
@@ -258,7 +297,7 @@ def session_clusters(
             float(100.0 * np.mean(sizes <= r["size"])), 1,
         )
 
-    top_n = int(MARKET_CFG[role]["top_n_per_side"])
+    top_n = int(ob.top_n_per_side)
     kept: list[dict[str, Any]] = []
     for side in ("BID", "ASK"):
         side_rows = [r for r in scored if r["side"] == side]
@@ -269,10 +308,22 @@ def session_clusters(
     return kept
 
 
-def run(*, month: str, out: Path, snap_hhmm: str) -> Path:
+def run(
+    *,
+    month: str,
+    out: Path,
+    snap_hhmm: str,
+    markets: list[str] | None = None,
+    cluster_pts: float | None = None,
+    max_width_pts: float | None = None,
+    bright_size_pct: float | None = None,
+    large_size_min: int | None = None,
+    top_n_per_side: int | None = None,
+) -> Path:
     cfg = load_config()
     pq_dir = Path(cfg["parquet_dir"])
     y_sel, m_sel = (int(x) for x in month.split("-")[:2])
+    roles = markets or ["NQ", "ES"]
     sessions = []
     for sid in list_sessions(pq_dir):
         try:
@@ -285,14 +336,29 @@ def run(*, month: str, out: Path, snap_hhmm: str) -> Path:
         if (base / "depth.parquet").exists() and (base / "mbo.parquet").exists():
             sessions.append(sid)
     sessions.sort()
-    print(f"October-style sessions for {month}: {len(sessions)}", flush=True)
+    ct_desc = (
+        f"cluster_pts={cluster_pts:g}"
+        if cluster_pts is not None
+        else "default market cluster_ticks"
+    )
+    print(
+        f"Sessions for {month}: {len(sessions)} · markets={roles} · {ct_desc}",
+        flush=True,
+    )
 
     rows: list[dict[str, Any]] = []
     for sid in sessions:
         print(f"[session] {sid}", flush=True)
-        for role in ("NQ", "ES"):
+        for role in roles:
             try:
-                got = session_clusters(pq_dir, sid, role, snap_hhmm=snap_hhmm)
+                got = session_clusters(
+                    pq_dir, sid, role, snap_hhmm=snap_hhmm,
+                    cluster_pts=cluster_pts,
+                    max_width_pts=max_width_pts,
+                    bright_size_pct=bright_size_pct,
+                    large_size_min=large_size_min,
+                    top_n_per_side=top_n_per_side,
+                )
             except Exception as e:
                 print(f"  {role} FAIL: {e}", flush=True)
                 continue
@@ -300,7 +366,7 @@ def run(*, month: str, out: Path, snap_hhmm: str) -> Path:
             rows.extend(got)
 
     # Global rank within market (across the month) for sorting the CSV
-    for role in ("NQ", "ES"):
+    for role in roles:
         mkt = [r for r in rows if r["market"] == role]
         mkt.sort(key=lambda r: r["significance"], reverse=True)
         for i, r in enumerate(mkt, start=1):
@@ -327,17 +393,28 @@ def run(*, month: str, out: Path, snap_hhmm: str) -> Path:
 
     # Short sidecar readme for chart use
     note = out.with_suffix(".README.txt")
+    if cluster_pts is not None:
+        cluster_line = f"Cluster merge gap: {cluster_pts:g} pts."
+    else:
+        cluster_line = "NQ: cluster within 2 ticks (0.5 pt); ES: 6 ticks (1.5 pt)."
+    bright_line = (
+        f"Bright filter: price size ≥ p{bright_size_pct:g} of snap book "
+        f"(and min floor)."
+        if bright_size_pct is not None
+        else "Bright filter: price size ≥ p99 of snap book within radius (and min floor)."
+    )
     note.write_text(
         "\n".join([
             f"Open-book resting clusters — {month}",
             f"Snap: {snap_hhmm} UK (RTH open).",
+            f"Markets: {', '.join(roles)}.",
             "mid_price = last trade at/before snap (not a crossed BBO mid).",
             "Book = full depth fold to snap; bids above mid / asks below mid dropped.",
             "significance = age_weighted_size: resting contracts × age weight",
             "  (age weight = clip(age_s / 900, 0.25, 1.0); full weight by 15 min).",
-            "Bright filter: price size ≥ p99 of snap book within radius (and min floor).",
-            "NQ: cluster within 2 ticks (0.5 pt); ES: 6 ticks (1.5 pt).",
-            "Top 10 per side per session; CSV sorted by date then significance.",
+            bright_line,
+            cluster_line,
+            "Top N per side per session; CSV sorted by date then significance.",
             "role_vs_mid: BID=support below mid, ASK=resistance above mid.",
             f"Rows: {len(rows)}  Sessions: {len(sessions)}",
             f"Output: {out}",
@@ -357,8 +434,43 @@ def main() -> None:
         "--out",
         default=str(ROOT / "results" / "open_clusters_oct2026.csv"),
     )
+    ap.add_argument(
+        "--markets", default="NQ,ES",
+        help="Comma-separated markets (default NQ,ES)",
+    )
+    ap.add_argument(
+        "--cluster-pts", type=float, default=None,
+        help="Merge gap in points (overrides market default ticks)",
+    )
+    ap.add_argument(
+        "--max-width-pts", type=float, default=None,
+        help="Cap cluster band width in points (default = --cluster-pts when set)",
+    )
+    ap.add_argument(
+        "--bright-size-pct", type=float, default=None,
+        help="Percentile floor for per-tick size before merge (default 99)",
+    )
+    ap.add_argument(
+        "--large-size-min", type=int, default=None,
+        help="Absolute min contracts per tick (with bright percentile)",
+    )
+    ap.add_argument(
+        "--top-n-per-side", type=int, default=None,
+        help="Keep top N clusters per side per session",
+    )
     args = ap.parse_args()
-    run(month=args.month, out=Path(args.out), snap_hhmm=args.snap)
+    markets = [m.strip().upper() for m in args.markets.split(",") if m.strip()]
+    run(
+        month=args.month,
+        out=Path(args.out),
+        snap_hhmm=args.snap,
+        markets=markets,
+        cluster_pts=args.cluster_pts,
+        max_width_pts=args.max_width_pts,
+        bright_size_pct=args.bright_size_pct,
+        large_size_min=args.large_size_min,
+        top_n_per_side=args.top_n_per_side,
+    )
 
 
 if __name__ == "__main__":

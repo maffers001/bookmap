@@ -626,7 +626,7 @@ execution timer is **not** entitled to use this state; if preregistered
 at all, it proceeds microprice-only under its own kill bar. This closes
 Tier A (A1–A4 all reject/park). See `results/EXP-0054/`.
 
-## H45 — Opening Range Breakout validated by orderflow (ES + NQ)
+## H46 — Opening Range Breakout validated by orderflow (ES + NQ)
 
 The first 15 minutes of RTH (UK 14:30–14:45) define an opening range per
 market. A breakout in the direction of the OR candle (bullish OR → break of
@@ -647,12 +647,27 @@ reaction-confirmed within 5 s (secondary; cannot be promoted over a
 failed B). Nulls: time-matched random, shifted-ES (+60 s) placebo,
 own-market-only twin, random-skip placebo for the P&L gate.
 
-**Test:** EXP-0054 (`research/features/opening_range.py`,
-`research/features/orb_flow.py`, `research/orb/exp_0054_orb.py`).
+**Test:** EXP-0055 (`research/features/opening_range.py`,
+`research/features/orb_flow.py`, `research/orb/exp_0055_orb.py`).
+(Registered as H46/EXP-0055: H45/EXP-0054 was taken by the Tier A A4
+book-agreement study the same day.)
 Discovery = Apr–Aug 2026; Sep–Oct 2026 holdout read once after a
 discovery pass. Stage 0 power floor: Arm B kept ≥ 20 and dropped ≥ 20
 events on discovery, else park with counts as the result. No retune of
 OR window, pierce, imbalance cuts, windows, or brackets on this sample.
+**Result (EXP-0055, 2026-10-24): reject / park at Stage 2.** Stage 0
+PASS (109 events, Arm B kept 36 / dropped 73 pooled; causality PASS).
+Stage 1: Arm B improves forward paths vs Arm A (NQ @60s +2.68 vs
+−0.06, n=19; ES @60s +0.65 vs −0.44, n=17) but the +60 s shifted-ES
+placebo is as good or better (NQ @60s +9.69, n=12) — the cross-market
+timing is not specific. Stage 2 FAIL on every book: Arm B avg lifts
+strongly vs a deeply negative Arm A (Book 2 NQ +0.31 vs −4.12; ES
+Book 1 +0.57 vs −3.43) yet per-market kept n = 19/17 < 20 and Arm B
+avg never beats the random-skip placebo p90. Price-only ORB (Arm A)
+loses heavily, worst on the paper-faithful far-OR stop (NQ Book 1 avg
+−28.7). **Sep–Oct holdout not read; no retune.** RelVol ≥ 1 did not
+separate Arm A outcomes (NQ @60s −1.03 vs +0.58 for < 1) — the equity
+Stocks-in-Play effect does not transfer as a session gate here.
 
 ---
 

@@ -69,8 +69,54 @@
 | EXP-0052 | H43 aggressor count/size (FLB gate on MAT) | ran — **reject / park** (Stage 1) | DIG4 23d discovery | gated MAT avg +0.59 vs +1.55; placebo fail; MSQ empty on CFADE; May not read; see notes |
 | EXP-0053 | H44 large-print clustering (both-burst gate on MAT) | ran — **reject / park** (Stage 1) | DIG4 23d discovery | gated MAT avg +1.13 vs +1.55; hold/maxDD/placebo fail; both not special cell; May not read; see notes |
 | EXP-0054 | H45 BBO/top-3 imbalance agreement state (stratum only) | ran — **reject / park** (matters bar) | DIG4 23d discovery (depth, all 23) | agree_with trades 0 on both books; triggers ~100% mixed; causality PASS; May not read; see notes |
+| EXP-0055 | H46 Opening Range Breakout validated by orderflow | ran — **reject / park** (Stage 2) | Apr–Aug 2026 discovery (69 sessions); Sep–Oct holdout **not read** | Arm B lifts avg vs deeply negative Arm A but kept n 19/17 < 20 and never beats random-skip placebo p90; shifted-ES placebo ≥ real gate; see notes |
 
 ## Run notes
+
+### 2026-10-24 — EXP-0055 Opening Range Breakout validated by orderflow (H46)
+
+- **Design (frozen in `EXP-0055.yaml` before any ORB outcome was read):**
+  OR = UK 14:30–14:45 per market; breakout in the OR-candle direction only
+  (Zarattini & Aziz 2023), 1-tick pierce, first break only, one event per
+  market/session. Arm A price-only; Arm B (primary gate) traded-market
+  trailing-5 s aggressor imbalance ≥ 0.30 in break direction + other-market
+  5 s imbalance ≥ 0; Arm C reaction-confirmed ≤ 5 s (secondary). Books:
+  (1) paper-faithful SL at far OR extreme / TP 2R, (2) vol RR SL1/TP2;
+  `simulate_session` events override, 1-tick slip, 0.25 pt/RT. Session
+  state (RelVol vs prior 14 sessions, Holmberg/Crabel contraction) is
+  causal and stratum-only. Papers: `researchpapers/SSRN-id4416622.pdf`,
+  `8007-ssrn-4729284-1-pdf.pdf`, `ues845.pdf`. Registered H46/EXP-0055
+  (H45/EXP-0054 was taken by Tier A A4 the same day; a brief numbering
+  collision overwrote A4's YAML/results — YAML reconstructed from its
+  frozen runner and `results/EXP-0054/` regenerated with that runner,
+  numbers matching the log note below).
+- **Stage 0 PASS:** discovery Apr–Aug 2026, 69 sessions → 109 breakouts
+  (NQ 55 / ES 54); Arm B kept 36 / dropped 73 pooled. Truncation
+  invariance (flow at break on truncated tape) and OR hand-check vs
+  1-min bars PASS (3 sessions each).
+- **Stage 1 (event study):** Arm B path improves on Arm A — NQ @60s
+  +2.68 vs −0.06 (n=19), @300s +0.21 vs −5.70; ES @60s +0.65 vs −0.44
+  (n=17) — but the **+60 s shifted-ES placebo matches or beats the real
+  gate** (NQ @60s +9.69 n=12; ES hit-rates higher), so the cross-market
+  timing is not specific. Reaction-confirmed Arm C ≈ Arm A (no lift).
+  RelVol ≥ 1 does **not** separate Arm A (NQ @60s −1.03 vs +0.58 for
+  < 1): the equity Stocks-in-Play RelVol effect does not transfer as a
+  futures session gate on this sample.
+- **Stage 2 FAIL (all four market×book cells):** Arm B avg lifts strongly
+  against a deeply negative Arm A (Book 2 NQ +0.31 vs −4.12; ES Book 1
+  +0.57 vs −3.43) driven by Arm A's losses, worst on the paper-faithful
+  far-OR stop (NQ Book 1 avg −28.70, net −1578.8 — a 15-min OR in NQ is
+  far too wide a stop unit at a 17:00 exit). Frozen bars fail regardless:
+  per-market Arm B kept n = 19 (NQ) / 17 (ES) < 20, and Arm B avg never
+  beats the random-skip placebo p90 (NQ Book 2 +0.31 vs p90 +3.83;
+  ES Book 1 +0.57 vs p90 +2.30); early/late and maxDD checks also fail
+  in places.
+- **Decisions:** **Reject / park.** Sep–Oct 2026 holdout **not read**;
+  no retune of OR window, pierce, imbalance cuts, or brackets; no Java.
+  Plumbing stays reusable (`research/features/opening_range.py`,
+  `research/features/orb_flow.py`, `research/orb/exp_0055_orb.py`).
+  Results: `results/EXP-0055/` (`summary.md`, `report.json`,
+  `events.parquet`).
 
 ### 2026-10-24 — EXP-0054 BBO/top-3 imbalance agreement state (H45) — Tier A complete
 

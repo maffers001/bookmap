@@ -31,6 +31,7 @@ from research.irt_lvn.of_scores import (
 class OpenBookConfig:
     book_radius_pts: float = 100.0
     cluster_ticks: int = 2
+    max_width_ticks: int | None = None  # cap band width (ticks); None = uncapped
     standout_pct: float = 99.0
     large_mult: float = 2.0
     top_n_per_side: int = 5
@@ -98,8 +99,19 @@ def primary_bracket(u: float, cfg: OpenBookConfig) -> tuple[float, float]:
 
 # ---------------------------------------------------------------- clustering
 
-def _cluster_side(book: dict[int, int], *, lo: int, hi: int, cluster_ticks: int) -> list[dict[str, Any]]:
-    """Merge contiguous non-empty prices within ``cluster_ticks`` into clusters."""
+def _cluster_side(
+    book: dict[int, int],
+    *,
+    lo: int,
+    hi: int,
+    cluster_ticks: int,
+    max_width_ticks: int | None = None,
+) -> list[dict[str, Any]]:
+    """Merge prices within ``cluster_ticks`` gap; optionally cap band width.
+
+    ``max_width_ticks`` stops chain-merging from growing past a fixed band
+    (e.g. 10–15 pts of resting size summed together).
+    """
     prices = sorted(p for p, s in book.items() if s > 0 and lo <= p <= hi)
     if not prices:
         return []
@@ -107,7 +119,11 @@ def _cluster_side(book: dict[int, int], *, lo: int, hi: int, cluster_ticks: int)
     cur_px = [prices[0]]
     cur_sz = [int(book[prices[0]])]
     for p in prices[1:]:
-        if p - cur_px[-1] <= cluster_ticks:
+        gap_ok = p - cur_px[-1] <= cluster_ticks
+        width_ok = (
+            max_width_ticks is None or (p - cur_px[0]) <= max_width_ticks
+        )
+        if gap_ok and width_ok:
             cur_px.append(p)
             cur_sz.append(int(book[p]))
         else:
@@ -146,12 +162,18 @@ def snapshot_clusters(
             if not book:
                 continue
             # cluster only the bright prices (may have gaps)
-            for c in _cluster_side(book, lo=lo, hi=hi, cluster_ticks=cfg.cluster_ticks):
+            for c in _cluster_side(
+                book, lo=lo, hi=hi, cluster_ticks=cfg.cluster_ticks,
+                max_width_ticks=cfg.max_width_ticks,
+            ):
                 c["side"] = side
                 c["dist_mid_pts"] = abs(c["centre_tick"] - mid_tick) * PTS_PER_TICK
                 rows.append(c)
         else:
-            for c in _cluster_side(book, lo=lo, hi=hi, cluster_ticks=cfg.cluster_ticks):
+            for c in _cluster_side(
+                book, lo=lo, hi=hi, cluster_ticks=cfg.cluster_ticks,
+                max_width_ticks=cfg.max_width_ticks,
+            ):
                 c["side"] = side
                 c["dist_mid_pts"] = abs(c["centre_tick"] - mid_tick) * PTS_PER_TICK
                 rows.append(c)

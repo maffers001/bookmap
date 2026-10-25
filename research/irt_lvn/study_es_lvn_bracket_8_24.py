@@ -16,8 +16,16 @@ Windows (UK clock):
 Exits: ``tp`` when target hits; else ``endofsession`` at ``--eos``.
 Use ``--sl 0`` for TP-or-EOS only (no stop); ``--sl N`` keeps a hard stop.
 
+``--min-open-dist`` (default 0): require |anchor level − open mid| ≥ N pts,
+where open mid is the last print at/before 14:30 UK. Skips levels parked
+on the open (instant first-touch fills).
+
+``--market`` ES|NQ (default ES). ``--min-size`` filters resting cluster size
+(contracts); NQ books are much thinner than ES — absolute 100+ is rare.
+
     .venv\\Scripts\\python.exe -m research.irt_lvn.study_es_lvn_bracket_8_24 --sl 8 --tp 16 --level-mode outer
-    .venv\\Scripts\\python.exe -m research.irt_lvn.study_es_lvn_bracket_8_24 --sl 0 --tp 60 --level-mode outer --eos 21:00
+    .venv\\Scripts\\python.exe -m research.irt_lvn.study_es_lvn_bracket_8_24 --sl 8 --tp 24 --level-mode outer --min-open-dist 5
+    .venv\\Scripts\\python.exe -m research.irt_lvn.study_es_lvn_bracket_8_24 --market NQ --min-size 40 --sl 8 --tp 24 --level-mode outer
 """
 from __future__ import annotations
 
@@ -55,6 +63,11 @@ MONTHS = {
 def _hhmm_ns(y: int, m: int, d: int, hhmm: str) -> int:
     hh, mm = (int(x) for x in hhmm.split(":")[:2])
     return int(datetime(y, m, d, hh, mm, tzinfo=UK).timestamp() * 1e9)
+
+
+def _fmt_uk(ts_ns: int) -> str:
+    """Full UK wall-clock timestamp for spreadsheets (ISO-8601 with offset)."""
+    return datetime.fromtimestamp(ts_ns / 1e9, tz=UK).isoformat(timespec="milliseconds")
 
 
 def _parse_floats(s: str) -> list[float]:
@@ -146,10 +159,15 @@ def _fade(
             j_tp = 10**18
         if not hit_sl.any():
             j_sl = 10**18
-        reason, pnl = ("sl", -sl - exit_slip) if j_sl <= j_tp else ("tp", tp - exit_slip)
+        if j_sl <= j_tp:
+            reason, pnl, j = "sl", -sl - exit_slip, j_sl
+        else:
+            reason, pnl, j = "tp", tp - exit_slip, j_tp
     else:
         # Still open at EOS → flatten only because TP was not hit
-        reason, pnl = "endofsession", sign * (float(px2[-1]) - entry) - exit_slip
+        reason, pnl, j = "endofsession", sign * (float(px2[-1]) - entry) - exit_slip, len(px2) - 1
+    entry_ns = int(ts[i])
+    exit_ns = int(ts[i + j])
     return {
         "pnl_net": pnl - commission,
         "exit": reason,
@@ -157,7 +175,11 @@ def _fade(
         "mae": mae,
         "sl": sl,
         "tp": tp,
-        "t_entry_s": (int(ts[i]) - snap_ns) / 1e9,
+        # seconds after 14:30 UK open snap (not absolute clock)
+        "t_entry_s": (entry_ns - snap_ns) / 1e9,
+        "duration_s": (exit_ns - entry_ns) / 1e9,
+        "entry_ts": _fmt_uk(entry_ns),
+        "exit_ts": _fmt_uk(exit_ns),
     }
 
 
@@ -193,10 +215,45 @@ def _md_table(
 
 
 TRADE_FIELDS = [
-    "date", "session_id", "side", "centre", "lvn_px", "level_px",
-    "level_src", "level_mode", "entry", "sl", "tp",
-    "pnl_net", "exit", "mfe", "mae", "t_entry_s", "bracket", "month",
+    "date", "session_id", "market", "side", "centre", "size", "lvn_px", "level_px",
+    "level_src", "level_mode", "open_mid", "dist_open", "entry", "sl", "tp",
+    "pnl_net", "exit", "mfe", "mae", "t_entry_s", "duration_s",
+    "entry_ts", "exit_ts", "bracket", "month",
 ]
+
+
+def _open_mid(ts: np.ndarray, px: np.ndarray, snap_ns: int) -> float | None:
+    """Last print at/before 14:30 UK (points)."""
+    if len(ts) == 0:
+        return None
+    j = int(np.searchsorted(ts, snap_ns, side="right")) - 1
+    if j < 0:
+        return None
+    return float(px[j])
+
+
+def _dedupe_same_entry(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One trade per (session, side, entry, bracket); keep largest cluster size.
+
+    Outer-wall mode maps several nearby clusters onto the same LVN entry; without
+    this the study double-counts one fill (same ``entry_ts`` / PnL).
+    """
+    best: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for t in trades:
+        key = (
+            t.get("session_id"),
+            t.get("side"),
+            round(float(t["entry"]), 2),
+            t.get("bracket"),
+        )
+        prev = best.get(key)
+        sz = float(t.get("size") or 0.0)
+        if prev is None or sz > float(prev.get("size") or 0.0):
+            best[key] = t
+    # Stable-ish order: by date then entry time
+    out = list(best.values())
+    out.sort(key=lambda r: (r.get("date") or "", float(r.get("t_entry_s") or 0), r.get("bracket") or ""))
+    return out
 
 
 def run(
@@ -209,9 +266,16 @@ def run(
     sls: list[float],
     tps: list[float],
     level_mode: str,
+    min_open_dist: float,
+    market: str,
+    min_size: float,
+    month_paths: dict[str, Path] | None = None,
 ) -> None:
     if level_mode not in LEVEL_MODES:
         raise ValueError(f"--level-mode must be one of {LEVEL_MODES}, got {level_mode!r}")
+    market = market.upper()
+    if market not in ("ES", "NQ"):
+        raise ValueError(f"--market must be ES or NQ, got {market!r}")
 
     cfg = load_config()
     pq_dir = Path(cfg["parquet_dir"])
@@ -219,7 +283,7 @@ def run(
 
     brackets = _brackets(sls, tps)
     exit_slip = PTS_PER_TICK
-    commission = 0.125
+    commission = 0.25 if market == "NQ" else 0.125
     br_desc = ", ".join(f"SL{sl:g}/TP{tp:g}" for _, tp, sl in brackets)
     mode_desc = {
         "cluster": "large-order cluster centre (legacy)",
@@ -228,14 +292,17 @@ def run(
     }[level_mode]
 
     lines = [
-        "# ES ∩ LVN — SL/TP sweep",
+        f"# {market} ∩ LVN — SL/TP sweep",
         "",
-        f"Structure: ES · LVN≤{near_pts:g} · outside+{offset:g} · first-touch fade.",
+        f"Structure: {market} · LVN≤{near_pts:g} · outside+{offset:g} · first-touch fade"
+        + (f" · size≥{min_size:g}." if min_size > 0 else "."),
         f"Fills until **{entry_until} UK**; hold to **{eos} UK** — "
         f"`exit=endofsession` only if TP not hit"
         + ("; SL active." if any(sl > 0 for _, _, sl in brackets) else " (no SL)."),
+        f"Min |level − open mid|: **{min_open_dist:g}** pts "
+        f"(0 = no filter).",
         f"Level mode: **`{level_mode}`** — {mode_desc}.",
-        f"Brackets: **{br_desc}**.",
+        f"Brackets: **{br_desc}** · commission {commission} pt/RT.",
         "",
     ]
     grid: list[dict] = []
@@ -243,13 +310,21 @@ def run(
     all_trades: list[dict[str, Any]] = []
     n_switched = 0
     n_levels_total = 0
+    n_skipped_open = 0
 
-    for mo, ann in MONTHS.items():
+    month_map = month_paths if month_paths is not None else MONTHS
+    for mo, ann in month_map.items():
         if not ann.exists():
             print(f"{mo}: missing {ann}", flush=True)
             continue
-        levels = _load_month_levels(ann, near_pts=near_pts)
-        print(f"{mo}: {len(levels)} ES confluence levels", flush=True)
+        levels = _load_month_levels(
+            ann, near_pts=near_pts, market=market, min_size=min_size,
+        )
+        print(
+            f"{mo}: {len(levels)} {market} confluence levels"
+            + (f" (size≥{min_size:g})" if min_size > 0 else ""),
+            flush=True,
+        )
         n_levels_total += len(levels)
 
         sess_ids = sorted({lv["session_id"] for lv in levels})
@@ -259,20 +334,29 @@ def run(
             snap_ns = _hhmm_ns(y, m, d, "14:30")
             entry_until_ns = _hhmm_ns(y, m, d, entry_until)
             eos_ns = _hhmm_ns(y, m, d, eos)
-            tr = _prefer_single_feed(_load_trades(pq_dir, sid, "ES"), pq_dir, sid, "ES")
+            tr = _prefer_single_feed(
+                _load_trades(pq_dir, sid, market), pq_dir, sid, market,
+            )
             ts = tr.column("ts_ns").to_numpy().astype(np.int64)
             px = tr.column("price").to_numpy().astype(np.float64) * PTS_PER_TICK
             o = np.argsort(ts, kind="stable")
             ts, px = ts[o], px[o]
+            open_mid = _open_mid(ts, px, snap_ns)
             # Hold path through EOS; fills gated inside _fade via entry_until_ns
             msk = (ts >= snap_ns) & (ts < eos_ns)
-            tapes[sid] = (ts[msk], px[msk], snap_ns, entry_until_ns)
+            tapes[sid] = (ts[msk], px[msk], snap_ns, entry_until_ns, open_mid)
 
         for bname, tp, sl in brackets:
             trades: list[dict[str, Any]] = []
             for lv in levels:
-                ts, px, snap_ns, entry_until_ns = tapes[lv["session_id"]]
+                ts, px, snap_ns, entry_until_ns, open_mid = tapes[lv["session_id"]]
                 level_px, level_src = _anchor_level(lv, level_mode=level_mode)
+                if open_mid is None:
+                    continue
+                dist_open = abs(level_px - open_mid)
+                if dist_open < min_open_dist:
+                    n_skipped_open += 1
+                    continue
                 if level_src == "lvn":
                     n_switched += 1
                 entry = level_px - offset if lv["side"] == "BID" else level_px + offset
@@ -287,18 +371,25 @@ def run(
                     **trd,
                     "date": lv["date"],
                     "session_id": lv["session_id"],
+                    "market": market,
                     "side": lv["side"],
                     "centre": lv["centre"],
+                    "size": lv.get("size"),
                     "lvn_px": lv.get("lvn_px"),
                     "level_px": level_px,
                     "level_src": level_src,
                     "level_mode": level_mode,
+                    "open_mid": open_mid,
+                    "dist_open": dist_open,
                     "entry": entry,
                     "sl": sl,
                     "tp": tp,
                     "bracket": bname,
                     "month": mo,
                 })
+            # Outer-wall collapse: several clusters near one LVN share the same
+            # entry — keep one trade per (session, side, entry) or P&L double-counts.
+            trades = _dedupe_same_entry(trades)
             p = _pack(trades)
             exits = {"tp": 0, "sl": 0, "endofsession": 0}
             for t in trades:
@@ -327,9 +418,10 @@ def run(
                     w.writerow(t)
             all_trades.extend(trades)
 
-    # n_switched counts per (level × bracket); report once per level
+    # n_switched / n_skipped_open count per (level × bracket); report once per level
     n_br = max(len(brackets), 1)
     switched_levels = n_switched // n_br if n_br else 0
+    skipped_open = n_skipped_open // n_br if n_br else 0
 
     lines += _md_table(
         ["Month", "bracket", "n", "WR", "net", "avg", "days+", "maxDD", "exits"],
@@ -340,18 +432,20 @@ def run(
         "",
         f"LVN-anchor switches (LVN chosen over cluster): **{switched_levels}** / "
         f"{n_levels_total} levels (mode=`{level_mode}`).",
+        f"Skipped (level closer than {min_open_dist:g} pts to open mid): "
+        f"**{skipped_open}**.",
         "",
         "## Cross-month",
         "",
     ]
 
-    cross_headers = ["bracket", *MONTHS.keys(), "Sum net", "+months"]
+    cross_headers = ["bracket", *month_map.keys(), "Sum net", "+months"]
     cross_rows: list[list[str]] = []
     for bname, _, _ in brackets:
         cells: list[str] = [bname]
         snet = 0.0
         npos = 0
-        for mo in MONTHS:
+        for mo in month_map:
             g = next((x for x in grid if x["month"] == mo and x["bracket"] == bname), None)
             if not g or g["n"] == 0:
                 cells.append("—")
@@ -361,7 +455,7 @@ def run(
             if g["net"] > 0:
                 npos += 1
         cells.append(f"{snet:+.0f}")
-        cells.append(f"{npos}/{len(MONTHS)}")
+        cells.append(f"{npos}/{len(month_map)}")
         cross_rows.append(cells)
     # right-align numeric-ish columns (all except bracket)
     lines += _md_table(
@@ -379,7 +473,7 @@ def run(
         for bname, tp, sl in brackets[1:]:
             lift_rows: list[list[str]] = []
             sum_base = sum_cand = 0.0
-            for mo in MONTHS:
+            for mo in month_map:
                 a = next((x for x in grid if x["month"] == mo and x["bracket"] == base_name), None)
                 b = next((x for x in grid if x["month"] == mo and x["bracket"] == bname), None)
                 if not a or not b or a["n"] == 0:
@@ -412,7 +506,7 @@ def run(
     for bname, tp, sl in brackets:
         s = sum(
             g["net"] for g in grid
-            if g["bracket"] == bname and g["month"] in MONTHS
+            if g["bracket"] == bname and g["month"] in month_map
         )
         sums.append((bname, tp, sl, s))
     best = max(sums, key=lambda x: x[3]) if sums else None
@@ -492,10 +586,44 @@ def main() -> None:
             "inner=buy max/sell min with LVN"
         ),
     )
+    ap.add_argument(
+        "--min-open-dist",
+        type=float,
+        default=0.0,
+        help=(
+            "Require |anchor level − 14:30 open mid| ≥ this many pts "
+            "(default 0 = off; e.g. 5 skips levels parked on the open)"
+        ),
+    )
+    ap.add_argument(
+        "--market",
+        choices=("ES", "NQ"),
+        default="ES",
+        help="Futures market to fade (default ES)",
+    )
+    ap.add_argument(
+        "--min-size",
+        type=float,
+        default=0.0,
+        help="Min resting cluster size in contracts (default 0 = off)",
+    )
+    ap.add_argument(
+        "--ann-template",
+        default=None,
+        help=(
+            "Annotated confluence CSV template with {mo} placeholder, e.g. "
+            "results/OPEN_CLUSTER_LVN_CONFLUENCE_NQ_BAND12_{mo}/clusters_with_lvn.csv"
+        ),
+    )
     args = ap.parse_args()
     sls = _parse_floats(args.sl)
     tps = _parse_floats(args.tp)
     eos = args.until if args.until is not None else args.eos
+    month_paths = None
+    if args.ann_template:
+        month_paths = {
+            mo: Path(args.ann_template.format(mo=mo)) for mo in MONTHS
+        }
     run(
         out_dir=args.out,
         near_pts=args.near,
@@ -505,6 +633,10 @@ def main() -> None:
         sls=sls,
         tps=tps,
         level_mode=args.level_mode,
+        min_open_dist=args.min_open_dist,
+        market=args.market,
+        min_size=args.min_size,
+        month_paths=month_paths,
     )
 
 

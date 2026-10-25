@@ -1,1 +1,1 @@
-"""Opening Range Breakout research (EXP-0054 / H45)."""
+"""Opening Range Breakout research (EXP-0055 / H46)."""
