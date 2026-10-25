@@ -671,6 +671,25 @@ Stocks-in-Play effect does not transfer as a session gate here.
 
 ---
 
+## H47 — MAT signals by 50-tick range-bar type
+
+Frozen MAT (causal ES, trend+VWAP, UK 14:30–17:00, vol k=1) improves when
+filtered by the **type** of the surrounding 50-tick NQ range bar: high volume
+vs prior median, aligned aggressor delta, and/or entry beyond the bar value
+area (long above VAH / short below VAL). Primary context = last **completed**
+bar before the MAT stamp (causal). Secondary = partial current bar up to the
+stamp (sensitivity only). Distinct from H26 (range-imbalance events) and
+H38/H39 (LVN / fail-fade overlays).
+
+**Test:** EXP-0056. Runner: `python -m research.run_mat_range_bars`.
+Discovery Apr–Aug 2026; Sep–Oct locked one-shot holdout after freeze.
+Partial-bar results alone cannot ship.
+**Result (2026-10-25): reject / park at Stage 2.** Base avg −0.75 (n=1787).
+No primary arm passes (vol/delta/va_break all worse than base; `vol_delta`
++0.76 fails 3/5 month rule). Holdout not read. See `results/EXP-0056/`.
+
+---
+
 ## Unregistered candidates (no H-number yet)
 
 The complete post-EXP-0050 dig map — every remaining correlated idea as

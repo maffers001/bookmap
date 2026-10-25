@@ -70,8 +70,25 @@
 | EXP-0053 | H44 large-print clustering (both-burst gate on MAT) | ran — **reject / park** (Stage 1) | DIG4 23d discovery | gated MAT avg +1.13 vs +1.55; hold/maxDD/placebo fail; both not special cell; May not read; see notes |
 | EXP-0054 | H45 BBO/top-3 imbalance agreement state (stratum only) | ran — **reject / park** (matters bar) | DIG4 23d discovery (depth, all 23) | agree_with trades 0 on both books; triggers ~100% mixed; causality PASS; May not read; see notes |
 | EXP-0055 | H46 Opening Range Breakout validated by orderflow | ran — **reject / park** (Stage 2) | Apr–Aug 2026 discovery (69 sessions); Sep–Oct holdout **not read** | Arm B lifts avg vs deeply negative Arm A but kept n 19/17 < 20 and never beats random-skip placebo p90; shifted-ES placebo ≥ real gate; see notes |
+| EXP-0056 | H47 MAT × 50-tick range-bar context | ran — **reject / park** (Stage 2) | Apr–Aug discovery (69 sessions); Sep–Oct holdout **not read** | no primary arm passes; vol_delta avg +0.76 but only 2/5 months net+; see notes |
 
 ## Run notes
+
+### 2026-10-25 — EXP-0056 MAT × 50-tick range-bar context (H47)
+
+- Design: 50-tick NQ range bars with per-price buy/sell/delta, VPOC, 70% VA.
+  Attach **prior completed** bar (primary) and **partial current** bar (secondary)
+  to frozen MAT stamps. Arms: base / vol / delta / vol_delta / va_break /
+  vol_va_break / va_inside.
+- Runner: `python -m research.run_mat_range_bars --stage discover|holdout`.
+  Results: `results/EXP-0056/`. Feature: `research/features/range_bar_profile.py`.
+- Stage 0 PASS (synthetic + 3-session invariants). Discovery 69 sessions:
+  base n=1787 avg **−0.75**. No primary arm passes kill rules. Closest:
+  `vol_delta` n=58 avg +0.76 but only 2/5 months net+. `va_inside` avg +0.12
+  also fails month stability. Partial secondary not shippable.
+- **Verdict: reject / park.** Sep–Oct holdout not read (no freeze).
+- Dig `--bracket rr_1_2` (TP=2R SL=1R vol unit) → `results/EXP-0056_RR_1_2/`: base avg −0.19;
+  best prior arm `vol` avg **+0.30** net +184 but lift &lt; +0.5 vs base — still no freeze.
 
 ### 2026-10-24 — EXP-0055 Opening Range Breakout validated by orderflow (H46)
 

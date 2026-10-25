@@ -552,22 +552,24 @@ public class LvnConfluenceAutoTradeModule implements
         return m == null ? 0.0 : m;
     }
 
-    /** Next Long/Short for resting orders: nearest to open mid, not marketable vs live mid. */
+    /**
+     * Next Long/Short for resting orders: nearest armed to open mid.
+     * Do <em>not</em> skip “marketable” vs live mid — that hid limits exactly when
+     * replay reaches the study fill (e.g. ASK entry 7860 while mid already ≥7860),
+     * so no order was sent. If the limit is marketable, SIM fills immediately
+     * (correct: we would have been filled).
+     */
     private ArmedLevel nearestForEntry(OpenClusterDetector.Side side) {
         double ref = refMidPts();
         if (ref <= 0) {
             return null;
         }
-        return detector.nearestArmed(side, ref, detector.midPts());
+        return detector.nearestArmed(side, ref, null);
     }
 
     /** Next Long/Short chart marks: nearest to open mid (always show armed short/long). */
     private ArmedLevel nearestForDisplay(OpenClusterDetector.Side side) {
-        double ref = refMidPts();
-        if (ref <= 0) {
-            return null;
-        }
-        return detector.nearestArmed(side, ref, null);
+        return nearestForEntry(side);
     }
 
     /** Interval/realtime hook: place or cancel without spamming logs every 250ms. */
@@ -576,6 +578,10 @@ public class LvnConfluenceAutoTradeModule implements
             return;
         }
         if (!LvnStrategyState.tradingEnabled() || !realtimeStarted || api == null) {
+            return;
+        }
+        // After entry-until cancel, do not re-rest limits
+        if (cancelledAtEntryUntil) {
             return;
         }
         if (inTrade()) {
@@ -683,6 +689,9 @@ public class LvnConfluenceAutoTradeModule implements
         if (!LvnStrategyState.tradingEnabled() || !realtimeStarted || api == null) {
             return;
         }
+        if (cancelledAtEntryUntil) {
+            return;
+        }
         if (inTrade()) {
             if (!pendingEntryOrderIds.isEmpty()) {
                 Log.info("LVN ORDER in-position — cancel pending entries (" + via + ")");
@@ -698,10 +707,13 @@ public class LvnConfluenceAutoTradeModule implements
             maybePlaceLimit(nearestShort);
         }
         Log.info(String.format(Locale.US,
-                "LVN ORDER nearest mid=%.2f long=%s short=%s (%s)",
+                "LVN ORDER nearest mid=%.2f long=%s short=%s armedBID=%d armedASK=%d trading=%s (%s)",
                 mid,
                 nearestLong == null ? "—" : String.format(Locale.US, "%.2f", nearestLong.entryPts),
                 nearestShort == null ? "—" : String.format(Locale.US, "%.2f", nearestShort.entryPts),
+                detector.countTradeable(OpenClusterDetector.Side.BID),
+                detector.countTradeable(OpenClusterDetector.Side.ASK),
+                LvnStrategyState.tradingEnabled(),
                 via));
     }
 

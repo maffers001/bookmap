@@ -167,7 +167,7 @@ With MAT attached and **Enable Ctrl+Shift side hotkeys = true** (default), or wi
 
 Same core as v1 (EXP-0008 tape + ES sync, reverse-on-stop, TP extend, Ctrl+Shift side hotkeys), plus optional **regime / trend / VWAP** gates and **vol-scaled brackets** from **EXP-0034**, plus **v4 open-vol calibration**: in the first N minutes after UK session open, brackets use the **prior-session** median 1-min range (persisted under `~/.bookmap-orderflow/mat_prior_vol_median.txt`); if none is stored, a **fixed open bracket** (default 10). After the open period, live vol k=1 as before. Log tags remain `MAT2 ?` for replay tooling.
 
-Do **not** enable trading on v1 and v4 at the same time ? they share `MatSideFilter`. CFADE is **unchanged** (own `resolveBracketPts`).
+Do **not** enable trading on v1 and v4 at the same time ? they share `MatSideFilter`. CFADE shares the same open-vol store (`MatOpenVolAnchor`) but keeps its own asymmetric RR `resolveBracketPts`.
 
 JAR: `bookmap-addon/build/libs/bookmap-orderflow-mat-v4.jar` (or default `bookmap-orderflow.jar` from `gradle jar`). Remove any old mat-v2 plugin entry before installing.
 
@@ -214,6 +214,8 @@ JAR: `bookmap-addon/build/libs/bookmap-orderflow-cfade.jar` (contains every add-
 **Gates:** UK **14:30–17:00**; **Max efficiency ratio 0.30** on the 60-min regime (`|net| / path` over completed minutes; tracker resets at window open so the first hour matches research); flat-only; 5 s cooldown from the last *taken* signal; Allow longs/shorts. **No** trend/VWAP gate — DIG3 showed those hurt the fade.
 
 **Brackets (default after CFADE_ASYM_RR):** `unit = k × median 30-min 1-minute range` (**k = 1**); **SL = clip(1R × unit, 4, 40)**, **TP = clip(2R × unit, 4, 40)** — same formula as `make_vol_bracket_rr`. Panel: Vol multiple k, SL R / TP R multiples, Bracket min/max pts.
+
+**Open-vol (MAT v4, default ON):** for the first **Open vol period min** (20) after UK window open (14:30), unit uses the **prior-session** median 1-min range from `~/.bookmap-orderflow/mat_prior_vol_median.txt` (shared with MAT); if none is stored, **Open fixed bracket pts** (10) as TP=SL. After the open period, live vol RR as above. Logs `volSrc=prior|fixed|live` on `CFADE SIGNAL`.
 
 | Panel | Meaning |
 |---|---|

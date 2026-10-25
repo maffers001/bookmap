@@ -14,6 +14,7 @@ import java.util.Set;
 import com.bookmap.orderflow.core.CorrFadeDetector;
 import com.bookmap.orderflow.core.CorrFadeDetector.FadeEvent;
 import com.bookmap.orderflow.core.InstrumentClassifier;
+import com.bookmap.orderflow.core.MatOpenVolAnchor;
 import com.bookmap.orderflow.core.PriceTicks;
 import com.bookmap.orderflow.core.RegimeTracker;
 import com.bookmap.orderflow.core.TapeBurstTracker.Burst;
@@ -65,7 +66,11 @@ import velox.api.layer1.simplified.TradeDataListener;
  * <p>Gates: UK 14:30–17:00, 60-min efficiency ratio ≤ 0.30, flat-only, 5 s
  * cooldown. Brackets (vol RR, {@code results/CFADE_ASYM_RR/}): unit =
  * k × median 30-min minute range; SL = clip(1R×unit, 4, 40), TP = clip(2R×unit, 4, 40).
- * No trend / VWAP gate (DIG3: those hurt the fade).
+ * <b>Open-vol</b> (same as MAT v4): for the first {@code Open vol period min}
+ * after UK window open, unit uses the <em>prior-session</em> median 1-min
+ * range (shared store with MAT); if none is stored, fixed open brackets
+ * (TP=SL). After the open period, live vol RR as above. No trend / VWAP gate
+ * (DIG3: those hurt the fade).
  *
  * <p>Separate from Momentum AutoTrade (continuation). Both can run together
  * as independent books (DIG3 §6: additive), but do <b>not</b> enable trading
@@ -191,6 +196,20 @@ public class CorrFadeAutoTradeModule implements
     @Parameter(name = "Bracket max pts", step = 1.0)
     Double bracketMaxPts = 40.0;
 
+    /**
+     * Same as MAT v4: during the first N minutes after UK window open, use
+     * prior-session median for vol unit (or fixed open size if no prior).
+     */
+    @Parameter(name = "Open vol period min", step = 1.0)
+    Double openVolPeriodMin = 20.0;
+
+    /** Fixed TP=SL (pts) when in open period and no prior median is available. */
+    @Parameter(name = "Open fixed bracket pts", step = 0.5)
+    Double openFixedBracketPts = 10.0;
+
+    @Parameter(name = "Enable open vol anchor")
+    Boolean enableOpenVolAnchor = true;
+
     // --- Trading ---
     @Parameter(name = "Enable trading (OFF for signal-only)")
     Boolean enableTrading = false;
@@ -242,6 +261,11 @@ public class CorrFadeAutoTradeModule implements
     private int lastSignalSide;
     private long fadeCandidateCount;
     private long signalCount;
+
+    /** Prior-session median 1-min range for open-vol brackets (MAT-shared store). */
+    private double priorVolMedian = Double.NaN;
+    private boolean priorVolLoaded;
+    private long lastPriorPersistNs;
 
     // position / orders
     private int position;
@@ -333,18 +357,24 @@ public class CorrFadeAutoTradeModule implements
                 + " tpR=" + tpRMultiple
                 + " floor=" + bracketMinPts
                 + " cap=" + bracketMaxPts
+                + " openVol=" + Boolean.TRUE.equals(enableOpenVolAnchor)
+                + " openPeriodMin=" + openVolPeriodMin
+                + " openFixed=" + openFixedBracketPts
                 + " window=" + windowStartUkMin + "-" + windowEndUkMin
                 + " kill=" + killMaxSessionLossPts
-                + " (H29 fade; vol RR sl1/tp2; spec results/EXP-0036_DIG4/TEST_AUTOTRADE_SPEC.md)");
+                + " (H29 fade; vol RR sl1/tp2 + open-vol; spec results/EXP-0036_DIG4/TEST_AUTOTRADE_SPEC.md)");
     }
 
     private static final class BracketPts {
         final double tp;
         final double sl;
+        /** {@code prior} / {@code fixed} / {@code live} — open-vol path taken. */
+        final String volSrc;
 
-        BracketPts(double tp, double sl) {
+        BracketPts(double tp, double sl, String volSrc) {
             this.tp = tp;
             this.sl = sl;
+            this.volSrc = volSrc == null ? "live" : volSrc;
         }
     }
 
@@ -677,19 +707,91 @@ public class CorrFadeAutoTradeModule implements
      * Vol RR brackets matching {@code make_vol_bracket_rr(k, tp_r, sl_r)}:
      * unit = k × median minute range; SL = clip(slR×unit), TP = clip(tpR×unit).
      * Defaults: k=1, slR=1, tpR=2, floor=4, cap=40 ({@code CFADE_ASYM_RR}).
+     *
+     * <p>Open-vol (MAT v4): in the first {@code openVolPeriodMin} after UK
+     * window open, median is the prior-session file (shared with MAT); if
+     * missing, TP=SL=fixed open size. After the open period, live median.
      */
     private BracketPts resolveBracketPts(long asofNs) {
-        int vw = volWindowMin == null ? 30 : Math.max(1, volWindowMin.intValue());
-        RegimeTracker.Snapshot sv = regime.snapshot(vw, asofNs);
         double k = volMultipleK == null ? 1.0 : volMultipleK;
         double slR = slRMultiple == null ? 1.0 : slRMultiple;
         double tpR = tpRMultiple == null ? 2.0 : tpRMultiple;
         double floor = bracketMinPts == null ? 4.0 : bracketMinPts;
         double cap = bracketMaxPts == null ? 40.0 : bracketMaxPts;
-        double unit = k * Math.max(sv.medianMinuteRange, 0.25);
+
+        int openMin = windowStartUkMin == null ? 870 : windowStartUkMin.intValue();
+        int openPeriod = openVolPeriodMin == null ? 20 : Math.max(1, openVolPeriodMin.intValue());
+        boolean openAnchor = Boolean.TRUE.equals(enableOpenVolAnchor)
+                && openMin > 0
+                && asofNs > 0
+                && MatOpenVolAnchor.inOpenPeriod(asofNs, openMin, openPeriod);
+
+        String volSrc;
+        double med;
+        if (openAnchor) {
+            ensurePriorVolLoaded();
+            if (Double.isFinite(priorVolMedian) && priorVolMedian > 0) {
+                med = priorVolMedian;
+                volSrc = "prior";
+            } else {
+                double fixed = openFixedBracketPts == null ? 10.0 : openFixedBracketPts;
+                double pts = Math.max(floor, Math.min(cap, fixed));
+                return new BracketPts(pts, pts, "fixed");
+            }
+        } else {
+            int vw = volWindowMin == null ? 30 : Math.max(1, volWindowMin.intValue());
+            RegimeTracker.Snapshot sv = regime.snapshot(vw, asofNs);
+            med = sv.medianMinuteRange;
+            volSrc = "live";
+        }
+        double unit = k * Math.max(med, 0.25);
         double sl = Math.max(floor, Math.min(cap, slR * unit));
         double tp = Math.max(floor, Math.min(cap, tpR * unit));
-        return new BracketPts(tp, sl);
+        return new BracketPts(tp, sl, volSrc);
+    }
+
+    private void ensurePriorVolLoaded() {
+        if (priorVolLoaded) {
+            return;
+        }
+        priorVolMedian = MatOpenVolAnchor.loadPriorMedian();
+        priorVolLoaded = true;
+        if (Double.isFinite(priorVolMedian)) {
+            Log.info(String.format("CFADE open-vol: loaded prior median=%.2f from %s",
+                    priorVolMedian, MatOpenVolAnchor.storePath()));
+        } else {
+            Log.info("CFADE open-vol: no prior median; open period will use fixed brackets");
+        }
+    }
+
+    /** Persist today's post-open session median for tomorrow's open anchor. */
+    private void maybePersistPriorVol() {
+        if (!Boolean.TRUE.equals(enableOpenVolAnchor)) {
+            return;
+        }
+        long asof = nowNs > 0 ? nowNs : 0;
+        if (asof <= 0) {
+            return;
+        }
+        if (lastPriorPersistNs > 0 && asof - lastPriorPersistNs < 60_000_000_000L) {
+            return;
+        }
+        int openMin = windowStartUkMin == null ? 870 : windowStartUkMin.intValue();
+        int openPeriod = openVolPeriodMin == null ? 20 : Math.max(1, openVolPeriodMin.intValue());
+        if (openMin > 0 && MatOpenVolAnchor.inOpenPeriod(asof, openMin, openPeriod)) {
+            return; // still in open — do not overwrite prior with thin tape
+        }
+        int minBars = volWindowMin == null ? 30 : Math.max(15, volWindowMin.intValue() / 2);
+        int n = regime.sessionBarsCount(asof);
+        if (n < minBars) {
+            return;
+        }
+        double med = regime.medianRangeSinceSessionOpen(asof, minBars);
+        if (!Double.isFinite(med) || med <= 0) {
+            return;
+        }
+        MatOpenVolAnchor.savePriorMedian(med, n);
+        lastPriorPersistNs = asof;
     }
 
     private void fireSignal(FadeEvent e, double chartPx, RegimeTracker.Snapshot sr) {
@@ -711,9 +813,9 @@ public class CorrFadeAutoTradeModule implements
         boolean willTrade = wantTrade && realtimeStarted && api != null && !tradingHalted;
         Log.info(String.format(
                 "CFADE SIGNAL %s @%.2f time=%s tsNs=%d wait_ms=%.0f es_imb_x=%.2f er60=%.3f "
-                        + "tp=%.1f sl=%.1f trading=%s realtime=%s halted=%s pos=%d account=%s sessionNet=%.2f",
+                        + "tp=%.1f sl=%.1f volSrc=%s trading=%s realtime=%s halted=%s pos=%d account=%s sessionNet=%.2f",
                 side > 0 ? "LONG" : "SHORT", chartPx, formatTime(e.stampNs), e.stampNs, e.waitMs, e.esImbX,
-                sr.efficiencyRatio, brkt.tp, brkt.sl, wantTrade, realtimeStarted, tradingHalted,
+                sr.efficiencyRatio, brkt.tp, brkt.sl, brkt.volSrc, wantTrade, realtimeStarted, tradingHalted,
                 flatCheckPosition(), tradingAccountId == null ? "null" : tradingAccountId, sessionNetPts));
         if (willTrade) {
             sendBracketOrder(side > 0, chartPx, brkt);
@@ -741,6 +843,7 @@ public class CorrFadeAutoTradeModule implements
             detector.onTime(nowNs);
             int rw = regimeWindowMin == null ? 60 : Math.max(1, regimeWindowMin.intValue());
             erIndicator.addPoint(regime.snapshot(rw, nowNs).efficiencyRatio);
+            maybePersistPriorVol();
         }
         pendingIndicator.addPoint(detector.pendingFades());
     }

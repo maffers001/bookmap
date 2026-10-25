@@ -11,14 +11,15 @@ import java.time.ZonedDateTime;
 import velox.api.layer1.common.Log;
 
 /**
- * Open-period vol calibration for MAT brackets.
+ * Open-period vol calibration for MAT / CFADE brackets.
  *
  * <p>During the first {@code openPeriodMin} minutes after the UK session open
  * (default 14:30), live median 1-min range is often too quiet. Prefer a
  * <b>prior-session</b> median persisted from the previous RTH window; if none
  * is available, fall back to a fixed open bracket size.
  *
- * <p>Does <b>not</b> affect CFADE (separate {@code resolveBracketPts}).
+ * <p>Shared store under {@code ~/.bookmap-orderflow/mat_prior_vol_median.txt}
+ * so MAT and CFADE reuse the same prior NQ session median.
  */
 public final class MatOpenVolAnchor {
 

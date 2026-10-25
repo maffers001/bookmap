@@ -1,0 +1,43 @@
+name: EXP-0056
+hypothesis: H47
+title: MAT signals by 50-tick range-bar type
+description: >
+  Attach causal 50-tick NQ range-bar context (per-price volume/delta, VPOC,
+  70% VAH/VAL) to frozen MAT stamps (causal ES, trend+VWAP, UK 14:30–17:00,
+  vol k=1). Primary context = last completed bar before MAT. Secondary =
+  partial current bar up to MAT stamp. Pre-registered arms: base, vol (≥1.5×
+  prior-20 median), delta (aligned Δfrac ≥0.20), vol_delta, va_break
+  (long>VAH / short<VAL), vol_va_break, va_inside (comparison). Discovery
+  Apr–Aug 2026; Sep–Oct locked one-shot holdout after freeze. Partial alone
+  cannot ship.
+
+detector: mat_range_bar_context
+range_ticks: 50
+tick_size: 1.0
+va_frac: 0.70
+vol_median_n: 20
+primary_context: prior_completed
+secondary_context: partial_current
+arms:
+  - base
+  - vol
+  - delta
+  - vol_delta
+  - va_break
+  - vol_va_break
+  - va_inside
+vol_ratio_min: 1.5
+aligned_delta_frac_min: 0.20
+vol_delta_frac_min: 0.30
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+es_stamp: causal
+mat_gate: trend_vwap
+discovery_months: ["0426", "0526", "0626", "0726", "0826"]
+holdout_months: ["0926", "1026"]
+kill:
+  min_n: 50
+  min_avg_lift_vs_base: 0.5
+  min_months_net_pos: 3
+  max_month_net_share: 0.60
+runner: python -m research.run_mat_range_bars
