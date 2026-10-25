@@ -377,23 +377,30 @@ public class LvnConfluenceAutoTradeModule implements
         if (!isEs() || !detector.isSnapped()) {
             return;
         }
+        // Historical catch-up must NOT consume armed levels: orders cannot be
+        // sent until onRealtimeStart, and a pre-realtime tape touch would
+        // markFilled → nearest entry gone → no resting limit on replay.
+        if (!realtimeStarted) {
+            return;
+        }
         // While in a trade, entries are cancelled by design — tape touching the
         // next level must NOT consume it (it gets re-rested when flat).
         if (inTrade()) {
             return;
         }
-        // Research fills when tape reaches entry; resting limits handle live.
+        // Research fills when the resting side is traded (not price alone):
+        // BID entry ← sell aggressor at/through entry; ASK ← buy aggressor.
         // Chart px from the book-aligned tick: ES tape ticks are ~31k (<80k), so
-        // PriceTicks.toChartPoints would return the raw tick (31115) as "points"
-        // and spuriously hit every ASK level. tick * pips is the real price.
+        // PriceTicks.toChartPoints would return the raw tick as "points".
         double px = tick * (pips > 0 ? pips : 0.25);
+        boolean buyAgg = tradeInfo != null && tradeInfo.isBidAggressor;
         for (ArmedLevel a : detector.armedLevels()) {
             if (!a.isTradeable()) {
                 continue;
             }
             boolean hit = a.side == OpenClusterDetector.Side.BID
-                    ? px <= a.entryPts
-                    : px >= a.entryPts;
+                    ? (!buyAgg && px <= a.entryPts)   // seller hits resting bid
+                    : (buyAgg && px >= a.entryPts);   // buyer lifts resting ask
             if (!hit) {
                 continue;
             }
@@ -498,6 +505,11 @@ public class LvnConfluenceAutoTradeModule implements
                         : String.format(Locale.US, "%.2f",
                         detector.nearestArmed(OpenClusterDetector.Side.ASK, openMid).entryPts)));
         // One resting entry per side: nearest long (BID) + nearest short (ASK) to open mid
+        if (!LvnStrategyState.tradingEnabled()) {
+            Log.info("LVN ORDER skip at snap — Trading OFF (console). Next Long/Short still plotted.");
+        } else if (!realtimeStarted) {
+            Log.info("LVN ORDER defer at snap — waiting for realtime (will place onRealtimeStart)");
+        }
         placeNearestEntryOrders("snap");
         publishLive("SNAP armed=" + n);
     }
@@ -1302,9 +1314,17 @@ public class LvnConfluenceAutoTradeModule implements
     public void onRealtimeStart() {
         realtimeStarted = true;
         Log.info("LVN realtime started — orders enabled when console trading ON");
-        if (detector.isSnapped() && LvnStrategyState.tradingEnabled()) {
-            placeNearestEntryOrders("realtime");
+        if (!isEs() || !detector.isSnapped()) {
+            return;
         }
+        // Historical tape was ignored for fills; rest nearest entries now so
+        // replay shows working limits even if the study fill time already passed.
+        if (LvnStrategyState.tradingEnabled()) {
+            placeNearestEntryOrders("realtime");
+        } else {
+            Log.info("LVN realtime: Trading OFF — enable console Trading to send SIM limits");
+        }
+        publishLive("realtime armed=" + detector.armedLevels().size());
     }
 
     private void installAccountListener(Api api) {

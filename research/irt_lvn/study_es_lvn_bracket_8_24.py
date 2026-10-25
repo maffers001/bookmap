@@ -23,6 +23,9 @@ on the open (instant first-touch fills).
 ``--market`` ES|NQ (default ES). ``--min-size`` filters resting cluster size
 (contracts); NQ books are much thinner than ES — absolute 100+ is rare.
 
+Fills require the resting side to be traded (sell aggressor hits BID entries;
+buy aggressor lifts ASK entries) — price printing through alone is not enough.
+
     .venv\\Scripts\\python.exe -m research.irt_lvn.study_es_lvn_bracket_8_24 --sl 8 --tp 16 --level-mode outer
     .venv\\Scripts\\python.exe -m research.irt_lvn.study_es_lvn_bracket_8_24 --sl 8 --tp 24 --level-mode outer --min-open-dist 5
     .venv\\Scripts\\python.exe -m research.irt_lvn.study_es_lvn_bracket_8_24 --market NQ --min-size 40 --sl 8 --tp 24 --level-mode outer
@@ -129,15 +132,26 @@ def _fade(
     entry_until_ns: int,
     exit_slip: float,
     commission: float,
+    is_buy_aggressor: np.ndarray | None = None,
 ) -> dict[str, Any] | None:
     """First-touch fade: fill only before ``entry_until_ns``; hold to tape end.
+
+    Entry requires the resting book to be traded:
+      * BID (buy limit): sell-aggressor print at/through ``entry`` (hits the bid)
+      * ASK (sell limit): buy-aggressor print at/through ``entry`` (lifts the ask)
+    A same-side aggressor printing through the level does not fill the limit.
 
     Exits: ``tp`` if target hits; ``sl`` if stop hits first (``sl`` > 0);
     else ``endofsession`` at last print (caller truncates tape at EOS).
     """
     if len(ts) == 0:
         return None
-    fillable = (px <= entry if side == "BID" else px >= entry) & (ts < entry_until_ns)
+    at_level = (px <= entry) if side == "BID" else (px >= entry)
+    if is_buy_aggressor is not None and len(is_buy_aggressor) == len(px):
+        hits_book = (~is_buy_aggressor) if side == "BID" else is_buy_aggressor
+        fillable = at_level & hits_book & (ts < entry_until_ns)
+    else:
+        fillable = at_level & (ts < entry_until_ns)
     if not fillable.any():
         return None
     i = int(np.argmax(fillable))
@@ -368,17 +382,18 @@ def run(
             )
             ts = tr.column("ts_ns").to_numpy().astype(np.int64)
             px = tr.column("price").to_numpy().astype(np.float64) * PTS_PER_TICK
+            buy = tr.column("is_buy_aggressor").to_numpy().astype(bool)
             o = np.argsort(ts, kind="stable")
-            ts, px = ts[o], px[o]
+            ts, px, buy = ts[o], px[o], buy[o]
             open_mid = _open_mid(ts, px, snap_ns)
             # Hold path through EOS; fills gated inside _fade via entry_until_ns
             msk = (ts >= snap_ns) & (ts < eos_ns)
-            tapes[sid] = (ts[msk], px[msk], snap_ns, entry_until_ns, open_mid)
+            tapes[sid] = (ts[msk], px[msk], buy[msk], snap_ns, entry_until_ns, open_mid)
 
         for bname, tp, sl in brackets:
             trades: list[dict[str, Any]] = []
             for lv in levels:
-                ts, px, snap_ns, entry_until_ns, open_mid = tapes[lv["session_id"]]
+                ts, px, buy, snap_ns, entry_until_ns, open_mid = tapes[lv["session_id"]]
                 level_px, level_src = _anchor_level(lv, level_mode=level_mode)
                 if open_mid is None:
                     continue
@@ -393,6 +408,7 @@ def run(
                     ts, px, side=lv["side"], entry=entry, tp=tp, sl=sl,
                     snap_ns=snap_ns, entry_until_ns=entry_until_ns,
                     exit_slip=exit_slip, commission=commission,
+                    is_buy_aggressor=buy,
                 )
                 if trd is None:
                     continue
