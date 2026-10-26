@@ -197,12 +197,19 @@ public class MomentumAutoTradeV2Module implements
     @Parameter(name = "Reverse only if entry OK")
     Boolean reverseOnlyIfEntryOk = false;
 
-    /** Near TP, push TP further by Take profit pts if same-side entry still OK. */
+    /**
+     * Near TP, push TP further by one live bracket if same-side burst still
+     * favourable (EXP-0072). Default OFF — promote only after research PASS.
+     */
     @Parameter(name = "Extend TP if still favourable")
     Boolean extendTpIfFavourable = false;
 
     @Parameter(name = "TP extend proximity (pts)", step = 0.25)
     Double tpExtendProximityPts = 2.0;
+
+    /** Max age of last same-side NQ burst for TP-extend favourability (sec). */
+    @Parameter(name = "TP extend lookback (sec)", step = 1.0)
+    Double tpExtendLookbackSec = 8.0;
 
     /** 0 = unlimited extends per trade. */
     @Parameter(name = "Max TP extends (0=unlimited)", step = 1.0)
@@ -1704,13 +1711,49 @@ public class MomentumAutoTradeV2Module implements
         sendBracketOrder(side > 0, px, true);
     }
 
+    /**
+     * Favourability for TP-extend: recent same-side NQ burst + ES sync.
+     * Deliberately does NOT reuse entry gates (cooldown / flat / CD / regime) —
+     * those made extends almost never fire (burst must be ≤ syncMs old).
+     */
+    private EntryEval stillFavourableForExtend(int side) {
+        InstrumentState nq = byAlias.get(primaryAlias);
+        if (nq == null || nq.burst == null) {
+            return new EntryEval(false, "no_nq", Long.MAX_VALUE);
+        }
+        Burst last = nq.burst.getLastBurst();
+        if (last == null || last.side != side) {
+            return new EntryEval(false, "no_same_side_burst", Long.MAX_VALUE);
+        }
+        long now = nowNs > 0 ? nowNs : System.nanoTime();
+        long ageNs = now - last.tsNs;
+        double lookbackSec = tpExtendLookbackSec == null ? 8.0 : tpExtendLookbackSec;
+        long lookbackNs = (long) (Math.max(0.5, lookbackSec) * 1_000_000_000.0);
+        if (ageNs < 0 || ageNs > lookbackNs) {
+            return new EntryEval(false, "burst_stale", ageNs / 1_000_000L);
+        }
+        InstrumentState es = findByRole("ES");
+        long syncNs = (long) ((syncMs == null ? 1500.0 : syncMs) * 1_000_000.0);
+        if (es == null) {
+            return new EntryEval(false, "no_ES_instrument", Long.MAX_VALUE);
+        }
+        long lagMs = es.burst.lagMsTo(side, now);
+        if (!es.burst.hasRecentBurst(side, now, syncNs)) {
+            return new EntryEval(false, "ES_no_same_side_burst_in_sync", lagMs);
+        }
+        return new EntryEval(true, "ok", lagMs);
+    }
+
     private void maybeExtendTp(InstrumentState nqState) {
         if (!Boolean.TRUE.equals(extendTpIfFavourable)
                 || !Boolean.TRUE.equals(useBrackets)
                 || openSide == 0
-                || tpOrderId == null
                 || api == null
                 || !realtimeStarted) {
+            return;
+        }
+        // Allow tracking expected TP before working LMT id is known; apply when present.
+        if (currentTpPx == 0) {
             return;
         }
 
@@ -1738,11 +1781,13 @@ public class MomentumAutoTradeV2Module implements
         // Must still be approaching TP, not already through it
         boolean throughTp = openSide > 0 ? lastPx >= currentTpPx : lastPx <= currentTpPx;
         if (throughTp) {
+            Log.info("MAT2 TP EXTEND skip through_tp last=" + lastPx + " tp=" + currentTpPx);
             return;
         }
 
-        EntryEval eval = evaluateEntryFromLastBurst(openSide, true);
+        EntryEval eval = stillFavourableForExtend(openSide);
         if (!eval.ok) {
+            Log.info("MAT2 TP EXTEND skip " + eval.reason + " dist=" + String.format("%.2f", dist));
             return;
         }
 
@@ -1750,6 +1795,20 @@ public class MomentumAutoTradeV2Module implements
                 ? liveBracketPts
                 : (takeProfitPts == null ? 10.0 : takeProfitPts);
         double newTp = openSide > 0 ? currentTpPx + tpPts : currentTpPx - tpPts;
+        if (tpOrderId == null) {
+            // Track expected TP; apply updateOrder once working LMT arrives
+            currentTpPx = newTp;
+            tpExtendCount++;
+            tpExtendArmed = false;
+            Log.info(String.format(
+                    "MAT2 TP EXTEND #%d (pending LMT id) %s oldDist=%.2f newTp=%.2f last=%.2f",
+                    tpExtendCount,
+                    openSide > 0 ? "LONG" : "SHORT",
+                    dist,
+                    newTp,
+                    lastPx));
+            return;
+        }
         try {
             OrderMoveParameters move = new OrderMoveParameters.Builder(tpOrderId)
                     .setOrderEntryType(OrderEntryType.AUTO)

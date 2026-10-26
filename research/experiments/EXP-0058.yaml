@@ -1,0 +1,25 @@
+name: EXP-0058
+hypothesis: H49
+title: CFADE microprice / passive entry timer (B1)
+description: >
+  Post-EXP-0054 microprice-only form. On frozen CFADE events, compare
+  (0) marketable at 1-tick slip (baseline),
+  (1) passive join at trigger mid with 1s timeout then market,
+  (2) delay marketable entry <=500ms until NQ microprice favours fade side.
+  First step: depth/MBO coverage audit on clean 113 sessions.
+  Kill: retain >=80% of trades AND lift >=1 tick/trade (~0.25pt) on IS AND OOS.
+  No BBO-agreement timer variable (EXP-0054 closed that).
+
+detector: cfade_entry_timer
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+entry:
+  passive_timeout_ms: 1000
+  microprice_max_delay_ms: 500
+  microprice_favour_eps: 0.0  # microprice on fade side of mid
+kill:
+  min_trade_retain_frac: 0.80
+  min_lift_pts_per_trade: 0.25
+  must_pass_is_and_oos: true
+target_n_events: 459

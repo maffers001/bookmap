@@ -1,0 +1,22 @@
+name: EXP-0059
+hypothesis: H50
+title: Execute frozen CFADE triggers on ES
+description: >
+  Same frozen CFADE event set; trade the ES path with ES-scaled vol brackets
+  (same RR SL1/TP2 clip 4-40 in ES points), ES commission 0.125 pt/RT, 1-tick slip.
+  Nulls: NQ-leg frozen CFADE (parity check), time-matched random on ES.
+  Kill: positive net on IS and OOS after ES costs; 2-tick slip sensitivity better
+  than NQ leg (smaller relative degradation).
+
+detector: cfade_es_venue
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+es:
+  pts_per_tick: 0.25
+  commission_pts_rt: 0.125
+  brackets: vol_rr_sl1_tp2_clip_4_40
+kill:
+  is_net_positive: true
+  oos_net_positive: true
+  slip2_degradation_vs_nq: better

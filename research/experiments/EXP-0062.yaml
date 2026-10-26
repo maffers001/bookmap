@@ -1,0 +1,24 @@
+name: EXP-0062
+hypothesis: H53
+title: Synthetic-basis dislocation ± flow (C1)
+description: >
+  Rolling β (30 min, 1s returns) of NQ on ES; residual r = ΔNQ - β·ΔES over 5s,
+  z-scored. residual_with_flow (NQ aggressor with residual sign) → continuation;
+  residual_without_flow → mean-reversion fade. Null: unconditional residual fade.
+  Twin: NQ-tape-only residual (no ES). Report β instability on roll days.
+  Kill: primary arm beats null and twin on OOS avg; n>=200 events discovery.
+
+detector: basis_dislocation
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+params:
+  beta_window_sec: 1800
+  residual_window_sec: 5
+  z_entry: 2.0
+  cooldown_sec: 30
+  flow_vol_min: 20
+kill:
+  min_events: 200
+  beat_null_oos: true
+  beat_twin_oos: true

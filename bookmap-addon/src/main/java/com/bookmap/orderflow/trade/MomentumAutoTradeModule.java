@@ -197,6 +197,10 @@ public class MomentumAutoTradeModule implements
     @Parameter(name = "TP extend proximity (pts)", step = 0.25)
     Double tpExtendProximityPts = 2.0;
 
+    /** Max age of last same-side NQ burst for TP-extend favourability (sec). */
+    @Parameter(name = "TP extend lookback (sec)", step = 1.0)
+    Double tpExtendLookbackSec = 8.0;
+
     /** 0 = unlimited extends per trade. */
     @Parameter(name = "Max TP extends (0=unlimited)", step = 1.0)
     Double maxTpExtends = 3.0;
@@ -1174,13 +1178,47 @@ public class MomentumAutoTradeModule implements
         sendBracketOrder(side > 0, px, true);
     }
 
+    /**
+     * Favourability for TP-extend: recent same-side NQ burst + ES sync.
+     * Does not reuse entry gates (cooldown / flat / CD / regime).
+     */
+    private EntryEval stillFavourableForExtend(int side) {
+        InstrumentState nq = byAlias.get(primaryAlias);
+        if (nq == null || nq.burst == null) {
+            return new EntryEval(false, "no_nq", Long.MAX_VALUE);
+        }
+        Burst last = nq.burst.getLastBurst();
+        if (last == null || last.side != side) {
+            return new EntryEval(false, "no_same_side_burst", Long.MAX_VALUE);
+        }
+        long now = nowNs > 0 ? nowNs : System.nanoTime();
+        long ageNs = now - last.tsNs;
+        double lookbackSec = tpExtendLookbackSec == null ? 8.0 : tpExtendLookbackSec;
+        long lookbackNs = (long) (Math.max(0.5, lookbackSec) * 1_000_000_000.0);
+        if (ageNs < 0 || ageNs > lookbackNs) {
+            return new EntryEval(false, "burst_stale", ageNs / 1_000_000L);
+        }
+        InstrumentState es = findByRole("ES");
+        long syncNs = (long) ((syncMs == null ? 1500.0 : syncMs) * 1_000_000.0);
+        if (es == null) {
+            return new EntryEval(false, "no_ES_instrument", Long.MAX_VALUE);
+        }
+        long lagMs = es.burst.lagMsTo(side, now);
+        if (!es.burst.hasRecentBurst(side, now, syncNs)) {
+            return new EntryEval(false, "ES_no_same_side_burst_in_sync", lagMs);
+        }
+        return new EntryEval(true, "ok", lagMs);
+    }
+
     private void maybeExtendTp(InstrumentState nqState) {
         if (!Boolean.TRUE.equals(extendTpIfFavourable)
                 || !Boolean.TRUE.equals(useBrackets)
                 || openSide == 0
-                || tpOrderId == null
                 || api == null
                 || !realtimeStarted) {
+            return;
+        }
+        if (currentTpPx == 0) {
             return;
         }
 
@@ -1196,7 +1234,6 @@ public class MomentumAutoTradeModule implements
         double lastPx = PriceTicks.toChartPoints(nqState.lastPrice, pips);
         double dist = Math.abs(lastPx - currentTpPx);
 
-        // Clear debounce when price backs away
         if (dist > proximity * 1.5) {
             tpExtendArmed = true;
             return;
@@ -1205,19 +1242,33 @@ public class MomentumAutoTradeModule implements
             return;
         }
 
-        // Must still be approaching TP, not already through it
         boolean throughTp = openSide > 0 ? lastPx >= currentTpPx : lastPx <= currentTpPx;
         if (throughTp) {
+            Log.info("MAT TP EXTEND skip through_tp last=" + lastPx + " tp=" + currentTpPx);
             return;
         }
 
-        EntryEval eval = evaluateEntryFromLastBurst(openSide, true);
+        EntryEval eval = stillFavourableForExtend(openSide);
         if (!eval.ok) {
+            Log.info("MAT TP EXTEND skip " + eval.reason + " dist=" + String.format("%.2f", dist));
             return;
         }
 
         double tpPts = takeProfitPts == null ? 10.0 : takeProfitPts;
         double newTp = openSide > 0 ? currentTpPx + tpPts : currentTpPx - tpPts;
+        if (tpOrderId == null) {
+            currentTpPx = newTp;
+            tpExtendCount++;
+            tpExtendArmed = false;
+            Log.info(String.format(
+                    "MAT TP EXTEND #%d (pending LMT id) %s oldDist=%.2f newTp=%.2f last=%.2f",
+                    tpExtendCount,
+                    openSide > 0 ? "LONG" : "SHORT",
+                    dist,
+                    newTp,
+                    lastPx));
+            return;
+        }
         try {
             OrderMoveParameters move = new OrderMoveParameters.Builder(tpOrderId)
                     .setOrderEntryType(OrderEntryType.AUTO)

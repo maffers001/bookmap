@@ -1,0 +1,73 @@
+# Phase 0 protocol for CFADE-family similarly-themed investigations (2026-10-26).
+# Frozen before EXP-0057+ outcomes. Do not retune CFADE on this sample.
+
+name: CFADE_FAMILY_PROTOCOL
+next_exp: EXP-0057
+title: CFADE family similarly-themed strategy queue
+
+sample:
+  exclude_sessions: ["200626", "220626"]  # May tapes misfiled as June
+  is_definition: DIG4_23d  # strata/freeze sample; promote only on OOS
+  window: "UK 14:30-17:00"
+  feed: primary_only
+
+frozen_cfade:
+  exhaust:
+    es_imb_max: -0.4
+    es_min_vol: 0
+    use_imb: true
+    use_vol: false
+    nq_min_imbalance: 0.55
+    nq_min_vol: 25
+    nq_min_trades: 6
+  max_wait_sec: 5.0
+  er_max: 0.30
+  brackets: "vol_rr sl1/tp2 k=1 floor=4 cap=40 (independent clip — do NOT uncap)"
+  costs: "1-tick slip, 0.25 pt/RT NQ"
+  flat_only: true
+  signal_cooldown_sec: 5.0
+
+# Filters observed on anatomy OOS (shorts-only, ER 0.10-0.30) are REGISTERED
+# for future months only — never re-scored as promote evidence on the current 90d OOS.
+registered_future_filters:
+  - shorts_only
+  - er_band_0.10_0.30
+
+protocol:
+  count_first:
+    gate_strata_min_trades: 20
+    standalone_entry_min_events: 200
+  mandatory_nulls:
+    - single_market_twin
+    - shifted_es_placebo_plus_60s
+    - time_matched_random_null
+  promote_rule: "beat twin AND placebo on OOS; IS alone never promotes"
+  report_fields:
+    - is_oos_split
+    - twin_placebo_table
+    - days_plus
+    - max_dd
+    - top3_concentration
+    - leave_one_day_out
+    - slip_2tick_sensitivity
+
+closed_do_not_reopen:
+  - H40_H45_tier_a_retunes
+  - uncapped_1_2_or_1_3_brackets
+  - be_trail_timestop_exits
+  - day_kill_rules
+  - late_rth_windows
+  - millisecond_lead_lag
+  - standalone_level_book_fades
+
+queue:
+  - EXP-0057  # B3 combined MAT+CFADE allocator
+  - EXP-0058  # B1 depth audit + microprice entry timer
+  - EXP-0059  # Execute CFADE on ES
+  - EXP-0060  # Role-swapped CFADE
+  - EXP-0061  # Confirmed-burst continuation + hand-off
+  - EXP-0062  # C1 synthetic-basis dislocation
+  - EXP-0063  # C2 normalised effort/result
+  - EXP-0064  # C3 flow-inflection synchrony
+  - EXP-0065  # CFADE second-bar persistence entry
+  - EXP-0066  # Tier D count-first book/MBO

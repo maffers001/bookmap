@@ -104,28 +104,43 @@ def cumulative_delta_features(
     bb_std: float = 2.0,
     slope_lookback: int = 5,
     pullback_frac_of_bb: float = 0.35,
+    *,
+    sma_min_bars: int | None = None,
+    tight_long_zone: tuple[float, float] = (-0.5, 0.2),
+    tight_short_zone: tuple[float, float] = (-0.2, 0.5),
+    away_long: float = 0.5,
+    away_short: float = -0.5,
 ) -> pa.Table:
-    """CD, SMA, Bollinger, MA trend, and pullback-to-MA flags per range bar."""
+    """CD, SMA, Bollinger, MA trend, and pullback-to-MA flags per range bar.
+
+    ``sma_min_bars`` (default = ``sma_len``) requires a full SMA window before
+    SMA/BB/pullback flags are valid — matches discretionary SMA(100). Pass
+    ``sma_min_bars=max(10, sma_len // 4)`` for the legacy expanding-mean behaviour
+    used by EXP-0009 / H6.
+    """
     if range_bars.num_rows == 0:
         return pa.table({})
 
+    min_bars = sma_len if sma_min_bars is None else int(sma_min_bars)
     delta = range_bars.column("delta").to_numpy().astype(np.float64)
     ts = range_bars.column("ts_ns").to_numpy().astype(np.int64)
     cd = np.cumsum(delta)
     n = len(cd)
 
     sma = np.full(n, np.nan)
+    sd_arr = np.full(n, np.nan)
     bb_width = np.full(n, np.nan)
     bb_upper = np.full(n, np.nan)
     bb_lower = np.full(n, np.nan)
     for i in range(n):
         a = max(0, i - sma_len + 1)
         w = cd[a : i + 1]
-        if len(w) < max(10, sma_len // 4):
+        if len(w) < min_bars:
             continue
         m = float(w.mean())
         sd = float(w.std())
         sma[i] = m
+        sd_arr[i] = sd
         bb_upper[i] = m + bb_std * sd
         bb_lower[i] = m - bb_std * sd
         bb_width[i] = 2 * bb_std * sd
@@ -143,14 +158,43 @@ def cumulative_delta_features(
             ma_trend[i] = -1
 
     dist = cd - sma
+    dist_sigma = np.where(
+        np.isfinite(sd_arr) & (sd_arr > 1e-12),
+        dist / sd_arr,
+        np.nan,
+    )
     thr = np.where(np.isfinite(bb_width) & (bb_width > 0), pullback_frac_of_bb * bb_width, np.nan)
     near_ma = np.isfinite(thr) & (np.abs(dist) <= thr)
 
-    # Classic timing (projectdetails):
+    # Classic (H6 / EXP-0009) timing — wide 1.4σ band:
     #   MA up + CD down to MA → long candidate
     #   MA down + CD up to MA → short candidate
     pullback_long = (ma_trend > 0) & near_ma & (dist <= 0)
     pullback_short = (ma_trend < 0) & near_ma & (dist >= 0)
+
+    # Faithful tight pullback (H60): was away, now in discretionary zone.
+    lo_l, hi_l = tight_long_zone
+    lo_s, hi_s = tight_short_zone
+    been_away_long = np.zeros(n, dtype=bool)
+    been_away_short = np.zeros(n, dtype=bool)
+    # Episode = consecutive bars with same non-zero ma_trend
+    run_start = 0
+    for i in range(n):
+        if i == 0 or ma_trend[i] != ma_trend[i - 1] or ma_trend[i] == 0:
+            run_start = i
+        if ma_trend[i] > 0:
+            hist = dist_sigma[run_start:i]
+            been_away_long[i] = bool(np.any(hist > away_long)) if len(hist) else False
+        elif ma_trend[i] < 0:
+            hist = dist_sigma[run_start:i]
+            been_away_short[i] = bool(np.any(hist < away_short)) if len(hist) else False
+
+    in_long_zone = np.isfinite(dist_sigma) & (dist_sigma >= lo_l) & (dist_sigma <= hi_l)
+    in_short_zone = np.isfinite(dist_sigma) & (dist_sigma >= lo_s) & (dist_sigma <= hi_s)
+    tight_pullback_long = (ma_trend > 0) & been_away_long & in_long_zone
+    tight_pullback_short = (ma_trend < 0) & been_away_short & in_short_zone
+    # Arm B absolute cheap: dist_σ ≤ +0.2 (below or only just above MA)
+    cheap_cd = np.isfinite(dist_sigma) & (dist_sigma <= hi_l)
 
     return pa.table({
         "ts_ns": ts,
@@ -163,9 +207,14 @@ def cumulative_delta_features(
         "cd_ma_slope": ma_slope,
         "cd_ma_trend": ma_trend,
         "cd_dist_to_ma": dist,
+        "cd_dist_sigma": dist_sigma,
         "cd_near_ma": near_ma.astype(np.int8),
         "cd_pullback_long": pullback_long.astype(np.int8),
         "cd_pullback_short": pullback_short.astype(np.int8),
+        "cd_tight_pb_long": tight_pullback_long.astype(np.int8),
+        "cd_tight_pb_short": tight_pullback_short.astype(np.int8),
+        "cd_cheap": cheap_cd.astype(np.int8),
+        "cd_sma_ready": np.isfinite(sma).astype(np.int8),
     })
 
 
@@ -258,6 +307,8 @@ def build_cd_series(
     regime_pct_lookback: int = 100,
     wide_pct: float = 0.70,
     narrow_pct: float = 0.30,
+    *,
+    sma_min_bars: int | None = None,
 ) -> pa.Table:
     bars = trades_to_range_bars(trades, range_ticks=range_ticks, tick_size=tick_size)
     cd = cumulative_delta_features(
@@ -265,6 +316,7 @@ def build_cd_series(
         sma_len=sma_len,
         slope_lookback=slope_lookback,
         pullback_frac_of_bb=pullback_frac_of_bb,
+        sma_min_bars=sma_min_bars,
     )
     if annotate_regime and cd.num_rows:
         cd = annotate_bb_regime(
@@ -397,10 +449,12 @@ def lookup_cd_at_events(cd: pa.Table, event_ts_ns: np.ndarray) -> dict[str, np.n
         "cd", "cd_sma", "cd_ma_trend", "cd_ma_slope", "cd_dist_to_ma",
         "cd_near_ma", "cd_pullback_long", "cd_pullback_short", "cd_bb_width",
     ]
-    if "cd_bb_width_pct" in cd.column_names:
-        cols.append("cd_bb_width_pct")
-    if "cd_bb_regime" in cd.column_names:
-        cols.append("cd_bb_regime")
+    for optional in (
+        "cd_bb_width_pct", "cd_bb_regime", "cd_dist_sigma",
+        "cd_tight_pb_long", "cd_tight_pb_short", "cd_cheap", "cd_sma_ready",
+    ):
+        if optional in cd.column_names:
+            cols.append(optional)
     idx = np.searchsorted(cts, event_ts_ns, side="right") - 1
     valid = idx >= 0
     out: dict[str, np.ndarray] = {}
@@ -410,6 +464,51 @@ def lookup_cd_at_events(cd: pa.Table, event_ts_ns: np.ndarray) -> dict[str, np.n
         arr[valid] = src[idx[valid]].astype(np.float64)
         out[name] = arr
     return out
+
+
+def cd_tight_pullback_events(
+    cd: pa.Table,
+    *,
+    cooldown_bars: int = 3,
+) -> pa.Table:
+    """Primary events: first bar of each faithful (tight) CD pullback episode."""
+    if cd.num_rows == 0 or "cd_tight_pb_long" not in cd.column_names:
+        return pa.table({})
+    ts = cd.column("ts_ns").to_numpy().astype(np.int64)
+    pb_l = cd.column("cd_tight_pb_long").to_numpy().astype(np.int8)
+    pb_s = cd.column("cd_tight_pb_short").to_numpy().astype(np.int8)
+    trend = cd.column("cd_ma_trend").to_numpy().astype(np.int8)
+    dist = cd.column("cd_dist_sigma").to_numpy().astype(np.float64)
+
+    events_ts: list[int] = []
+    events_side: list[int] = []
+    events_dist: list[float] = []
+    last_i = -10**9
+    for i in range(len(ts)):
+        if i - last_i < cooldown_bars:
+            continue
+        if pb_l[i] == 1:
+            events_ts.append(int(ts[i]))
+            events_side.append(1)
+            events_dist.append(float(dist[i]) if np.isfinite(dist[i]) else 0.0)
+            last_i = i
+        elif pb_s[i] == 1:
+            events_ts.append(int(ts[i]))
+            events_side.append(-1)
+            events_dist.append(float(dist[i]) if np.isfinite(dist[i]) else 0.0)
+            last_i = i
+    if not events_ts:
+        return pa.table({})
+    return pa.table({
+        "event_ts_ns": np.asarray(events_ts, dtype=np.int64),
+        "side": np.asarray(events_side, dtype=np.int8),
+        "event_type": ["cd_tight_pullback"] * len(events_ts),
+        "cd_dist_sigma": np.asarray(events_dist, dtype=np.float64),
+        "cd_ma_trend": np.asarray(
+            [int(trend[np.searchsorted(ts, t, side="right") - 1]) for t in events_ts],
+            dtype=np.int8,
+        ),
+    })
 
 
 def annotate_dual_cd_fields(

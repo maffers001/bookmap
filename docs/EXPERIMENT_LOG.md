@@ -71,8 +71,52 @@
 | EXP-0054 | H45 BBO/top-3 imbalance agreement state (stratum only) | ran — **reject / park** (matters bar) | DIG4 23d discovery (depth, all 23) | agree_with trades 0 on both books; triggers ~100% mixed; causality PASS; May not read; see notes |
 | EXP-0055 | H46 Opening Range Breakout validated by orderflow | ran — **reject / park** (Stage 2) | Apr–Aug 2026 discovery (69 sessions); Sep–Oct holdout **not read** | Arm B lifts avg vs deeply negative Arm A but kept n 19/17 < 20 and never beats random-skip placebo p90; shifted-ES placebo ≥ real gate; see notes |
 | EXP-0056 | H47 MAT × 50-tick range-bar context | ran — **reject / park** (Stage 2) | Apr–Aug discovery (69 sessions); Sep–Oct holdout **not read** | no primary arm passes; vol_delta avg +0.76 but only 2/5 months net+; see notes |
+| EXP-0057 | H48 MAT+CFADE allocator | ran — **ship (c)** | 113 clean sessions | er60_switch+MAT skip_range175; always-on OOS −472 → (c) OOS +290; see notes |
+| EXP-0058 | H49 CFADE microprice/passive entry | ran — **reject / park** | 98 depth sessions | OOS lifts fail IS leg of kill bar |
+| EXP-0059 | H50 CFADE execute on ES | ran — **reject / park** | 113d | ES OOS −186; slip-robust but not profitable |
+| EXP-0060 | H51 role-swapped CFADE | ran — **reject / park** | 113d | fade-ES and fade-NQ both OOS − |
+| EXP-0061 | H52 confirm-burst continuation | ran — **PASS** | 113d | n=3055 net +815 OOS +577; beats twin/null/D |
+| EXP-0062 | H53 basis dislocation ± flow | ran — **reject / park** | 113d | all arms OOS − |
+| EXP-0063 | H54 effort/result normalised | ran — **reject / park** | 113d | beats twin avg; loses null; OOS − |
+| EXP-0064 | H55 flow-inflection sync | ran — **reject / park** | 113d | beats twin+null avg; OOS net − |
+| EXP-0065 | H56 CFADE persist2 entry | ran — **reject / park** | 113d | retain 2% (n=10) |
+| EXP-0066 | H57 Tier D book counts | ran — **park** | 98 depth | co-pull proxy loose; disagree filter fail |
+| EXP-0067 | H58 MAT context strata | ran — descriptive | 113d | buckets only; rot_0.5_0.9 OOS+; rot_gt_1.1 OOS−; see notes |
+| EXP-0068 | H59 session rot/speed/ATR | ran — **PASS rot_fresh_0.90** | 113d | n=1031 net +501 OOS +212; speed/ATR fail; needs future months |
+| EXP-0069 | H60 faithful CD | ran — **reject / park** | 113d | A/B/C all OOS −; C n_events=256 |
+| EXP-0070 | H61 VWAP dist/vol | ran — **reject / park** | 113d | both OOS net − |
+| EXP-0071 | H62 structural SL | ran — **reject / park** | 113d | WR~23–26%; OOS net − |
+| EXP-0072 | H63 TP-extend | ran — **reject / park** | 113d | OOS avg worse than base; Java default OFF |
+| EXP-0073 | H64 absorb exit | ran — **PASS nq_absorb_exit** | 113d | n=3621 net +832 OOS +460; dual fail; needs path-MFE + future months |
 
 ## Run notes
+
+### 2026-10-26 — MAT context / CD / exits queue (EXP-0067…0073)
+
+- Protocol: `research/experiments/MAT_CONTEXT_PROTOCOL.yaml`; helpers
+  `research/mat_context/`; features `session_rotation.py`, `atr.py`, CD
+  tight/σ, structural-SL helper, `mat_sim` TP-extend.
+- Host: frozen MAT (causal ES, trend+VWAP, vol k=1). CFADE / allocator (c)
+  untouched. Sep–Oct **not** virgin MAT holdout.
+- Synthesis: `results/MAT_CONTEXT_SYNTHESIS/summary.md`.
+- **Survivors (research only, need future months):** (1) EXP-0068
+  `rot_fresh_0.90`; (2) EXP-0073 `nq_absorb_exit`.
+- **Java:** TP-extend decoupled (`stillFavourableForExtend`, 8s lookback,
+  skip logs) in MAT v1/v2; CD SMA warmup 100 bars. Defaults stay OFF.
+- Rejects: faithful CD, VWAP-band, structural SL, TP-extend sim, ATR/speed
+  gates, dual absorb exit.
+
+### 2026-10-26 — CFADE family similarly-themed queue (EXP-0057…0066)
+
+- Protocol: `research/experiments/CFADE_FAMILY_PROTOCOL.yaml`; helpers
+  `research/correlated/cfade_family.py`; clean baseline excl. `200626`/`220626`
+  → CFADE ALL n=459 net **+1210.9**.
+- Synthesis: `results/CFADE_FAMILY_SYNTHESIS/summary.md`.
+- **Survivors for separate Java plan:** (1) EXP-0061 continuation book;
+  (2) EXP-0057 allocator (c). CFADE stays frozen as-is.
+- Notable negatives: MAT alone OOS **−1019** on 113d; `after_mat_sl` n=91
+  net −158 (DIG3 n=12 did not hold); role-swap / ES venue / Tier C tape
+  hunts all fail OOS net.
 
 ### 2026-10-25 — EXP-0056 MAT × 50-tick range-bar context (H47)
 

@@ -440,18 +440,21 @@ Full summary: `docs/TIER_A.md` (Tier A completion summary).
 
 | # | Area | Status / form | First step | Ship path |
 |---|---|---|---|---|
-| B1 | §1.3 Claim B — BBO-imbalance execution timer for CFADE | **OPEN — rank 2 (§6)** (REVIEW §6.3). Delays the marketable entry ≤ 500 ms until imbalance favours the fade side. **Post-EXP-0054:** microprice-only — the A4 agreement state is not an approved timer variable. Needs its own preregistration before any run. | Passive-join vs delayed-marketable vs baseline on the *frozen* CFADE event set, train + May; kill bar in REVIEW §6.3 (retain ≥ 80 % of trades, ≥ 1 tick/trade lift both samples). | Live execution param; directly attacks CFADE's 2-tick-slip death. |
+| B1 | §1.3 Claim B — BBO-imbalance execution timer for CFADE | **DONE reject/park (EXP-0058 / H49).** Microprice OOS lift fails IS leg; passive same. Re-test only on *future* months, no retune. | — | Closed on this sample. |
 | B2 | StackConsume fade × ES context (H34 follow-up) | **OPEN, two honest variants only** (REVIEW §6.6): ES-aggressor-not-pushing-break gate at +2 s, and progress time-stop (+20/30 s, exit if MFE < 5 pt). Both were specified *before* any ES read on this book; the §6.6 kill bar (May avg + ≥ 1 SE **and** maxDD cut) applies. Plus forward-paper on new depth sessions, no retune. | Read the two filters once on the frozen StackConsume event set. | Second gate on the H34 dig book; still shadow/paper until ≥ 2 more untouched months (REVIEW §3.3). |
-| B3 | Combined MAT + CFADE book / allocator + CFADE May anatomy | **OPEN, zero new-signal risk** (EDGE_RANKING §A–C, REVIEW §6.1–6.2). Not an ES/NQ signal, but it is where the correlated research cashes out. Includes the still-unread May reads: side split, `wait_500_2000`, `after_mat_sl`, low-burst-ES-vol strata (DIG3 definitions, read once, no refit), and the ER60-switch vs always-on allocator comparison. | Daily-P&L correlation + combined equity over all ~40 converted sessions; three allocators per REVIEW §6.2. | Portfolio spec; decides live sizing for both existing modules. |
+| B3 | Combined MAT + CFADE book / allocator + CFADE May anatomy | **DONE ship allocator (c) (EXP-0057 / H48).** `er60_switch + MAT skip_range175`; always-on OOS −472 → (c) +290; corr≈0. `after_mat_sl` descriptive fail (n=91 −158). | — | Portfolio rule for live MAT+CFADE sizing. |
 
 ### Tier C — Open new-signal hunts (trades-only; fresh preregistration required)
 
 | # | Area | Status / form | Caution |
 |---|---|---|---|
-| C1 | §3.1 synthetic-basis dislocation ± flow | **OPEN.** Only idea here that yields a *continuous* live signal. Residual-with-flow continues vs residual-without-flow reverts; unconditional residual reversion is the mandatory null, NQ-tape-only residual the twin. | Needs rolling β (30–60 min, 1 s returns); β instability on roll days must be reported, not cleaned away. |
-| C2 | §2.2 effort/result, normalised | **OPEN — rank 4 (§6).** Progress per unit signed volume over 5–30 s, ES as control; pre-register the ES-continuation split (fade vs catch-up) *before* seeing outcomes. | Third absorption-adjacent hunt after H1/H28/H40 failures — target n and MDE in the YAML are mandatory. |
-| C3 | §2.6 flow-inflection synchrony | **OPEN, never tested.** Dual slope sign-change within 1 s vs single-market null. | EMA-slope sign flips are noise-prone; require a minimum post-inflection slope magnitude, frozen a priori. |
+| C1 | §3.1 synthetic-basis dislocation ± flow | **DONE reject/park (EXP-0062 / H53).** All arms OOS negative. | Closed. |
+| C2 | §2.2 effort/result, normalised | **DONE reject/park (EXP-0063 / H54).** Beats twin avg; loses null; OOS net −. | Closed. |
+| C3 | §2.6 flow-inflection synchrony | **DONE reject/park (EXP-0064 / H55).** Beats twin+null avg; OOS net −. | Closed. |
 | C4 | §2.5 multi-second correlated absorption | **CONDITIONAL — one permitted resurrection** (EDGE_RANKING Tier 4 note, EXP-0035 post-mortem): ≥ 3 s execute-into a *tracked level*, ES confirming over the same seconds. This is a different construction from H28's 100 ms bars, not a retune. One attempt, pre-registered, then closed either way. | Heaviest Tier-C build (depth + level tracker); do not start until A-tier is exhausted. |
+| C5 | Confirm-burst continuation + ES-against exit | **DONE PASS (EXP-0061 / H52).** n=3055 net +815 OOS +577 avg +0.23; beats twin/null/D. Thin avg — Java shortlist with CFADE hand-off. | Ship candidate (separate plan). |
+| C6 | Role-swapped CFADE / ES venue | **DONE reject (EXP-0060 / H51, EXP-0059 / H50).** | Closed. |
+| C7 | CFADE persist2 entry | **DONE reject (EXP-0065 / H56).** retain 2%. | Closed. |
 
 ### Tier D — Conditional: book/MBO ideas (count first; filter/feature form only)
 
@@ -461,9 +464,9 @@ is the right to serve as *filters, timers, or features on tape triggers*:
 
 | # | Area | Condition |
 |---|---|---|
-| D1 | §1.1 co-pull / §1.2 co-stack | **Count first:** dual-pull / dual-stack event counts on the 15 depth sessions. Only if n ≥ 200: stratify frozen MAT/CFADE outcomes by co-pull/co-stack state at trigger. No standalone entry test. |
-| D2 | §1.5 correlated iceberg / §1.6 paired large orders (+ §3.3 price-equivalence map) | **Descriptive first:** build §3.3's β-map and report its error distribution; count paired-iceberg / paired-large events (REVIEW §6.7 iceberg-as-feature, δ ≥ 0.2 kill bar). Feature-on-trigger only; the H36/H37 open-book level results say the standalone form is dead. |
-| D3 | §1.4 book-pressure divergence (NQ lean vs ES lean ≥ 2 s) | **Filter form only:** does the state at a MAT trigger predict MAT failure (fade-the-lean as an *exit/skip* stratum)? Standalone spoof-fade entry is closed with the rest of §1. |
+| D1 | §1.1 co-pull / §1.2 co-stack | **DONE count (EXP-0066):** proxy n≫200 but too sensitive (1.3M events); no auto-promote. Needs tighter MBO-resolved cancel definition before filter dig. |
+| D2 | §1.5 correlated iceberg / §1.6 paired large orders (+ §3.3 price-equivalence map) | **Still descriptive:** MBO on 98/113; detector deferred pending tighter D1. Feature-on-trigger only. |
+| D3 | §1.4 book-pressure divergence (NQ lean vs ES lean ≥ 2 s) | **DONE park (EXP-0066):** CFADE/MAT disagree stratum fails OOS lift ≥+1.0. Standalone spoof-fade remains closed. |
 | D4 | §4.2 divergence-persistence anatomy | **Descriptive only, bundled:** lifetime of D-exceedances + which market resolves. Run only as an appendix to A1/C1 if their design needs it (see §6 rank 3 note); produces no trade alone. |
 | D5 | §4.1 which-market-in-charge (slow state) | **Allocator form only.** As a *timing* signal it is closed with the H18/H22/H23 family (§6). As a slow daily/h hourly allocator input it folds into B3 — test it there, not as its own experiment. |
 
@@ -497,9 +500,10 @@ evening session 17:00–21:00, loss-clustering/daily-stop design, ES-as-venue
 §6.8, pre-open day-type prior §6.9) remains documented there and is
 unchanged by EXP-0049/0050; none of it outranks Tier A/B.
 
-**Next action:** Tier A is complete (A1–A4 reject/park, EXP-0051–0054).
-Pre-register Tier B B1 (§1.3 Claim B) as its own experiment — microprice-
-only execution timer on the frozen CFADE event set, REVIEW §6.3 kill bar
-(retain ≥ 80 % of trades, ≥ 1 tick/trade lift on train **and** May).
-Do not reopen any Tier A item by loosening cuts/windows/carried cells on
-the DIG4 sample.
+**Next action (updated 2026-10-26):** CFADE-family queue EXP-0057–0066
+complete — synthesis in `results/CFADE_FAMILY_SYNTHESIS/`. Survivors:
+allocator (c) for live MAT+CFADE sizing, and EXP-0061 continuation book
+(Java shortlist). Still open in this map: B2 StackConsume ES-context,
+C4 multi-second absorption (one shot), tighter D1/D2 MBO features,
+legacy EXP-0033 / EXP-0020. Do not reopen Tier A or rejected C1–C3/C6–C7
+by retuning on this sample.

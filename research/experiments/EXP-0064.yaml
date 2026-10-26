@@ -1,0 +1,10 @@
+name: EXP-0064
+hypothesis: H55
+title: Flow-inflection synchrony (C3)
+description: >
+  Dual EMA cumulative-delta slope sign-change within 1s vs NQ-only twin.
+  Kill: dual beats twin+null on OOS; n>=200.
+detector: flow_inflection_sync
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d

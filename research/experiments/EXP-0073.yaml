@@ -1,0 +1,18 @@
+name: EXP-0073
+hypothesis: H64
+title: Opposite-side absorption exit after min-TP (0.5R MFE)
+description: >
+  After MAT entry, first opposite-side NQ absorption bar with MFE >= 0.5×TP
+  forces market exit (existing exit_fn). Twin: dual ES+NQ absorption.
+  Do not stack with TP-extend. Kill vs base MAT + null.
+detector: mat_absorb_exit
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+arms: [nq_absorb_exit, dual_absorb_exit]
+kill:
+  oos_net_positive: true
+  beat_base_oos_avg: true
+  beat_null_oos_avg: true
+  min_n: 50
+runner: python -m research.mat_context.run_queue --exp EXP-0073

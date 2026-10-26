@@ -103,7 +103,21 @@ class SessionState:
     prev_size: dict[tuple[str, int], int] = field(default_factory=dict)
 
 
-def _nearest_lvn(bars, t_ns: int, centre_pts: float) -> tuple[str, float, float] | None:
+def _nearest_lvn(
+    bars,
+    t_ns: int,
+    centre_pts: float,
+    stack=None,
+) -> tuple[str, float, float] | None:
+    """Nearest LVN to ``centre_pts``.
+
+    Prefer the developing stack (all valleys in the trailing profile) when
+    provided; otherwise fall back to IRT export LVN2/LVN3 as-of ``t_ns``.
+    """
+    if stack is not None:
+        hit = stack.nearest(t_ns, centre_pts)
+        if hit is not None:
+            return hit
     bi = _asof_idx(bars.ts_ns, t_ns)
     levels = [(lid, px) for kind, lid, px in _active_levels(bars, bi) if kind == KIND_LVN]
     if not levels:
@@ -183,6 +197,7 @@ def run_session(
     end_ns: int,
     max_arm_s: float,
     min_age_s: float = 0.0,
+    stack=None,
 ) -> tuple[list[dict], dict[str, int]]:
     """Detect + simulate one ES session. Returns trades and census."""
     y, m, d = session_id_to_ymd(sid)
@@ -270,7 +285,7 @@ def run_session(
             return
         if side == "ASK" and centre <= mid_pts:
             return
-        lv = _nearest_lvn(bars, t_ns, centre)
+        lv = _nearest_lvn(bars, t_ns, centre, stack=stack)
         if lv is None or lv[2] > near_lvn_pts:
             return
         # fresh: crossed threshold (prev < thr <= sz) or brand new
@@ -419,10 +434,16 @@ def estimate_large_thr(pq_dir: Path, sid: str, open_ns: int, *, pct: float, floo
 
 def run(*, month: str, out_dir: Path, min_dist: float, near_lvn: float,
         offset: float, tp: float, sl: float, large_pct: float, large_floor: int,
-        max_arm_min: float, until: str = "17:00", min_age_min: float = 0.0) -> None:
+        max_arm_min: float, until: str = "17:00", min_age_min: float = 0.0,
+        lvn_stack: Path | None = None) -> None:
     cfg = load_config()
     pq_dir = Path(cfg["parquet_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
+    stack = None
+    if lvn_stack is not None:
+        from research.irt_lvn.lvn_stack import load_stack_csv
+        stack = load_stack_csv(Path(lvn_stack))
+        print(f"LVN stack loaded: {lvn_stack} ({len(stack.ts_ns)} snaps)", flush=True)
     y_sel, m_sel = (int(x) for x in month.split("-")[:2])
 
     irt = load_irt_csv(default_irt_paths(ROOT)["ES"])
@@ -459,6 +480,7 @@ def run(*, month: str, out_dir: Path, min_dist: float, near_lvn: float,
             offset=offset, tp=tp, sl=sl, open_ns=open_ns, end_ns=end_ns,
             max_arm_s=max_arm_min * 60.0,
             min_age_s=min_age_min * 60.0,
+            stack=stack,
         )
         print(
             f"    armed={cen['armed']} fills={cen['fills']} pulled={cen['pulled']} "
@@ -577,6 +599,11 @@ def main() -> None:
         "--until", default="17:00",
         help="UK clock: arm/fill window end (default 17:00)",
     )
+    ap.add_argument(
+        "--lvn-stack",
+        default=None,
+        help="Optional LVN_STACK_ES.csv from build_lvn_stack (all valleys as-of arm)",
+    )
     args = ap.parse_args()
     run(
         month=args.month,
@@ -591,6 +618,7 @@ def main() -> None:
         max_arm_min=args.max_arm_min,
         until=args.until,
         min_age_min=args.min_age_min,
+        lvn_stack=Path(args.lvn_stack) if args.lvn_stack else None,
     )
 
 

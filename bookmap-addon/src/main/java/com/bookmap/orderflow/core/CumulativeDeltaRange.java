@@ -11,9 +11,12 @@ public final class CumulativeDeltaRange {
 
     private final double rangePts;
     private final int smaLen;
+    private final int smaMinBars;
     private final int slopeLookback;
-    private final double pullbackFracOfBb;
+    private double pullbackFracOfBb;
     private final double bbStd;
+    /** When true, long zone is dist_σ in [−0.5,+0.2]; short [−0.2,+0.5] (H60). */
+    private boolean asymmetricTight;
 
     private double o, h, l, c;
     private double buyVol, sellVol;
@@ -25,26 +28,49 @@ public final class CumulativeDeltaRange {
     private double cdSum;
     private double lastCd;
     private double lastSma = Double.NaN;
+    private double lastSd = Double.NaN;
     private double lastBbWidth = Double.NaN;
     private double smaSlope = Double.NaN;
     private int maTrend; // +1 / -1 / 0
     private boolean pullbackLong;
     private boolean pullbackShort;
+    private boolean tightPullbackLong;
+    private boolean tightPullbackShort;
+    private double distSigma = Double.NaN;
 
     // ring of recent SMA for slope
     private final double[] smaRing;
     private int smaCount;
     private int smaHead;
 
+    // episode tracking for "was away" (tight pullback)
+    private double episodeMaxDistSigma = Double.NaN;
+    private double episodeMinDistSigma = Double.NaN;
+    private int episodeTrend;
+
     public CumulativeDeltaRange(int rangeTicks, double tickSize, int smaLen,
+                                int slopeLookback, double pullbackFracOfBb) {
+        this(rangeTicks, tickSize, smaLen, smaLen, slopeLookback, pullbackFracOfBb);
+    }
+
+    public CumulativeDeltaRange(int rangeTicks, double tickSize, int smaLen, int smaMinBars,
                                 int slopeLookback, double pullbackFracOfBb) {
         this.rangePts = Math.max(1, rangeTicks) * tickSize;
         this.smaLen = Math.max(10, smaLen);
+        this.smaMinBars = Math.max(1, smaMinBars);
         this.slopeLookback = Math.max(1, slopeLookback);
         this.pullbackFracOfBb = pullbackFracOfBb;
         this.bbStd = 2.0;
         this.cdRing = new double[this.smaLen];
         this.smaRing = new double[this.slopeLookback + 2];
+    }
+
+    public void setPullbackFracOfBb(double frac) {
+        this.pullbackFracOfBb = frac;
+    }
+
+    public void setAsymmetricTight(boolean on) {
+        this.asymmetricTight = on;
     }
 
     public void onTrade(double price, int size, boolean buyAggressor) {
@@ -91,8 +117,11 @@ public final class CumulativeDeltaRange {
 
     private void updateSmaBb() {
         int n = cdCount;
-        if (n < Math.max(10, smaLen / 4)) {
+        // Default smaMinBars == smaLen → full SMA(100) before valid (H60).
+        // Legacy H6 used max(10, smaLen/4); pass that as smaMinBars if needed.
+        if (n < smaMinBars) {
             lastSma = Double.NaN;
+            lastSd = Double.NaN;
             lastBbWidth = Double.NaN;
             return;
         }
@@ -104,6 +133,7 @@ public final class CumulativeDeltaRange {
         }
         double sd = Math.sqrt(var / n);
         lastSma = mean;
+        lastSd = sd;
         lastBbWidth = 2 * bbStd * sd;
         pushSma(mean);
     }
@@ -134,9 +164,13 @@ public final class CumulativeDeltaRange {
     private void updateTrendAndPullback() {
         pullbackLong = false;
         pullbackShort = false;
+        tightPullbackLong = false;
+        tightPullbackShort = false;
         maTrend = 0;
         smaSlope = Double.NaN;
-        if (Double.isNaN(lastSma) || Double.isNaN(lastBbWidth) || lastBbWidth <= 0) {
+        distSigma = Double.NaN;
+        if (Double.isNaN(lastSma) || Double.isNaN(lastBbWidth) || lastBbWidth <= 0
+                || Double.isNaN(lastSd) || lastSd <= 1e-12) {
             return;
         }
         double past = smaAtOffset(slopeLookback);
@@ -149,6 +183,7 @@ public final class CumulativeDeltaRange {
             }
         }
         double dist = lastCd - lastSma;
+        distSigma = dist / lastSd;
         double thr = pullbackFracOfBb * lastBbWidth;
         boolean near = Math.abs(dist) <= thr;
         if (maTrend > 0 && near && dist <= 0) {
@@ -156,6 +191,32 @@ public final class CumulativeDeltaRange {
         }
         if (maTrend < 0 && near && dist >= 0) {
             pullbackShort = true;
+        }
+
+        // Episode "was away" tracking for tight pullback (H60)
+        if (maTrend != episodeTrend) {
+            episodeTrend = maTrend;
+            episodeMaxDistSigma = distSigma;
+            episodeMinDistSigma = distSigma;
+        } else {
+            if (!Double.isNaN(distSigma)) {
+                if (Double.isNaN(episodeMaxDistSigma) || distSigma > episodeMaxDistSigma) {
+                    episodeMaxDistSigma = distSigma;
+                }
+                if (Double.isNaN(episodeMinDistSigma) || distSigma < episodeMinDistSigma) {
+                    episodeMinDistSigma = distSigma;
+                }
+            }
+        }
+        if (asymmetricTight) {
+            boolean beenAwayLong = !Double.isNaN(episodeMaxDistSigma) && episodeMaxDistSigma > 0.5;
+            boolean beenAwayShort = !Double.isNaN(episodeMinDistSigma) && episodeMinDistSigma < -0.5;
+            if (maTrend > 0 && beenAwayLong && distSigma >= -0.5 && distSigma <= 0.2) {
+                tightPullbackLong = true;
+            }
+            if (maTrend < 0 && beenAwayShort && distSigma >= -0.2 && distSigma <= 0.5) {
+                tightPullbackShort = true;
+            }
         }
     }
 
@@ -169,6 +230,18 @@ public final class CumulativeDeltaRange {
 
     public boolean isPullbackShort() {
         return pullbackShort;
+    }
+
+    public boolean isTightPullbackLong() {
+        return tightPullbackLong;
+    }
+
+    public boolean isTightPullbackShort() {
+        return tightPullbackShort;
+    }
+
+    public double getDistSigma() {
+        return distSigma;
     }
 
     public double getCd() {
@@ -187,10 +260,15 @@ public final class CumulativeDeltaRange {
         cdSum = 0;
         lastCd = 0;
         lastSma = Double.NaN;
+        lastSd = Double.NaN;
         lastBbWidth = Double.NaN;
         smaSlope = Double.NaN;
+        distSigma = Double.NaN;
         maTrend = 0;
         pullbackLong = pullbackShort = false;
+        tightPullbackLong = tightPullbackShort = false;
+        episodeMaxDistSigma = episodeMinDistSigma = Double.NaN;
+        episodeTrend = 0;
         smaCount = smaHead = 0;
         for (int i = 0; i < cdRing.length; i++) {
             cdRing[i] = 0;

@@ -858,3 +858,99 @@ def validate_session_invariants(
         if bad.any():
             errors.append(f"prior context ends after event on {int(bad.sum())} rows")
     return errors
+
+
+def nearest_supporting_node(
+    profile: pa.Table,
+    bar_id: int,
+    *,
+    entry_ticks: float,
+    side: int,
+    mode: str = "vol",
+    node_percentile: float = 70.0,
+    max_search_pts: float = 30.0,
+    pts_per_tick: float = TICK_PTS,
+) -> float | None:
+    """Nearest volume/delta shelf *behind* the trade in the given bar profile.
+
+    Long (side>0): search prices below entry; stop = node − 1 tick.
+    Short: search above entry; stop = node + 1 tick.
+    ``mode``: ``vol`` (total_vol ≥ pN), ``delta`` (buy-delta ≥ pN for long /
+    sell-delta abs ≥ pN for short), ``vol_or_delta``.
+    Returns stop price in chart points, or None if no node within max_search.
+    """
+    if profile.num_rows == 0:
+        return None
+    mask = profile.column("bar_id").to_numpy() == int(bar_id)
+    if not mask.any():
+        return None
+    ticks = profile.column("price_tick").to_numpy()[mask].astype(np.float64)
+    tot = profile.column("total_vol").to_numpy()[mask].astype(np.float64)
+    buy = profile.column("buy_vol").to_numpy()[mask].astype(np.float64)
+    sell = profile.column("sell_vol").to_numpy()[mask].astype(np.float64)
+    delta = buy - sell
+    max_ticks = max_search_pts / pts_per_tick
+
+    vol_thr = float(np.percentile(tot, node_percentile)) if len(tot) else 0.0
+    if side > 0:
+        delta_thr = float(np.percentile(delta, node_percentile)) if len(delta) else 0.0
+        behind = ticks < entry_ticks
+        candidates = []
+        for i in np.where(behind)[0]:
+            dist = entry_ticks - ticks[i]
+            if dist > max_ticks or dist <= 0:
+                continue
+            vol_ok = tot[i] >= vol_thr
+            delta_ok = delta[i] >= delta_thr
+            if mode == "vol" and not vol_ok:
+                continue
+            if mode == "delta" and not delta_ok:
+                continue
+            if mode == "vol_or_delta" and not (vol_ok or delta_ok):
+                continue
+            candidates.append((dist, ticks[i]))
+        if not candidates:
+            return None
+        node = min(candidates, key=lambda x: x[0])[1]
+        return (node - 1.0) * pts_per_tick
+    else:
+        # short: sell pressure above entry
+        neg_delta = -delta
+        delta_thr = float(np.percentile(neg_delta, node_percentile)) if len(neg_delta) else 0.0
+        behind = ticks > entry_ticks
+        candidates = []
+        for i in np.where(behind)[0]:
+            dist = ticks[i] - entry_ticks
+            if dist > max_ticks or dist <= 0:
+                continue
+            vol_ok = tot[i] >= vol_thr
+            delta_ok = neg_delta[i] >= delta_thr
+            if mode == "vol" and not vol_ok:
+                continue
+            if mode == "delta" and not delta_ok:
+                continue
+            if mode == "vol_or_delta" and not (vol_ok or delta_ok):
+                continue
+            candidates.append((dist, ticks[i]))
+        if not candidates:
+            return None
+        node = min(candidates, key=lambda x: x[0])[1]
+        return (node + 1.0) * pts_per_tick
+
+
+def structural_sl_pts(
+    entry_px_pts: float,
+    stop_px_pts: float | None,
+    side: int,
+    *,
+    fallback_sl: float,
+    clip_floor: float = 4.0,
+    clip_cap: float = 40.0,
+) -> float:
+    """Convert absolute stop price to clipped SL offset; fall back if missing."""
+    if stop_px_pts is None or not np.isfinite(stop_px_pts):
+        return float(np.clip(fallback_sl, clip_floor, clip_cap))
+    raw = abs(entry_px_pts - stop_px_pts)
+    if raw <= 0:
+        return float(np.clip(fallback_sl, clip_floor, clip_cap))
+    return float(np.clip(raw, clip_floor, clip_cap))

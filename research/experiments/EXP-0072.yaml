@@ -1,0 +1,18 @@
+name: EXP-0072
+hypothesis: H63
+title: TP-extend when same-side burst still favourable near TP
+description: >
+  Simulate dynamic TP-extend (proximity 2 pts, lookback 8s, max 3 extends,
+  step = live bracket). SL unchanged. Live Java fix defaults OFF; promote
+  only if OOS avg beats base MAT. Arms: extend_8s_2pt, extend_8s_2pt_max3.
+detector: mat_tp_extend
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+arms: [extend_8s_2pt, extend_8s_2pt_max3]
+kill:
+  oos_net_positive: true
+  beat_base_oos_avg: true
+  beat_null_oos_avg: true
+  min_n: 50
+runner: python -m research.mat_context.run_queue --exp EXP-0072

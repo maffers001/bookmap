@@ -7,9 +7,11 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -19,6 +21,7 @@ import java.util.Set;
 
 import com.bookmap.orderflow.core.InstrumentClassifier;
 import com.bookmap.orderflow.core.LvnLevelFile;
+import com.bookmap.orderflow.core.LvnStackFile;
 import com.bookmap.orderflow.core.OpenClusterDetector;
 import com.bookmap.orderflow.core.OpenClusterDetector.ArmedLevel;
 import com.bookmap.orderflow.core.OpenClusterDetector.LevelState;
@@ -132,6 +135,11 @@ public class LvnConfluenceAutoTradeModule implements
     private Indicator hvn3Marker;
     private Indicator openMarker;
     private Indicator vpocMarker;
+    /** Developing stack slots (pre-registered; unused → NaN). */
+    private final Indicator[] lvnAboveMarkers = new Indicator[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
+    private final Indicator[] lvnBelowMarkers = new Indicator[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
+    private final double[] lvnAboveIconPx = new double[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
+    private final double[] lvnBelowIconPx = new double[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
     /** Last price we stamped an on-chart text icon for (re-stamp when it changes). */
     private double lvn2IconPx = Double.NaN;
     private double lvn3IconPx = Double.NaN;
@@ -199,6 +207,16 @@ public class LvnConfluenceAutoTradeModule implements
         shortMarker = api.registerIndicator("Next Short", GraphType.PRIMARY, Double.NaN, true, true);
         lvn2Marker = api.registerIndicator("LVN2", GraphType.PRIMARY, Double.NaN, true, true);
         lvn3Marker = api.registerIndicator("LVN3", GraphType.PRIMARY, Double.NaN, true, true);
+        for (int i = 0; i < LvnStackFile.MAX_DISPLAY_EACH_SIDE; i++) {
+            lvnAboveMarkers[i] = api.registerIndicator(
+                    "LVN Above " + (i + 1), GraphType.PRIMARY, Double.NaN, true, true);
+            lvnBelowMarkers[i] = api.registerIndicator(
+                    "LVN Below " + (i + 1), GraphType.PRIMARY, Double.NaN, true, true);
+            styleLevelLine(lvnAboveMarkers[i], COL_LVN, 50);
+            styleLevelLine(lvnBelowMarkers[i], COL_LVN, 50);
+            lvnAboveIconPx[i] = Double.NaN;
+            lvnBelowIconPx[i] = Double.NaN;
+        }
         hvn1Marker = api.registerIndicator("HVN1", GraphType.PRIMARY, Double.NaN, true, true);
         hvn2Marker = api.registerIndicator("HVN2", GraphType.PRIMARY, Double.NaN, true, true);
         hvn3Marker = api.registerIndicator("HVN3", GraphType.PRIMARY, Double.NaN, true, true);
@@ -261,8 +279,23 @@ public class LvnConfluenceAutoTradeModule implements
     }
 
     private void applyLevelsToDetector() {
+        if (detector == null) {
+            return;
+        }
+        LvnStackFile.Stack stack = LvnStrategyState.stackFor(instrumentRole);
+        if (stack != null && !stack.isEmpty()) {
+            LocalDateTime asOf = ukTime(nowNs).toLocalDateTime();
+            List<Double> all = stack.allPricesAsOf(asOf);
+            if (all.isEmpty() && !stack.snapshots.isEmpty()) {
+                all = stack.snapshots.get(stack.snapshots.size() - 1).prices;
+            }
+            if (!all.isEmpty()) {
+                detector.setLvns(all);
+                return;
+            }
+        }
         LvnLevelFile.Levels lv = LvnStrategyState.levelsFor(instrumentRole);
-        if (lv != null && detector != null) {
+        if (lv != null) {
             detector.setLvns(lv.lvn2, lv.lvn3);
         }
     }
@@ -464,7 +497,7 @@ public class LvnConfluenceAutoTradeModule implements
         detector.config().offsetPts = s.offsetPts;
         detector.config().nearLvnPts = s.nearLvnPts;
         detector.config().minOpenDistPts = s.minOpenDistPts;
-        detector.setLvns(lv.lvn2, lv.lvn3);
+        applyLevelsToDetector(); // stack if loaded, else LVN2/3 from export
 
         Double mid = detector.midPts();
         double openMid = mid == null ? 0.0 : mid;
@@ -1011,8 +1044,62 @@ public class LvnConfluenceAutoTradeModule implements
 
     /** Draw this chart's market LVNs when console toggle is on. */
     private void plotLvnLines() {
+        if (!LvnStrategyState.showLvnsOnChart()) {
+            hideLine(lvn2Marker);
+            hideLine(lvn3Marker);
+            hideStackSlots();
+            return;
+        }
+        LvnStrategyState.Settings s = LvnStrategyState.settings();
+        LvnStackFile.Stack stack = LvnStrategyState.stackFor(instrumentRole);
+        Double mid = detector != null ? detector.midPts() : null;
+        if (stack != null && !stack.isEmpty() && mid != null && mid > 0) {
+            // Prefer developing stack: nearest N above / below mid
+            hideLine(lvn2Marker);
+            hideLine(lvn3Marker);
+            LocalDateTime asOf = ukTime(nowNs).toLocalDateTime();
+            List<Double> selected = stack.selectAround(asOf, mid, s.lvnAbove, s.lvnBelow);
+            List<Double> below = new java.util.ArrayList<>();
+            List<Double> above = new java.util.ArrayList<>();
+            for (double px : selected) {
+                if (px < mid - 1e-9) {
+                    below.add(px);
+                } else if (px > mid + 1e-9) {
+                    above.add(px);
+                }
+            }
+            // nearest below first (highest), nearest above first (lowest)
+            below.sort((a, b) -> Double.compare(b, a));
+            above.sort(Double::compare);
+            for (int i = 0; i < LvnStackFile.MAX_DISPLAY_EACH_SIDE; i++) {
+                if (i < s.lvnBelow && i < below.size()) {
+                    lvnBelowIconPx[i] = plotLevel(
+                            lvnBelowMarkers[i], lvnBelowIconPx[i], below.get(i), COL_LVN);
+                } else {
+                    hideLine(lvnBelowMarkers[i]);
+                    lvnBelowIconPx[i] = Double.NaN;
+                }
+                if (i < s.lvnAbove && i < above.size()) {
+                    lvnAboveIconPx[i] = plotLevel(
+                            lvnAboveMarkers[i], lvnAboveIconPx[i], above.get(i), COL_LVN);
+                } else {
+                    hideLine(lvnAboveMarkers[i]);
+                    lvnAboveIconPx[i] = Double.NaN;
+                }
+            }
+            if (Boolean.TRUE.equals(verboseLog) && !loggedLvnPlot) {
+                loggedLvnPlot = true;
+                Log.info(String.format(Locale.US,
+                        "LVN stack lines %s above=%d below=%d mid=%.2f",
+                        instrumentRole, Math.min(s.lvnAbove, above.size()),
+                        Math.min(s.lvnBelow, below.size()), mid));
+            }
+            return;
+        }
+        // Fallback: frozen LVN2/LVN3 from IRT chart export
+        hideStackSlots();
         LvnLevelFile.Levels lv = LvnStrategyState.levelsFor(instrumentRole);
-        if (!LvnStrategyState.showLvnsOnChart() || lv == null || !lv.hasAny()) {
+        if (lv == null || !lv.hasAny()) {
             hideLine(lvn2Marker);
             hideLine(lvn3Marker);
             return;
@@ -1024,6 +1111,19 @@ public class LvnConfluenceAutoTradeModule implements
             Log.info(String.format(Locale.US,
                     "LVN chart lines %s at %.2f / %.2f (price tags via icon)",
                     instrumentRole, lv.lvn2, lv.lvn3));
+        }
+    }
+
+    private void hideStackSlots() {
+        for (int i = 0; i < LvnStackFile.MAX_DISPLAY_EACH_SIDE; i++) {
+            if (lvnAboveMarkers[i] != null) {
+                hideLine(lvnAboveMarkers[i]);
+            }
+            if (lvnBelowMarkers[i] != null) {
+                hideLine(lvnBelowMarkers[i]);
+            }
+            lvnAboveIconPx[i] = Double.NaN;
+            lvnBelowIconPx[i] = Double.NaN;
         }
     }
 

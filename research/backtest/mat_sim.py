@@ -56,6 +56,12 @@ class MatSimConfig:
     trail_frac: float = 0.0  # if >0: trail = frac * bracket
     # Optional CD pullback gate (mirrors live Require CD pullback)
     cd_gate: bool = False
+    # TP-extend (H63 / EXP-0072): step TP by one bracket when near TP with
+    # a same-side burst in lookback. SL unchanged. Defaults off.
+    tp_extend_proximity_pts: float = 0.0
+    tp_extend_lookback_sec: float = 8.0
+    tp_extend_max: int = 3
+    tp_extend_step_pts: float = 0.0  # 0 = use current tp_pts as step
 
 
 @dataclass
@@ -169,16 +175,27 @@ def _simulate_path(
     trail_pts: float = 0.0,
     force_exit_ns: int = 0,
     force_reason: str = "force",
+    tp_extend_proximity_pts: float = 0.0,
+    tp_extend_lookback_sec: float = 8.0,
+    tp_extend_max: int = 3,
+    tp_extend_step_pts: float = 0.0,
+    burst_ts: np.ndarray | None = None,
+    burst_side: np.ndarray | None = None,
 ) -> tuple[float, float, bool, int, str]:
     """Return exit_px, pnl, win, bars_held, reason.
 
-    Optional exits (defaults off): ``time`` / ``be`` / ``trail``. Stop hits are
-    conservative vs TP when both print on the same bar.
+    Optional exits (defaults off): ``time`` / ``be`` / ``trail`` / ``tp_extend``.
+    Stop hits are conservative vs TP when both print on the same bar.
 
     ``force_exit_ns`` (absolute ns, 0 = off): market-exit at the first print at or
     after that timestamp, unless TP/SL already resolved on an earlier print (or on
     that same print — stop/TP still win the tie). Used for signal-driven exits
     such as the correlated-exhaustion rule (EXP-0036).
+
+    TP-extend: when price is within ``tp_extend_proximity_pts`` of TP and a
+    same-side burst closed within ``tp_extend_lookback_sec``, step TP out by
+    ``tp_extend_step_pts`` (default = initial ``tp_pts``). SL unchanged. Debounce
+    until price backs away to 1.5× proximity.
     """
     entry = float(path_px[entry_i]) + side * slip_pts  # worse fill
     entry_ts = int(path_ts[entry_i])
@@ -189,9 +206,15 @@ def _simulate_path(
     trail_armed = False
     best = entry
     time_ns = int(time_stop_sec * 1e9) if time_stop_sec and time_stop_sec > 0 else 0
+    extend_count = 0
+    extend_armed = True
+    step = tp_extend_step_pts if tp_extend_step_pts > 0 else tp_pts
+    lookback_ns = int(tp_extend_lookback_sec * 1e9) if tp_extend_lookback_sec > 0 else 0
+    prox = tp_extend_proximity_pts if tp_extend_proximity_pts > 0 else 0.0
 
     for j in range(entry_i + 1, len(path_ts)):
         px = float(path_px[j])
+        now = int(path_ts[j])
         # Update best / BE / trail before hit checks
         if side > 0:
             best = max(best, px)
@@ -219,6 +242,34 @@ def _simulate_path(
                 else:
                     sl = min(sl, trail_sl)
 
+        # TP-extend before hit checks so we can push TP out of the way
+        if prox > 0 and step > 0 and (tp_extend_max <= 0 or extend_count < tp_extend_max):
+            dist = abs(px - tp)
+            if dist > prox * 1.5:
+                extend_armed = True
+            through = (px >= tp) if side > 0 else (px <= tp)
+            if (
+                extend_armed
+                and not through
+                and dist <= prox
+                and burst_ts is not None
+                and burst_side is not None
+                and lookback_ns > 0
+            ):
+                # same-side burst closed in [now - lookback, now]
+                lo = now - lookback_ns
+                bi = np.searchsorted(burst_ts, lo, side="left")
+                hi = np.searchsorted(burst_ts, now, side="right")
+                favourable = False
+                for k in range(bi, hi):
+                    if int(burst_side[k]) == side:
+                        favourable = True
+                        break
+                if favourable:
+                    tp = tp + side * step
+                    extend_count += 1
+                    extend_armed = False
+
         hit_tp = px >= tp if side > 0 else px <= tp
         hit_sl = px <= sl if side > 0 else px >= sl
         if hit_tp and hit_sl:
@@ -234,7 +285,8 @@ def _simulate_path(
         if hit_tp:
             exit_px = tp - side * slip_pts
             pnl = side * (exit_px - entry)
-            return exit_px, pnl, True, j - entry_i, "tp"
+            reason = "tp_ext" if extend_count > 0 else "tp"
+            return exit_px, pnl, True, j - entry_i, reason
         if time_ns > 0 and int(path_ts[j]) - entry_ts >= time_ns:
             exit_px = px - side * slip_pts
             pnl = side * (exit_px - entry)
@@ -432,6 +484,37 @@ def simulate_session(
             if fx is not None:
                 force_ns, force_reason = int(fx[0]), str(fx[1])
 
+        burst_ts_arr = burst_side_arr = None
+        if cfg.tp_extend_proximity_pts and cfg.tp_extend_proximity_pts > 0:
+            # NQ bursts for TP-extend favourability (same detector as entry)
+            if not hasattr(simulate_session, "_burst_cache"):
+                simulate_session._burst_cache = {}  # type: ignore[attr-defined]
+            cache_key = id(nq)
+            bcache = simulate_session._burst_cache  # type: ignore[attr-defined]
+            if cache_key not in bcache:
+                nq_bars = trades_to_tape_bars(nq, bar_ms=cfg.bar_ms)
+                nb = momentum_burst_events(
+                    nq_bars,
+                    min_trades=cfg.min_trades,
+                    min_vol=cfg.min_vol,
+                    min_imbalance=cfg.min_imbalance,
+                    min_progress_ticks=cfg.min_progress_ticks,
+                    tick_size=cfg.tick_size,
+                    cooldown_bars=cfg.cooldown_bars,
+                    bar_ms=cfg.bar_ms,
+                )
+                if nb.num_rows:
+                    bcache[cache_key] = (
+                        nb.column("event_ts_ns").to_numpy().astype(np.int64),
+                        nb.column("side").to_numpy().astype(int),
+                    )
+                else:
+                    bcache[cache_key] = (
+                        np.array([], dtype=np.int64),
+                        np.array([], dtype=int),
+                    )
+            burst_ts_arr, burst_side_arr = bcache[cache_key]
+
         exit_px, pnl, win, held, reason = _simulate_path(
             ts, px, entry_i, side, tp_pts, sl_pts, slip_pts,
             time_stop_sec=cfg.time_stop_sec,
@@ -439,6 +522,12 @@ def simulate_session(
             trail_pts=trail,
             force_exit_ns=force_ns,
             force_reason=force_reason,
+            tp_extend_proximity_pts=cfg.tp_extend_proximity_pts,
+            tp_extend_lookback_sec=cfg.tp_extend_lookback_sec,
+            tp_extend_max=cfg.tp_extend_max,
+            tp_extend_step_pts=cfg.tp_extend_step_pts,
+            burst_ts=burst_ts_arr,
+            burst_side=burst_side_arr,
         )
         # exit time approx
         exit_i = min(entry_i + held, len(ts) - 1)

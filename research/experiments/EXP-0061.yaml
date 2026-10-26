@@ -1,0 +1,22 @@
+name: EXP-0061
+hypothesis: H52
+title: Confirmed-burst continuation with ES-against hand-off exit
+description: >
+  Enter WITH the ES+NQ confirm burst (continuation). Exit on first ES-against
+  bar while NQ still pushing (CFADE's entry = this book's exit) OR vol bracket
+  TP/SL, whichever first. Not simply -D from anatomy — entry/exit asymmetry
+  and costs modelled explicitly. Twins: NQ-only burst continuation; fade-at-stamp
+  (anatomy D); random null. Kill: beat twin and null on OOS avg.
+
+detector: confirm_burst_continuation
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+exit:
+  exhaust_as_exit: true
+  max_wait_sec: 5.0
+  brackets: vol_rr_sl1_tp2_clip_4_40
+kill:
+  beat_nq_only_twin_oos: true
+  beat_null_oos: true
+  oos_net_positive: true

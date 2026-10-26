@@ -1,0 +1,19 @@
+name: EXP-0068
+hypothesis: H59
+title: Session-scale rotation + speed + ATR gates on frozen MAT
+description: >
+  Keep-gates on frozen MAT. Arms: rot_fresh_0.90 (skip with-leg when
+  rot_ratio >= 0.90), speed_not_stalled (skip speed_ratio < 0.5), atr_room
+  (skip range_so_far / prior_ATR >= 1.0), rot_and_atr. Session swings:
+  15-min lookback / 60s confirm / min 15 pts. Kill vs ungated MAT + null.
+detector: mat_session_rotation_gate
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+arms: [rot_fresh_0.90, speed_not_stalled, atr_room, rot_and_atr]
+kill:
+  oos_net_positive: true
+  beat_base_oos_avg: true
+  beat_null_oos_avg: true
+  min_n: 50
+runner: python -m research.mat_context.run_queue --exp EXP-0068

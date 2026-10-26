@@ -1,7 +1,7 @@
 Combined CFADE or MAT or LVN with market profile.
 Machine learning for regime detection.
 Fix MAT issue with vol targets - they are not calibrated correctly for open. [DONE MAT v4: prior-session median → fixed 10 in first 20m]
-MAT move TP doesn't work
+MAT move TP doesn't work [FIXED in Java: stillFavourableForExtend 8s lookback, no entry-gate reuse; default OFF pending EXP-0072 promote]
 MAT reversal - when price fails to move past MAT price, sometimes double bottoms, then reverses 30pts - as if traders are being trapped
 StackConsume-intact fade
 Could export signals to BA and run genetic algo on them?
@@ -28,3 +28,12 @@ Idea
 MAT Indicator
 - make requirement that MAT happends over 40 ticks and that volume occurs in bar
 - stop other side of value of bar
+
+TODO Next:
+- Get Tick data for @ES# and @NQ#
+    - get Bookmap add-on to compute LVN
+            - run large order against LVNs
+    - add alert for dual S/R
+    - practice bookmap at LVNs
+    - need bigger trade ideas
+    - take value seriously - outside va is cheap

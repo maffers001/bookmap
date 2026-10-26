@@ -1,0 +1,19 @@
+name: EXP-0071
+hypothesis: H62
+title: Structural SL from prior 50-tick vol/delta node
+description: >
+  At each MAT entry, place SL behind nearest supporting volume or delta
+  shelf in the prior completed 50-tick profile (within 30 pts). Clip
+  offset [4, 40]. Arms: vol_node, delta_node, vol_or_delta. Risk not
+  resized. Kill vs frozen vol-SL twin on OOS net and avg.
+detector: mat_structural_sl
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+arms: [vol_node, delta_node, vol_or_delta]
+kill:
+  oos_net_positive: true
+  beat_base_oos_avg: true
+  beat_base_oos_net: true
+  min_n: 50
+runner: python -m research.mat_context.run_queue --exp EXP-0071

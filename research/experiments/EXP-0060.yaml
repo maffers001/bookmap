@@ -1,0 +1,23 @@
+name: EXP-0060
+hypothesis: H51
+title: Role-swapped CFADE (ES-led confirm, NQ-against exhaustion)
+description: >
+  ES is the running leg; NQ confirms the burst; first NQ-against bar while ES
+  still pushes → fade. Two sub-variants only: (A) fade ES, (B) fade NQ (laggard).
+  Twins: ES-only burst → NQ-against; shifted-NQ (+60s) placebo; random null.
+  Kill: beat own single-market twin AND placebo on OOS.
+
+detector: cfade_role_swap
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+exhaust:
+  # mirrored thresholds on the confirming (NQ) leg
+  confirm_min_imbalance: 0.55
+  confirm_min_vol: 25
+  confirm_min_trades: 6
+  against_imb_max: -0.4
+  max_wait_sec: 5.0
+kill:
+  beat_twin_oos: true
+  beat_placebo_oos: true

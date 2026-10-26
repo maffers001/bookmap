@@ -1,0 +1,21 @@
+name: EXP-0069
+hypothesis: H60
+title: Faithful CD pullback / cheap-CD gates on frozen MAT
+description: >
+  New construction (not H6 1.4σ state). SMA valid only after 100 bars.
+  Arm A: directional tight pullback (was away, now in zone). Arm B:
+  dist_σ <= +0.2 + MA trend aligned. Arm C count-first: tight PB as primary
+  timing then MAT/ES confirm within 2s (promote only if n>=200 and kill).
+  Comparator: legacy 0.35×BB pullback flag.
+detector: mat_faithful_cd
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+arms: [cd_tight_A, cd_cheap_B, cd_timing_C]
+kill:
+  oos_net_positive: true
+  beat_base_oos_avg: true
+  beat_null_oos_avg: true
+  min_n: 50
+  arm_C_min_events: 200
+runner: python -m research.mat_context.run_queue --exp EXP-0069

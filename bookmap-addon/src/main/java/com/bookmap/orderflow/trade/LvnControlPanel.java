@@ -67,6 +67,8 @@ public final class LvnControlPanel {
     private final JTextField sizeField;
     private final JTextField entryUntilField;
     private final JTextField eosField;
+    private final JTextField lvnAboveField;
+    private final JTextField lvnBelowField;
     private final DefaultTableModel lvnModel;
     private final DefaultTableModel ordersModel;
     private final Consumer<LvnStrategyState.Snapshot> listener;
@@ -135,6 +137,15 @@ public final class LvnControlPanel {
                 "IRT multi-day chart export (or date,lvn2,lvn3 CSV). "
                         + "Resolves to the current session/replay day.");
         loadNqBtn.addActionListener(e -> loadFile("NQ"));
+        JButton loadEsStackBtn = new JButton("Load ES LVN stack…");
+        loadEsStackBtn.setToolTipText(
+                "Developing LVN stack from build_lvn_stack.py (LVN_STACK_ES.csv). "
+                        + "Plots nearest N above/below mid; feeds confluence when loaded.");
+        loadEsStackBtn.addActionListener(e -> loadStackFile("ES"));
+        JButton loadNqStackBtn = new JButton("Load NQ LVN stack…");
+        loadNqStackBtn.setToolTipText(
+                "Developing LVN stack from build_lvn_stack.py (LVN_STACK_NQ.csv).");
+        loadNqStackBtn.addActionListener(e -> loadStackFile("NQ"));
 
         showChartToggle = new JToggleButton("Show LVNs on chart");
         showChartToggle.setSelected(true);
@@ -212,6 +223,10 @@ public final class LvnControlPanel {
         sizeField = field(Integer.toString(s0.orderSize));
         entryUntilField = field(minToHhmm(s0.entryUntilUkMin));
         eosField = field(minToHhmm(s0.eosUkMin));
+        lvnAboveField = field(Integer.toString(s0.lvnAbove));
+        lvnBelowField = field(Integer.toString(s0.lvnBelow));
+        lvnAboveField.setToolTipText("Nearest LVNs above mid to plot (0–6, default 3)");
+        lvnBelowField.setToolTipText("Nearest LVNs below mid to plot (0–6, default 3)");
 
         JPanel settings = new JPanel(new GridBagLayout());
         settings.setBorder(BorderFactory.createTitledBorder("Brackets / gates (Apply for new orders)"));
@@ -226,11 +241,15 @@ public final class LvnControlPanel {
         addField(settings, gc, 5, "Size", sizeField);
         addField(settings, gc, 6, "Entry until UK", entryUntilField);
         addField(settings, gc, 7, "EOS UK", eosField);
+        addField(settings, gc, 8, "LVNs above", lvnAboveField);
+        addField(settings, gc, 9, "LVNs below", lvnBelowField);
 
         JPanel controls = new JPanel(new FlowLayout(FlowLayout.CENTER, 6, 4));
         controls.add(pinToggle);
         controls.add(loadEsBtn);
         controls.add(loadNqBtn);
+        controls.add(loadEsStackBtn);
+        controls.add(loadNqStackBtn);
         controls.add(showChartToggle);
         controls.add(showHvnToggle);
         controls.add(showOpenToggle);
@@ -347,6 +366,30 @@ public final class LvnControlPanel {
         }
     }
 
+    private void loadStackFile(String market) {
+        JFileChooser fc = new JFileChooser(lastDir);
+        fc.setDialogTitle("Load " + market + " LVN stack (LVN_STACK_*.csv)");
+        fc.setFileFilter(new FileNameExtensionFilter("CSV files", "csv", "CSV", "txt"));
+        int res = fc.showOpenDialog(frame);
+        if (res != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        File f = fc.getSelectedFile();
+        lastDir = f.getParentFile() != null ? f.getParentFile() : lastDir;
+        try {
+            LvnStrategyState.bindStack(market, f.toPath(), "panel");
+            var st = LvnStrategyState.stackFor(market);
+            if (st == null || st.isEmpty()) {
+                JOptionPane.showMessageDialog(frame, "Stack file loaded but empty.",
+                        "LVN stack", JOptionPane.WARNING_MESSAGE);
+            }
+        } catch (Exception ex) {
+            Log.info("LVN stack load failed: " + ex);
+            JOptionPane.showMessageDialog(frame, "Failed to load stack:\n" + ex.getMessage(),
+                    "LVN stack", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
     private void applySettings() {
         try {
             LvnStrategyState.Settings s = LvnStrategyState.settings();
@@ -355,6 +398,8 @@ public final class LvnControlPanel {
             s.offsetPts = Double.parseDouble(offsetField.getText().trim());
             s.nearLvnPts = Double.parseDouble(nearField.getText().trim());
             s.minOpenDistPts = Double.parseDouble(minOpenField.getText().trim());
+            s.lvnAbove = Integer.parseInt(lvnAboveField.getText().trim());
+            s.lvnBelow = Integer.parseInt(lvnBelowField.getText().trim());
             s.orderSize = Integer.parseInt(sizeField.getText().trim());
             s.entryUntilUkMin = hhmmToMin(entryUntilField.getText().trim());
             s.eosUkMin = hhmmToMin(eosField.getText().trim());
@@ -453,6 +498,12 @@ public final class LvnControlPanel {
             }
             if (!eosField.isFocusOwner()) {
                 eosField.setText(minToHhmm(s.eosUkMin));
+            }
+            if (!lvnAboveField.isFocusOwner()) {
+                lvnAboveField.setText(Integer.toString(s.lvnAbove));
+            }
+            if (!lvnBelowField.isFocusOwner()) {
+                lvnBelowField.setText(Integer.toString(s.lvnBelow));
             }
 
             lvnModel.setRowCount(0);

@@ -1,0 +1,106 @@
+# MAT context / CD / exits queue (2026-10-26).
+# Frozen before EXP-0067+ outcomes. Host = frozen MAT. Do not retune CFADE.
+
+name: MAT_CONTEXT_PROTOCOL
+next_exp: EXP-0067
+title: MAT context, CD, and exits
+
+sample:
+  exclude_sessions: ["200626", "220626"]  # May tapes misfiled as June
+  is_definition: DIG4_23d  # strata/freeze sample; promote only on OOS
+  window: "UK 14:30-17:00"
+  feed: primary_only
+  note: >
+    Sep–Oct is NOT a virgin MAT holdout (EXP-0056 already mined it).
+    A promote here still needs future months to ship. IS never promotes.
+
+frozen_mat:
+  es_stamp: causal
+  gate: trend_with + vwap_side
+  brackets: "vol k=1 floor=6 cap=30 (symmetric)"
+  costs: "1-tick slip, 0.25 pt/RT NQ"
+  flat_only: true
+  signal_cooldown_sec: 5.0
+  window: "UK 14:30-17:00"
+
+protocol:
+  count_first:
+    gate_strata_min_trades: 20
+    standalone_entry_min_events: 200
+  mandatory_nulls:
+    - ungated_mat_twin
+    - time_matched_random_null
+  promote_rule: >
+    OOS net > 0; beat ungated MAT twin on OOS avg; beat time-matched random
+    null on OOS avg; n >= 50; IS reported not used to promote; slip 2-tick
+    sensitivity; days+; max DD; top-3 day share; LOO.
+  report_fields:
+    - is_oos_split
+    - twin_null_table
+    - days_plus
+    - max_dd
+    - top3_concentration
+    - leave_one_day_out
+    - slip_2tick_sensitivity
+
+closed_do_not_reopen:
+  - H6_cd_1p4sigma_state_gate
+  - H24_micro_3min_20s_rotation
+  - H28_absorption_as_entry
+  - be_trail_timestop_exits
+  - CFADE_retune
+  - allocator_c_retune
+
+queue:
+  - EXP-0067  # H58 descriptive strata
+  - EXP-0068  # H59 session rotation + speed + ATR
+  - EXP-0069  # H60 faithful CD
+  - EXP-0070  # H61 VWAP distance in vol units
+  - EXP-0071  # H62 structural SL
+  - EXP-0072  # H63 TP-extend
+  - EXP-0073  # H64 absorption exit after min-TP
+
+session_rotation:
+  lookback_ms: 900000   # 15 min
+  confirm_ms: 60000     # 60 s
+  min_rotation_pts: 15
+  avg_n: 4
+  min_same_dir: 2
+  prior_session_fallback: true
+
+atr:
+  lookback_sessions: 10
+  window: "UK 14:30-17:00"
+
+cd_faithful:
+  range_ticks: 22
+  sma_len: 100
+  sma_min_bars: 100   # no expanding mean before 100
+  slope_lookback: 5
+  # Arm A directional tight pullback windows (in CD-σ)
+  long_zone: [-0.5, 0.2]
+  short_zone: [-0.2, 0.5]
+  away_long: 0.5    # must have been dist_σ > +0.5 earlier in episode
+  away_short: -0.5
+  # Arm B absolute cheap
+  cheap_max_sigma: 0.2
+  # Old comparator (H6)
+  old_pullback_frac_of_bb: 0.35
+
+tp_extend:
+  proximity_pts: 2.0
+  lookback_sec: 8.0
+  max_extends: 3
+  debounce_mult: 1.5
+
+structural_sl:
+  range_ticks: 50
+  node_percentile: 70
+  max_search_pts: 30
+  clip_floor: 4.0
+  clip_cap: 40.0
+  tick_pts: 0.25
+
+absorption_exit:
+  min_mfe_frac_of_tp: 0.5
+  market: NQ

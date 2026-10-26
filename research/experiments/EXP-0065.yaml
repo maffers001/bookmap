@@ -1,0 +1,17 @@
+name: EXP-0065
+hypothesis: H56
+title: CFADE second-bar persistence entry (first-crossing + hysteresis)
+description: >
+  Require the ES-against condition to hold for a second consecutive 100ms bar
+  (hysteresis) before fading. First-crossing form only — not a wait-bucket gate.
+  Comparator: frozen CFADE. Kill: lift OOS avg >= +0.5pt AND retain >=70% trades,
+  else park. Do not promote 500-2000ms wait filter.
+
+detector: cfade_persist2
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+persist_bars: 2
+kill:
+  min_retain_frac: 0.70
+  min_oos_avg_lift: 0.5

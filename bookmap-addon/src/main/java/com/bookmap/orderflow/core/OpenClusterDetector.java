@@ -168,6 +168,8 @@ public final class OpenClusterDetector {
     private double openMidPts;
     private double lvn2;
     private double lvn3;
+    /** Full LVN stack (may include lvn2/lvn3); empty → fall back to scalars. */
+    private final List<Double> lvnStack = new ArrayList<>();
     private String rankingMode = "size";
     private final List<ArmedLevel> armed = new ArrayList<>();
     private final List<Cluster> snapClusters = new ArrayList<>();
@@ -207,6 +209,38 @@ public final class OpenClusterDetector {
     public void setLvns(double lvn2, double lvn3) {
         this.lvn2 = lvn2;
         this.lvn3 = lvn3;
+        lvnStack.clear();
+        if (lvn2 != 0.0) {
+            lvnStack.add(lvn2);
+        }
+        if (lvn3 != 0.0 && Math.abs(lvn3 - lvn2) > 1e-9) {
+            lvnStack.add(lvn3);
+        }
+    }
+
+    /** Replace the LVN set with a full developing stack ( foregoes labeled LVN2/3). */
+    public void setLvns(List<Double> prices) {
+        lvnStack.clear();
+        lvn2 = 0;
+        lvn3 = 0;
+        if (prices == null) {
+            return;
+        }
+        for (Double p : prices) {
+            if (p != null && p != 0.0) {
+                lvnStack.add(p);
+            }
+        }
+        if (lvnStack.size() >= 1) {
+            lvn2 = lvnStack.get(0);
+        }
+        if (lvnStack.size() >= 2) {
+            lvn3 = lvnStack.get(1);
+        }
+    }
+
+    public List<Double> lvnStack() {
+        return lvnStack;
     }
 
     public double lvn2() {
@@ -767,6 +801,19 @@ public final class OpenClusterDetector {
 
     private NearestLvn nearestLvn(double centre) {
         NearestLvn best = null;
+        if (!lvnStack.isEmpty()) {
+            for (int i = 0; i < lvnStack.size(); i++) {
+                double px = lvnStack.get(i);
+                if (px == 0.0) {
+                    continue;
+                }
+                double d = Math.abs(px - centre);
+                if (best == null || d < best.dist) {
+                    best = new NearestLvn("LVN" + (i + 1), px, d);
+                }
+            }
+            return best;
+        }
         if (lvn2 != 0.0) {
             best = new NearestLvn("LVN2", lvn2, Math.abs(lvn2 - centre));
         }
@@ -807,7 +854,8 @@ public final class OpenClusterDetector {
 
     public String summary() {
         return String.format(Locale.US,
-                "snapped=%s openMid=%.2f lvn2=%.2f lvn3=%.2f clusters=%d armed=%d rank=%s",
-                snapped, openMidPts, lvn2, lvn3, snapClusters.size(), armed.size(), rankingMode);
+                "snapped=%s openMid=%.2f lvnStack=%d lvn2=%.2f lvn3=%.2f clusters=%d armed=%d rank=%s",
+                snapped, openMidPts, lvnStack.size(), lvn2, lvn3,
+                snapClusters.size(), armed.size(), rankingMode);
     }
 }

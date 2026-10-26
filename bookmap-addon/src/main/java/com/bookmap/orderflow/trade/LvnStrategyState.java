@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import com.bookmap.orderflow.core.LvnLevelFile;
+import com.bookmap.orderflow.core.LvnStackFile;
 import com.bookmap.orderflow.core.OpenClusterDetector;
 
 import velox.api.layer1.common.Log;
@@ -40,6 +41,9 @@ public final class LvnStrategyState {
         public int eosUkMin = 1260; // 21:00
         public int snapUkMin = 870; // 14:30
         public double killMaxSessionLossPts = 150.0;
+        /** Chart stack: nearest N LVNs above / below mid (capped by pre-registered slots). */
+        public int lvnAbove = 3;
+        public int lvnBelow = 3;
     }
 
     public static final class Snapshot {
@@ -137,6 +141,10 @@ public final class LvnStrategyState {
     private static volatile LvnLevelFile.Levels nqLevels;
     private static volatile Path esPath;
     private static volatile Path nqPath;
+    private static volatile LvnStackFile.Stack esStack;
+    private static volatile LvnStackFile.Stack nqStack;
+    private static volatile Path esStackPath;
+    private static volatile Path nqStackPath;
     /** Replay/live feed UK date — LVNs resolve as-of this day @14:30 from chart exports. */
     private static volatile LocalDate sessionDateUk;
     private static volatile Status status = Status.NO_LEVELS;
@@ -257,6 +265,8 @@ public final class LvnStrategyState {
         s.eosUkMin = SETTINGS.eosUkMin;
         s.snapUkMin = SETTINGS.snapUkMin;
         s.killMaxSessionLossPts = SETTINGS.killMaxSessionLossPts;
+        s.lvnAbove = SETTINGS.lvnAbove;
+        s.lvnBelow = SETTINGS.lvnBelow;
         return s;
     }
 
@@ -266,13 +276,15 @@ public final class LvnStrategyState {
         }
         Log.info(String.format(
                 "LVN settings apply (%s): SL %.1f→%.1f TP %.1f→%.1f offset %.1f→%.1f near %.1f→%.1f "
-                        + "minOpen %.1f→%.1f size %d→%d entryUntil %d→%d eos %d→%d",
+                        + "minOpen %.1f→%.1f size %d→%d entryUntil %d→%d eos %d→%d "
+                        + "lvnAbove %d→%d lvnBelow %d→%d",
                 via, SETTINGS.slPts, in.slPts, SETTINGS.tpPts, in.tpPts,
                 SETTINGS.offsetPts, in.offsetPts, SETTINGS.nearLvnPts, in.nearLvnPts,
                 SETTINGS.minOpenDistPts, in.minOpenDistPts,
                 SETTINGS.orderSize, in.orderSize,
                 SETTINGS.entryUntilUkMin, in.entryUntilUkMin,
-                SETTINGS.eosUkMin, in.eosUkMin));
+                SETTINGS.eosUkMin, in.eosUkMin,
+                SETTINGS.lvnAbove, in.lvnAbove, SETTINGS.lvnBelow, in.lvnBelow));
         SETTINGS.slPts = Math.max(0.0, in.slPts);
         SETTINGS.tpPts = Math.max(0.25, in.tpPts);
         SETTINGS.offsetPts = Math.max(0.0, in.offsetPts);
@@ -283,7 +295,54 @@ public final class LvnStrategyState {
         SETTINGS.eosUkMin = in.eosUkMin;
         SETTINGS.snapUkMin = in.snapUkMin;
         SETTINGS.killMaxSessionLossPts = Math.max(0.0, in.killMaxSessionLossPts);
+        int maxSlot = LvnStackFile.MAX_DISPLAY_EACH_SIDE;
+        SETTINGS.lvnAbove = Math.max(0, Math.min(maxSlot, in.lvnAbove));
+        SETTINGS.lvnBelow = Math.max(0, Math.min(maxSlot, in.lvnBelow));
         fire();
+    }
+
+    public static LvnStackFile.Stack esStack() {
+        return esStack;
+    }
+
+    public static LvnStackFile.Stack nqStack() {
+        return nqStack;
+    }
+
+    public static LvnStackFile.Stack stackFor(String market) {
+        if (market == null) {
+            return null;
+        }
+        if ("NQ".equalsIgnoreCase(market)) {
+            return nqStack;
+        }
+        if ("ES".equalsIgnoreCase(market)) {
+            return esStack;
+        }
+        return null;
+    }
+
+    public static synchronized void bindStack(String market, Path path, String via) {
+        try {
+            LvnStackFile.Stack st = LvnStackFile.load(path);
+            if ("NQ".equalsIgnoreCase(market)) {
+                nqStack = st;
+                nqStackPath = path;
+            } else {
+                esStack = st;
+                esStackPath = path;
+            }
+            Log.info("LVN stack bound " + market + " snaps=" + st.snapshots.size()
+                    + " via=" + via + " file=" + path.getFileName());
+            lastEvent = market + " stack loaded (" + st.snapshots.size() + " snaps)";
+            refreshStatusDetail();
+            recomputeStatus();
+            fire();
+        } catch (Exception e) {
+            Log.info("LVN stack bind failed: " + e.getMessage());
+            lastEvent = "Stack load failed: " + e.getMessage();
+            fire();
+        }
     }
 
     /** ES levels (used for confluence trading). */
@@ -612,6 +671,12 @@ public final class LvnStrategyState {
         } else {
             sb.append("ES: —");
         }
+        if (esStack != null && !esStack.isEmpty()) {
+            sb.append(" stack=").append(esStack.snapshots.size());
+            if (esStackPath != null) {
+                sb.append("[").append(esStackPath.getFileName()).append("]");
+            }
+        }
         sb.append("   |   ");
         if (nqLevels != null && nqLevels.hasAny()) {
             sb.append(String.format("NQ LVN2=%.2f LVN3=%.2f", nqLevels.lvn2, nqLevels.lvn3));
@@ -621,6 +686,13 @@ public final class LvnStrategyState {
         } else {
             sb.append("NQ: —");
         }
+        if (nqStack != null && !nqStack.isEmpty()) {
+            sb.append(" stack=").append(nqStack.snapshots.size());
+            if (nqStackPath != null) {
+                sb.append("[").append(nqStackPath.getFileName()).append("]");
+            }
+        }
+        sb.append(String.format("  |  LVNs↑%d ↓%d", SETTINGS.lvnAbove, SETTINGS.lvnBelow));
         statusDetail = sb.toString();
     }
 

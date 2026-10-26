@@ -1,0 +1,11 @@
+name: EXP-0063
+hypothesis: H54
+title: Normalised effort/result divergence (C2)
+description: >
+  Progress per unit signed volume over 10s; NQ absorbed (low effort) while ES
+  stalls → fade NQ. Pre-registered catch-up arm when ES continues. Twin: NQ-only
+  fade of absorbed tape. Kill: fade_es_stall beats twin+null on OOS; n>=200.
+detector: effort_result_xmarket
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d

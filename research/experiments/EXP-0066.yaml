@@ -1,0 +1,16 @@
+name: EXP-0066
+hypothesis: H57
+title: Tier D count-first — co-pull / co-stack / book-pressure / iceberg coverage
+description: >
+  Count-first only. On depth sessions, count dual co-pull / co-stack events and
+  book-pressure divergence states. Only if dual events n>=200, stratify frozen
+  MAT/CFADE outcomes (filter form). Iceberg/paired-large: descriptive coverage
+  only (MBO presence). No standalone entries. Kill for filter promotion:
+  gated avg lift >= +1.0 on OOS with n_trades>=20; else park counts.
+
+detector: tier_d_counts
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+count_first_min_events: 200
+filter_min_trades: 20

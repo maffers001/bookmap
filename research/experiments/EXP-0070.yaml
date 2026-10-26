@@ -1,0 +1,18 @@
+name: EXP-0070
+hypothesis: H61
+title: VWAP distance in vol units on frozen MAT
+description: >
+  Magnitude was missing from EXP-0056 (sign only). Keep-gates:
+  vwap_band_0.5_2.0 (same side, |dist|/med_r30 in [0.5, 2.0]) and
+  vwap_not_extended (same side, |dist|/med_r30 <= 2.0).
+detector: mat_vwap_distance
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+arms: [vwap_band_0.5_2.0, vwap_not_extended]
+kill:
+  oos_net_positive: true
+  beat_base_oos_avg: true
+  beat_null_oos_avg: true
+  min_n: 50
+runner: python -m research.mat_context.run_queue --exp EXP-0070

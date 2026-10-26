@@ -1,0 +1,50 @@
+name: EXP-0057
+hypothesis: H48
+title: Combined MAT + CFADE book / regime allocator
+description: >
+  Zero new-signal risk. Daily P&L correlation of frozen MAT (causal, trend+VWAP,
+  vol k=1) vs frozen CFADE (against_m04 + ER60<=0.30, vol RR SL1/TP2 clip 4-40)
+  over the clean 113-session sample. Three allocators: (a) both always-on,
+  (b) ER60 switch (CFADE when ER60<=0.30 else MAT-only; MAT always),
+  (c) ER60 switch + skip_range175 on MAT.
+  Kill: (b) or (c) must beat (a) on maxDD AND days+ on >=2 of 3 month-blocks,
+  else ship (a). Descriptive only (no refit): after_mat_sl hand-off stratum,
+  trade-overlap/conflict audit. Promote only on OOS; IS is DIG4 23d.
+
+detector: cfade_family_allocator
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+
+mat:
+  es_stamp: causal
+  trend_vwap: true
+  vol_k: 1
+  floor: 6
+  cap: 30
+  slip_ticks: 1.0
+  commission_pts_rt: 0.25
+
+cfade:
+  exhaust: against_m04
+  er_max: 0.30
+  brackets: vol_rr_sl1_tp2_clip_4_40
+  slip_ticks: 1.0
+  commission_pts_rt: 0.25
+
+allocators:
+  - always_on
+  - er60_switch
+  - er60_switch_mat_skip_range175
+
+kill:
+  allocator_must_beat_always_on_on: [max_dd, days_pos]
+  min_month_blocks_passing: 2
+  month_blocks: [["03","04","05"], ["06","07","08"], ["09","10"]]
+
+descriptive:
+  - after_mat_sl_handoff
+  - same_window_opposing_positions
+
+target_n_sessions: 113
+mde_note: "portfolio maxDD / days+ comparison; no per-trade MDE"

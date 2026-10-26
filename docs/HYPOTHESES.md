@@ -690,15 +690,152 @@ No primary arm passes (vol/delta/va_break all worse than base; `vol_delta`
 
 ---
 
+## H48 — Combined MAT + CFADE regime allocator
+
+Independent frozen MAT and CFADE books are additive on DIG3 but MAT is
+regime-broken on the expanded OOS. An ER60 switch (CFADE when ER≤0.30;
+MAT only when ER>0.30), optionally with `skip_range175` on MAT, should
+beat always-on on maxDD and days+.
+
+**Test:** EXP-0057. **Result (2026-10-26): ship allocator (c)** —
+`er60_switch + MAT skip_range175`. Daily corr MAT↔CFADE ≈ +0.04; always-on
+OOS −472 vs (c) OOS +290; (c) clears kill on 3/3 month-blocks. `after_mat_sl`
+hand-off does **not** hold (n=91 net −158). See `results/EXP-0057/`.
+
+## H49 — CFADE microprice / passive entry timer
+
+Delay or passively join CFADE entries using NQ BBO microprice (≤500 ms) or
+1 s passive join. Kill: retain ≥80% and lift ≥1 tick/trade on IS **and** OOS.
+
+**Test:** EXP-0058. **Result: reject / park.** Depth on 98/113 sessions.
+Microprice OOS lift +0.50 but IS lift 0; passive OOS +0.93 but IS −0.97.
+No timer clears both samples. Re-test only on future months.
+
+## H50 — Execute frozen CFADE on ES
+
+Same CFADE events, trade ES with ES-scaled brackets. Kill: IS+OOS net+, and
+2-tick degradation better than NQ.
+
+**Test:** EXP-0059. **Result: reject / park.** ES 1-tick n=427 net −100
+(OOS −186); more slip-robust than NQ but not profitable OOS.
+
+## H51 — Role-swapped CFADE (ES-led)
+
+ES-led confirm → NQ-against exhaustion → fade ES (or fade NQ).
+
+**Test:** EXP-0060. **Result: reject / park.** Both arms OOS negative;
+neither beats twin/placebo.
+
+## H52 — Confirmed-burst continuation + ES-against hand-off exit
+
+Enter *with* ES+NQ confirm burst; exit on first ES-against bar (CFADE's
+entry) or vol bracket. Inverse of anatomy twin D.
+
+**Test:** EXP-0061. **Result: PASS.** n=3055 net +815 (OOS +577 avg +0.23);
+beats NQ-only twin, null, and fade-at-stamp. Thin per-trade edge; candidate
+for Java shortlist alongside CFADE. See `results/EXP-0061/`.
+
+## H53 — Synthetic-basis dislocation ± flow
+
+**Test:** EXP-0062. **Result: reject / park.** All arms OOS negative.
+
+## H54 — Normalised effort/result cross-market
+
+**Test:** EXP-0063. **Result: reject / park.** Beats twin avg; loses to null;
+OOS net negative.
+
+## H55 — Flow-inflection synchrony
+
+**Test:** EXP-0064. **Result: reject / park.** Beats twin+null on OOS avg;
+OOS net still negative.
+
+## H56 — CFADE second-bar persistence entry
+
+**Test:** EXP-0065. **Result: reject / park.** retain 2% ≪ 70% (n=10).
+
+## H57 — Tier D book co-pull / pressure counts
+
+**Test:** EXP-0066. **Result: park.** Co-pull proxy n≫200 but too loose;
+BBO disagree filter fails OOS lift bar. Iceberg detector deferred.
+
+## H58 — MAT context descriptive strata
+
+Attach session-scale rotation, ATR, faithful CD-σ, and VWAP distance-in-vol
+features to frozen MAT trades. Publish pre-registered buckets (CD-σ, rot_ratio,
+speed, ATR, VWAP-norm). No ship decision.
+
+**Test:** EXP-0067. **Result (2026-10-26): descriptive only.** Base MAT
+n=2941 net −240. Notable: `rot_0.5_0.9` OOS +247; `rot_gt_1.1` OOS −507
+(micro-H24 inversion does **not** repeat at session scale — fresh looks
+better); `vwap_pos_gt_2.0` OOS −970; CD-σ mid buckets mixed. See
+`results/EXP-0067/`.
+
+## H59 — Session-scale rotation + speed + ATR gates on MAT
+
+Distinct from H24 micro swings (3-min / 20s). Frozen: lookback 15 min, confirm
+60 s, min rotation 15 pts; avg = last 4 same-direction; prior-session fallback.
+Arms: `rot_fresh_0.90`, `speed_not_stalled`, `atr_room`, `rot_and_atr`.
+
+**Test:** EXP-0068. **Result (2026-10-26): PASS `rot_fresh_0.90` only.**
+n=1031 net +501 (OOS +212 avg +0.25); beats base OOS avg and null. Speed /
+ATR / rot_and_atr all FAIL OOS net. Sep–Oct already mined for MAT — needs
+future months before ship. See `results/EXP-0068/`.
+
+## H60 — Faithful CD pullback / cheap-CD on MAT
+
+New construction (not H6 1.4σ state). SMA valid only after 100 bars. Arm A:
+directional tight pullback (was away, now in zone). Arm B: dist_σ ≤ +0.2 + MA
+trend aligned. Arm C count-first: tight PB timing then MAT/ES confirm ≤2 s.
+
+**Test:** EXP-0069. **Result (2026-10-26): reject / park.** All arms OOS
+negative (A −740, B −590, C −443); C n_events=256 ≥200 but kill fails. Live
+`requireCdPullback` stays false. See `results/EXP-0069/`.
+
+## H61 — VWAP distance in vol units on MAT
+
+Magnitude was missing from EXP-0056 (sign only). Arms: `vwap_band_0.5_2.0`,
+`vwap_not_extended` (|dist|/med_r30).
+
+**Test:** EXP-0070. **Result (2026-10-26): reject / park.** Both OOS net −
+(`not_extended` OOS −112 but still fails oos_net_pos). See `results/EXP-0070/`.
+
+## H62 — Structural SL from prior 50-tick vol/delta node
+
+Place SL behind nearest supporting volume or delta shelf in the prior completed
+50-tick profile (within 30 pts). Clip [4, 40]. Risk not resized. Arms:
+`vol_node`, `delta_node`, `vol_or_delta`.
+
+**Test:** EXP-0071. **Result (2026-10-26): reject / park.** All arms OOS net −
+(WR collapses ~23–26% — stops often too tight / noisy). See `results/EXP-0071/`.
+
+## H63 — TP-extend when same-side burst still favourable near TP
+
+Live bug: extend reused full entry gate (burst ≤1.5 s). Fix decouples to 8 s
+lookback + ES sync; default remains OFF. Sim: proximity 2 pts, max 3 extends,
+step = live bracket; SL unchanged.
+
+**Test:** EXP-0072. **Result (2026-10-26): reject / park.** Both arms OOS
+avg worse than base (−1.02 / −1.09). Java fix ships with default OFF. See
+`results/EXP-0072/`.
+
+## H64 — Opposite-side absorption exit after min-TP
+
+After MAT entry, first opposite-side NQ absorption with MFE ≥ 0.5×TP forces
+market exit. Twin: dual ES+NQ. Do not stack with TP-extend on first pass.
+Distinct from H28 absorption-*entry*.
+
+**Test:** EXP-0073. **Result (2026-10-26): PASS `nq_absorb_exit`.** n=3621
+net +832 (OOS +460 avg +0.155); beats base and null. Dual FAIL. Note: exit_fn
+MFE is approximated (path MFE not visible). Needs future months + stricter
+0.5R path-MFE before ship. See `results/EXP-0073/`.
+
+---
+
 ## Unregistered candidates (no H-number yet)
 
-The complete post-EXP-0050 dig map — every remaining correlated idea as
-OPEN / CONDITIONAL / CLOSED, in dig order — is **`docs/CORRELATED_IDEAS_2026-10-23.md` §8**
-(Tiers A–D + closed list + adjacent legacy queue EXP-0033 / EXP-0020).
-Tier A (A1–A4) is **complete**: all four items were preregistered and
-closed reject/park on 2026-10-24 (EXP-0051–EXP-0054 / H42–H45); its
-tracker home is **`docs/TIER_A.md`** (status board, shared count-first
-rules, one section per item, completion summary). Next in queue: Tier B
-B1 (§1.3 Claim B execution timer) in microprice-only fallback form,
-which earns its own H-number and frozen YAML only at preregistration —
-do not cite Tier B–D items as hypotheses until then.
+Post-EXP-0050 dig map: **`docs/CORRELATED_IDEAS_2026-10-23.md` §8**.
+Tier A complete (EXP-0051–0054). CFADE-family queue EXP-0057–0066 ran
+2026-10-26 — see `results/CFADE_FAMILY_SYNTHESIS/`. MAT context queue
+EXP-0067–0073 / H58–H64 — see `results/MAT_CONTEXT_SYNTHESIS/`. Still open: B2
+StackConsume ES-context, C4 multi-second absorption (one shot), D2 iceberg
+feature (after tighter count), legacy EXP-0033 / EXP-0020.

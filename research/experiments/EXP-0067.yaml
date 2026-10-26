@@ -1,0 +1,14 @@
+name: EXP-0067
+hypothesis: H58
+title: MAT context descriptive strata (CD-σ, VWAP-dist, rotation, speed, ATR)
+description: >
+  Attach session-scale rotation, ATR, faithful CD-σ, and VWAP distance-in-vol
+  features to frozen MAT trades. Publish pre-registered buckets. No ship
+  decision — descriptive only. Buckets do not retune later EXPs.
+detector: mat_context_strata
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+kill:
+  promote: false
+runner: python -m research.mat_context.run_queue --exp EXP-0067
