@@ -31,14 +31,20 @@ MAT Indicator
 
 TODO Next:
 - Get Tick data for @ES# and @NQ#
-    - get Bookmap add-on to compute LVN
-            - run large order against LVNs
-    - add alert for dual S/R
-    - practice bookmap at LVNs
-    - need bigger trade ideas
+    - * get Bookmap add-on to compute LVN
+        - * find a way to load lvns from IRT
+        - run large order against LVNs
+        - * add alert for dual S/R - see if P&C works with dual S/R
+        - * practice levels P&C in Bookmap at LVNs
+    - need trade ideas with 1:2 R:R
     - take value seriously - outside va is cheap
     - LVN trade on FX pairs - need to collect LVNs
     - Investigate DOP trade - checking for volume one side and large delta the other [H69/EXP-0078 under investigation]
-    - Backtest gamma levels + lvn from replay data on Deepcharts
-    - download more months
+    - * Backtest gamma levels + lvn from replay data on Deepcharts
+    - * download more months
     - point AI toward specific price events like momentum breakouts
+    - MBO research
+    - Market on Open/Close
+
+
+    - 30 sec pinbar - which is V shaped reversal, see if volume is trapped
