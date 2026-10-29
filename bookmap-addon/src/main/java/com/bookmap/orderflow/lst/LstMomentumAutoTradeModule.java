@@ -349,14 +349,14 @@ public class LstMomentumAutoTradeModule implements
                 lastDiagNs = nowNs;
                 String reason = String.format(Locale.US,
                         "state=%s side=%d level=%s dom=%s trend=%s nqTrades=%d esTrades=%d "
-                                + "bookLv=%d snaps=%d nqBurst=%d@%d esBurst=%d@%d aliases=%s rt=%s",
+                                + "bookLv=%d snaps=%d nqBurst=%d@%d esBurst=%d@%d aliases=%s rt=%s %s",
                         snap.state, snap.side, LstCsvLog.f(snap.dominantLevelPx),
                         LstCsvLog.f(snap.domVsMed), LstCsvLog.f(snap.trend5mPts),
                         tracker.diagNqTrades(), tracker.diagEsTrades(), tracker.nqBookLevels(),
                         tracker.diagBookSnapCount(),
                         tracker.diagLastNqBurstSide(), tracker.diagLastNqBurstNs(),
                         tracker.diagLastEsBurstSide(), tracker.diagLastEsBurstNs(),
-                        aliasesSeen, realtimeStarted);
+                        aliasesSeen, realtimeStarted, tracker.diagLastDom());
                 signalLog.writeRow(String.format(Locale.US,
                         "DIAG,%s,%d,%d,,,,,,,,,,,DIAG,%s,%s",
                         formatTime(nowNs), nowNs, snap.side, reason, realtimeStarted));
@@ -487,13 +487,15 @@ public class LstMomentumAutoTradeModule implements
         } else {
             action = "SIGNAL_ONLY";
         }
-        logSignal(signal, action, "ok", tp, sl);
+        String domDiag = tracker != null ? tracker.diagLastDom() : "";
+        logSignal(signal, action, "ok " + domDiag, tp, sl);
         Log.info(String.format(Locale.US,
                 "LST-AT FIRE %s side=%d px=%.2f level=%.2f stop=%.2f trend=%.1f dom=%.2f "
-                        + "tp=%.1f sl=%.1f action=%s realtime=%s catchupOk=%s time=%s",
+                        + "tp=%.1f sl=%.1f action=%s realtime=%s catchupOk=%s time=%s %s",
                 signal.side > 0 ? "LONG" : "SHORT", signal.side, signal.entryRefPx,
                 signal.dominantLevelPx, signal.stopPx, signal.trend5mPts, signal.domVsMed,
-                tp, sl, action, realtimeStarted, catchupOk, formatTime(signal.signalTsNs)));
+                tp, sl, action, realtimeStarted, catchupOk, formatTime(signal.signalTsNs),
+                domDiag));
 
         if (can) {
             sendBracket(signal.side > 0, signal.entryRefPx, tp, sl, signal);

@@ -221,6 +221,10 @@ public final class SliceEventTracker {
     private static final long BOOK_SNAP_EVERY_NS = 250_000_000L;
     private static final long BOOK_SNAP_KEEP_NS = 20_000_000_000L;
     private static final long DOM_LOOKBACK_NS = 3_000_000_000L;
+    /** Match research {@code detector.GRID_NS} / cluster gap. */
+    private static final long BURST_GRID_NS = 250_000_000L;
+    private static final long BURST_CLUSTER_NS = 5_000_000_000L;
+    private String lastDomDiag = "";
 
     private static final class BookSnap {
         final long tsNs;
@@ -383,6 +387,11 @@ public final class SliceEventTracker {
         return nqBookSnaps.size();
     }
 
+    /** Last dominant-zone dump (pre, snap age, top asks) for SIGNAL/DIAG logs. */
+    public String diagLastDom() {
+        return lastDomDiag == null ? "" : lastDomDiag;
+    }
+
     /** NQ bid+ask level count (debug / warmup gate). */
     public int nqBookLevels() {
         return nqBids.size() + nqAsks.size();
@@ -511,6 +520,7 @@ public final class SliceEventTracker {
         // Dominant level from NQ book ~3 s BEFORE ignition (research), not the
         // post-slice live book (which already had the stack taken — dom~1.7 vs 14).
         DomLevel dom = findDominantPreIgnition(side, lastNqBurst.prePx, lastNqBurst.ignitionNs);
+        lastDomDiag = formatDomDiag(side, lastNqBurst.prePx, lastNqBurst.ignitionNs, dom);
         double trend = trend5m(nqPrints, side, lastNqBurst.ignitionNs);
         Episode ep = new Episode();
         ep.side = side;
@@ -593,6 +603,59 @@ public final class SliceEventTracker {
         }
         // Fallback: live book (may be weak after the slice).
         return findDominant(side, prePx);
+    }
+
+    private String formatDomDiag(int side, double prePx, long ignitionNs, DomLevel dom) {
+        long want = ignitionNs - DOM_LOOKBACK_NS;
+        BookSnap snap = nearestNqSnap(want);
+        long snapAgeMs = snap == null ? -1 : (want - snap.tsNs) / 1_000_000L;
+        StringBuilder top = new StringBuilder();
+        TreeMap<Integer, Integer> sideBook = snap == null
+                ? (side > 0 ? nqAsks : nqBids)
+                : (side > 0 ? snap.asks : snap.bids);
+        if (sideBook != null && !Double.isNaN(prePx) && tickSize > 0) {
+            int preTicks = (int) Math.round(prePx / tickSize);
+            int lo = side > 0 ? preTicks + 1 : preTicks - cfg.zoneTicks;
+            int hi = side > 0 ? preTicks + cfg.zoneTicks : preTicks - 1;
+            int[] pxArr = new int[64];
+            int[] szArr = new int[64];
+            int n = 0;
+            for (var e : sideBook.entrySet()) {
+                int p = e.getKey();
+                if (p < lo || p > hi || n >= pxArr.length) {
+                    continue;
+                }
+                pxArr[n] = p;
+                szArr[n] = e.getValue();
+                n++;
+            }
+            // Partial selection sort for top 5 by size.
+            int show = Math.min(5, n);
+            for (int i = 0; i < show; i++) {
+                int best = i;
+                for (int j = i + 1; j < n; j++) {
+                    if (szArr[j] > szArr[best]) {
+                        best = j;
+                    }
+                }
+                int tsz = szArr[i];
+                int tpx = pxArr[i];
+                szArr[i] = szArr[best];
+                pxArr[i] = pxArr[best];
+                szArr[best] = tsz;
+                pxArr[best] = tpx;
+                if (i > 0) {
+                    top.append('|');
+                }
+                top.append(String.format(Locale.US, "%.2f:%d", pxArr[i] * tickSize, szArr[i]));
+            }
+        }
+        return String.format(Locale.US,
+                "pre=%.2f snapAgeMs=%d domPx=%s vs=%s top[%s]",
+                prePx, snapAgeMs,
+                dom == null ? "" : String.format(Locale.US, "%.2f", dom.pricePts),
+                dom == null ? "" : String.format(Locale.US, "%.2f", dom.vsMed),
+                top);
     }
 
     private void maybeResolve(long tsNs) {
@@ -857,24 +920,140 @@ public final class SliceEventTracker {
         return side * (p1 - p0);
     }
 
+    /**
+     * Research-aligned burst: 2 s windows on a 250 ms grid, clustered within 5 s.
+     * Ignition/pre come from the <b>first</b> qualifying window in the latest
+     * cluster (not the sliding [now−2s, now] first print — that pulled pre down
+     * to 29183 on 100926 and put 29200 outside the +40-tick stack zone).
+     */
     private LegBurst detectBurst(String role, Deque<Print> q, long nowNs) {
-        if (q.isEmpty()) {
+        if (q.isEmpty() || nowNs < cfg.burstWinNs) {
             return null;
         }
-        long winStart = nowNs - cfg.burstWinNs;
+        boolean nq = "NQ".equals(role);
+        long win = cfg.burstWinNs;
+        // Grid-align the latest confirm time at or before now.
+        long confirmAligned = nowNs - (nowNs % BURST_GRID_NS);
+        long startMax = confirmAligned - win;
+        long searchLo = startMax - BURST_CLUSTER_NS;
+        if (searchLo < 0) {
+            searchLo = 0;
+        }
+
+        LegBurst clusterFirst = null;
+        LegBurst clusterBest = null;
+        long clusterAnchor = -1;
+        LegBurst latestClusterFirst = null;
+        LegBurst latestClusterBest = null;
+
+        for (long start = searchLo; start <= startMax; start += BURST_GRID_NS) {
+            WindowEval w = evalWindow(q, start, start + win, nq);
+            if (w == null) {
+                if (clusterFirst != null) {
+                    latestClusterFirst = clusterFirst;
+                    latestClusterBest = clusterBest != null ? clusterBest : clusterFirst;
+                    clusterFirst = null;
+                    clusterBest = null;
+                    clusterAnchor = -1;
+                }
+                continue;
+            }
+            if (clusterFirst == null) {
+                clusterFirst = w.toBurst();
+                clusterBest = clusterFirst;
+                clusterAnchor = start;
+            } else if (start - clusterAnchor <= BURST_CLUSTER_NS) {
+                if (Math.abs(w.dispPts) > Math.abs(clusterBest.endPx - clusterBest.prePx)) {
+                    clusterBest = w.toBurstKeepingIgnition(clusterFirst);
+                }
+            } else {
+                latestClusterFirst = clusterFirst;
+                latestClusterBest = clusterBest != null ? clusterBest : clusterFirst;
+                clusterFirst = w.toBurst();
+                clusterBest = clusterFirst;
+                clusterAnchor = start;
+            }
+        }
+        if (clusterFirst != null) {
+            latestClusterFirst = clusterFirst;
+            latestClusterBest = clusterBest != null ? clusterBest : clusterFirst;
+        }
+        if (latestClusterFirst == null) {
+            return null;
+        }
+        LegBurst out = latestClusterBest != null ? latestClusterBest : latestClusterFirst;
+        // Prefer first-window pre/ignition with best-window end stats.
+        out = new LegBurst(
+                latestClusterFirst.side,
+                latestClusterFirst.ignitionNs,
+                latestClusterFirst.confirmNs,
+                latestClusterFirst.prePx,
+                out.endPx,
+                out.vol,
+                out.delta,
+                out.nTrades);
+
+        LegBurst prev = nq ? lastNqBurst : lastEsBurst;
+        if (prev != null && prev.ignitionNs == out.ignitionNs && prev.side == out.side) {
+            return null;
+        }
+        // Rising edge: only emit once confirm is reached (start+2s <= now).
+        if (nowNs < out.confirmNs) {
+            return null;
+        }
+        return out;
+    }
+
+    private static final class WindowEval {
+        final int side;
+        final long startNs;
+        final long endNs;
+        final double firstPx;
+        final double lastPx;
+        final double dispPts;
+        final double vol;
+        final double delta;
+        final int n;
+
+        WindowEval(int side, long startNs, long endNs, double firstPx, double lastPx,
+                   double dispPts, double vol, double delta, int n) {
+            this.side = side;
+            this.startNs = startNs;
+            this.endNs = endNs;
+            this.firstPx = firstPx;
+            this.lastPx = lastPx;
+            this.dispPts = dispPts;
+            this.vol = vol;
+            this.delta = delta;
+            this.n = n;
+        }
+
+        LegBurst toBurst() {
+            return new LegBurst(side, startNs, endNs, firstPx, lastPx, vol, delta, n);
+        }
+
+        LegBurst toBurstKeepingIgnition(LegBurst first) {
+            return new LegBurst(first.side, first.ignitionNs, first.confirmNs,
+                    first.prePx, lastPx, vol, delta, n);
+        }
+    }
+
+    /** Half-open [startNs, endNs) — matches numpy searchsorted lo/hi. */
+    private WindowEval evalWindow(Deque<Print> q, long startNs, long endNs, boolean nq) {
         double firstPx = Double.NaN;
         double lastPx = Double.NaN;
         double vol = 0;
         double delta = 0;
         int n = 0;
-        long firstTs = -1;
         for (Print p : q) {
-            if (p.tsNs < winStart) {
+            if (p.tsNs < startNs) {
                 continue;
+            }
+            if (p.tsNs >= endNs) {
+                break;
             }
             if (Double.isNaN(firstPx)) {
                 firstPx = p.px;
-                firstTs = p.tsNs;
             }
             lastPx = p.px;
             vol += p.sz;
@@ -889,7 +1068,6 @@ public final class SliceEventTracker {
         if (side == 0) {
             return null;
         }
-        boolean nq = "NQ".equals(role);
         double minDisp = nq ? cfg.nqMinDispPts : cfg.esMinDispPts;
         double minVol = nq ? cfg.nqMinVol : cfg.esMinVol;
         double minAbsDelta = nq ? cfg.nqMinAbsDelta : cfg.esMinAbsDelta;
@@ -899,12 +1077,7 @@ public final class SliceEventTracker {
                 || Math.abs(imb) < minImb || Math.signum(delta) != side) {
             return null;
         }
-        // Avoid re-firing identical bursts every trade: require new confirm end
-        LegBurst prev = nq ? lastNqBurst : lastEsBurst;
-        if (prev != null && nowNs - prev.confirmNs < 250_000_000L && prev.side == side) {
-            return null;
-        }
-        return new LegBurst(side, firstTs, nowNs, firstPx, lastPx, vol, delta, n);
+        return new WindowEval(side, startNs, endNs, firstPx, lastPx, disp, vol, delta, n);
     }
 
     private TreeMap<Integer, Integer> book(String role, boolean isBid) {
