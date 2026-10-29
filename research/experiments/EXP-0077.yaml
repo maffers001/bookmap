@@ -1,0 +1,22 @@
+name: EXP-0077
+hypothesis: H68
+title: CFADE ↔ EXP-0061 flat hand-off book
+description: >
+  Promote study_combined_book hand-off to a registered kill. Legs frozen:
+  CFADE (against_m04 + ER≤0.30, vol RR 1:2) and EXP-0061 confirm-burst
+  continuation with ES-against exit (same ExhaustParams). flat_handoff =
+  single NQ book, 5s cooldown, 0061 exhaust → opposite CFADE within 500ms
+  without cooldown wait. Kill: OOS net > 0; beat independent CFADE+0061 sum
+  on OOS avg; n ≥ 50. MAT allocator-(c) reported only, not in kill. Do not
+  retune ExhaustParams / CFADE / 0061 brackets.
+detector: cfade_0061_handoff
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+modes: [flat_handoff, independent_sum]
+twins: [cfade_alone, cont0061_alone]
+kill:
+  oos_net_positive: true
+  beat_independent_sum_oos_avg: true
+  min_n: 50
+runner: python -m research.correlated.exp_0077_handoff

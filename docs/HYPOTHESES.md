@@ -824,10 +824,131 @@ After MAT entry, first opposite-side NQ absorption with MFE ≥ 0.5×TP forces
 market exit. Twin: dual ES+NQ. Do not stack with TP-extend on first pass.
 Distinct from H28 absorption-*entry*.
 
-**Test:** EXP-0073. **Result (2026-10-26): PASS `nq_absorb_exit`.** n=3621
-net +832 (OOS +460 avg +0.155); beats base and null. Dual FAIL. Note: exit_fn
-MFE is approximated (path MFE not visible). Needs future months + stricter
-0.5R path-MFE before ship. See `results/EXP-0073/`.
+**Test:** EXP-0073. **Result (2026-10-26): PASS approx → demoted by EXP-0076.**
+Approx arm n=3621 net +832 OOS +460. Path-aware 0.5R (H67) fails OOS net
+(−33) → **park** absorb-exit as research PASS. See EXP-0076.
+
+## H65 — Prior-close VIX keep-gates on MAT
+
+Claim: MAT prefers elevated equity vol; filter with causal VIX. Source: FRED
+VIXCLS; prior close strictly before session calendar day (UK window precedes
+same-day VIX close). Absolute arms `vix_ge_15/18/20/25`; relative
+`vix_hi_tercile` (prior ≥ p66.7 of trailing 60 VIX closes).
+
+**Test:** EXP-0074. **Result (2026-10-26): reject / park.** All keep-gates
+FAIL `oos_net_pos`. Best absolute arm `vix_ge_18` OOS −36 (beats base avg but
+still net−). `vix_hi_tercile` OOS **−707** — opposite of the claim. Descriptive
+only: mid tercile OOS +601 (not a pre-registered keep-gate; do not promote).
+No live VIX panel. See `results/EXP-0074/`.
+
+## H66 — Near-VWAP + ATR-expanded keep-gates on MAT
+
+From EXP-0067 strata (opposite of failed `atr_room` / `vwap_band`): keep when
+same-side \|dist\|/med_r30 ≤ 0.5, or when range_so_far / prior_ATR ≥ 1.0;
+one combo with `rot_fresh_0.90`.
+
+**Test:** EXP-0075. **Result (2026-10-26): PASS all three arms** (research
+only). `vwap_near_0.5` n=307 OOS +194 avg +0.77; `atr_expanded` n=744 OOS
++210 avg +0.34; `rot_fresh_and_vwap_near` n=132 OOS +287 avg +2.76. No live
+defaults; no stacking on current OOS; needs virgin months. See
+`results/EXP-0075/`.
+
+## H67 — Path-aware 0.5R absorb exit
+
+Harden H64: opposite absorb may force exit only after path MFE ≥ 0.5×TP.
+
+**Test:** EXP-0076. **Result (2026-10-26): reject path arm; demote H64.**
+`nq_absorb_path_mfe` OOS −33 FAIL; approx twin still PASS (replicates 0073).
+Absorb-exit edge does not survive true MFE gate → park. See
+`results/EXP-0076/`.
+
+## H68 — CFADE ↔ EXP-0061 flat hand-off book
+
+Single NQ book: 0061 continuation exhaust → opposite CFADE within 500 ms
+(no cooldown). Kill: beat independent CFADE+0061 sum on OOS avg.
+
+**Test:** EXP-0077. **Result (2026-10-26): reject / park.** flat_handoff
+OOS +513 avg +0.24 but independent sum OOS avg +0.38 — hand-off does not
+add value beyond running both independently (95 hand-offs). Keep legs
+separate. See `results/EXP-0077/`.
+
+## H69 — Daily Open (DOP) break, trap-side amount dose-response
+
+After UK 14:30 open, volume builds on one side of the Daily Open (trap /
+false side). When price later breaks through the DOP to the other side,
+traders trapped on the wrong side of the open fuel continuation. Enter at
+the first break in the break direction (long and short mirrored). Core
+claim: **absolute** trap-side volume and/or aggressor delta (causally
+z-scored vs prior-14 same-market sessions) predict continuation — more
+trapped size → higher hit rates / better forward returns. Share and shape
+(V vs sideways) are secondary. Window UK 14:30–21:00; NQ + ES.
+
+**Primary (frozen a priori):** Arm B (high trap-side amount:
+`trap_vol_z ≥ 0` and `trap_share ≥ 0.55`) beats Arm A (all first breaks)
+on forward outcomes and on both preregistered books. Arm C = B + break-time
+5 s imbalance ≥ 0.20 (secondary; cannot promote over a failed B). Headline
+Stage 1 analysis = dose-response terciles of `trap_vol` / `trap_delta`.
+
+**Test:** EXP-0078 (`research/features/daily_open.py`,
+`research/dop/exp_0078_dop.py`). Discovery Apr–Aug 2026; Sep–Oct 2026
+holdout read once after a discovery pass. Stage 0 power: ≥30 Arm A events
+per market and ≥10 of each side pooled, else park with counts. No retune
+of grace, pierce, amount cuts, or brackets on this sample.
+**Result (EXP-0078): reject / park — Stage 3 holdout fail (no retune).** See `results/EXP-0078/`.
+
+## H70 — DOP break: beyond-zone stack traversal (NQ, depth)
+
+Follow-up to parked H69 using **new information (depth)** — not a retune
+of EXP-0078. For an NQ DOP break, the beyond zone is the resting asks
+DOP+10..DOP+20 pts on a long break (mirrored bids on a short). User claim:
+price moving **through** that stack with speed marks a good trade.
+
+**Primary (frozen a priori):** (mechanism) fast traversal of the zone
+(entered ≤15 min after break, crossed in ≤60 s) separates continued from
+failed DOP breaks in forward outcomes from the DOP entry; (tradable)
+confirmation entry at zone exit (DOP±20) on fast traversals beats DOP
+entry (Arm A) on Book 2 vol RR. At-break zone resting/pull state is
+secondary (EXP-0043 pre-touch nulls are the warning). Depth universe:
+DOP breaks on sessions with depth.
+
+**Test:** EXP-0079 (`research/features/dop_zone.py`,
+`research/dop/exp_0079_zone.py`). Discovery Apr–Aug 2026 depth sessions.
+Sep–Oct 2026 = **semi-OOS only** (EXP-0078 already read its tape
+outcomes); clean holdout requires future months. No retune of zone,
+caps, or brackets on this sample.
+**Result (EXP-0079): reject / park — Stage 2 discovery P&L fail (no semi-OOS read, no retune).** See `results/EXP-0079/`.
+
+## H71 — DOP entry + beyond-zone stall-scratch exit
+
+Final DOP-thread test (design informed by EXP-0079 discovery; Apr–Aug
+is training for this rule). Enter at the DOP break (NQ, depth universe);
+if the DOP±10..20 zone is not entered within 15 min, or is entered but
+not crossed within 60 s, scratch at that decision print; fast traversals
+run the normal Book 2 vol-RR bracket. Hypothesis: cutting stall trades
+early lifts the DOP-entry book (fast +19.6 vs slow −8.3 @300s in 0079)
+without giving up the 20 pts that killed zone-exit entry.
+
+**Test:** EXP-0080 (`research/dop/exp_0080_mgmt.py`, reuses 0079 zone
+features). Discovery gate: MGMT avg ≥ BASE avg + 1.0, net and maxDD not
+worse. Then **one** Sep–Oct read (semi-holdout: zone features never
+computed there). Fail = DOP thread closed. Pass = virgin months only.
+**Result (EXP-0080): reject / park — Stage 1 discovery fail (no Sep-Oct read, no retune); DOP thread closed.** See `results/EXP-0080/`.
+
+## H72 — DOP break: pre-break final-approach chew
+
+Causal re-timing of H70's traversal claim (new feature timing; Apr–Aug
+is training). For an NQ DOP break, measure the **final approach**: last
+print at/beyond DOP∓20 (trap side) before the break, then the chew
+through resting orders in the 20 pts into the DOP. Gate at the break
+entry (no points surrendered, unlike H70's zone exit): approach crossed
+in ≤60 s = fast. Hypothesis: fast approach-chew DOP breaks continue
+better than slow-approach breaks from the DOP entry itself.
+
+**Test:** EXP-0081 (`research/features/dop_zone.py:compute_approach_features`,
+`research/dop/exp_0081_approach.py`). Discovery Apr–Aug depth sessions;
+Sep–Oct semi-holdout once after a pass (approach features never computed
+there); clean validation requires future months. Fail = reject/park.
+**Result (EXP-0081): reject / park — Stage 3 semi-holdout fail (no retune).** See `results/EXP-0081/`.
 
 ---
 
@@ -836,6 +957,7 @@ MFE is approximated (path MFE not visible). Needs future months + stricter
 Post-EXP-0050 dig map: **`docs/CORRELATED_IDEAS_2026-10-23.md` §8**.
 Tier A complete (EXP-0051–0054). CFADE-family queue EXP-0057–0066 ran
 2026-10-26 — see `results/CFADE_FAMILY_SYNTHESIS/`. MAT context queue
-EXP-0067–0073 / H58–H64 — see `results/MAT_CONTEXT_SYNTHESIS/`. Still open: B2
-StackConsume ES-context, C4 multi-second absorption (one shot), D2 iceberg
-feature (after tighter count), legacy EXP-0033 / EXP-0020.
+EXP-0067–0076 / H58–H67 + H68 hand-off — see `results/MAT_CONTEXT_SYNTHESIS/`
+and `results/EXP-0077/`. Still open: B2 StackConsume ES-context, C4
+multi-second absorption (one shot), D2 iceberg feature (after tighter
+count), legacy EXP-0033 / EXP-0020.

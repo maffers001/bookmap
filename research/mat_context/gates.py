@@ -40,6 +40,8 @@ def gate_masks(ev: pa.Table) -> dict[str, np.ndarray]:
     sma_ready = _icol(ev, "cd_sma_ready")
     vwda = _col(ev, "vwap_dist_aligned")
     vwdn = _col(ev, "vwap_dist_norm")
+    vix = _col(ev, "vix_prior")
+    vix_hi = _col(ev, "vix_hi_tercile")
 
     with_leg = (side == rot_leg) & (rot_leg != 0)
     rot_fresh = (rot_ready == 0) | ((rot_ready == 1) & with_leg & np.isfinite(rot_ratio) & (rot_ratio < 0.90))
@@ -65,7 +67,12 @@ def gate_masks(ev: pa.Table) -> dict[str, np.ndarray]:
     same_side_vwap = np.isfinite(vwda) & (vwda > 0)
     vwap_band = same_side_vwap & np.isfinite(vwdn) & (vwdn >= 0.5) & (vwdn <= 2.0)
     vwap_not_ext = same_side_vwap & np.isfinite(vwdn) & (vwdn <= 2.0)
+    vwap_near = same_side_vwap & np.isfinite(vwdn) & (vwdn <= 0.5)
+    # Missing ATR → skip (do not silently keep)
+    atr_expanded = np.isfinite(atr_r) & (atr_r >= 1.0)
 
+    # Missing VIX → skip (do not silently keep)
+    vix_ok = np.isfinite(vix)
     return {
         "base": np.ones(n, dtype=bool),
         "rot_fresh_0.90": rot_fresh.astype(bool),
@@ -76,6 +83,16 @@ def gate_masks(ev: pa.Table) -> dict[str, np.ndarray]:
         "cd_cheap_B": arm_b.astype(bool),
         "vwap_band_0.5_2.0": vwap_band.astype(bool),
         "vwap_not_extended": vwap_not_ext.astype(bool),
+        # H66 / EXP-0075 — near-VWAP + ATR-expanded (opposite of failed room/band)
+        "vwap_near_0.5": vwap_near.astype(bool),
+        "atr_expanded": atr_expanded.astype(bool),
+        "rot_fresh_and_vwap_near": (rot_fresh & vwap_near).astype(bool),
+        # H65 / EXP-0074 — prior-close VIX keep-gates
+        "vix_ge_15": (vix_ok & (vix >= 15.0)).astype(bool),
+        "vix_ge_18": (vix_ok & (vix >= 18.0)).astype(bool),
+        "vix_ge_20": (vix_ok & (vix >= 20.0)).astype(bool),
+        "vix_ge_25": (vix_ok & (vix >= 25.0)).astype(bool),
+        "vix_hi_tercile": (vix_ok & (vix_hi >= 0.5)).astype(bool),
         # descriptive helpers for 0067
         "cd_sig": cd_sig,
         "rot_ratio": rot_ratio,

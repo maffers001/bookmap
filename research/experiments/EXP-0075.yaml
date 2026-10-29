@@ -1,0 +1,20 @@
+name: EXP-0075
+hypothesis: H66
+title: Near-VWAP + ATR-expanded keep-gates on frozen MAT
+description: >
+  Last MAT context shot from EXP-0067 strata (opposite of failed atr_room /
+  vwap_band). Arms: vwap_near_0.5 (same-side |dist|/med_r30 ≤ 0.5),
+  atr_expanded (range_so_far / prior_ATR ≥ 1.0; missing ATR → skip),
+  rot_fresh_and_vwap_near (one combo). Kill vs ungated MAT + null. No
+  neighbouring threshold dig on this sample. Host frozen MAT; no CFADE retune.
+detector: mat_vwap_near_atr_expanded
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+arms: [vwap_near_0.5, atr_expanded, rot_fresh_and_vwap_near]
+kill:
+  oos_net_positive: true
+  beat_base_oos_avg: true
+  beat_null_oos_avg: true
+  min_n: 50
+runner: python -m research.mat_context.run_queue --exp EXP-0075

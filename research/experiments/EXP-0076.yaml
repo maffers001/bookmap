@@ -1,0 +1,20 @@
+name: EXP-0076
+hypothesis: H67
+title: Path-aware 0.5R absorb exit on frozen MAT
+description: >
+  Harden EXP-0073. Primary arm nq_absorb_path_mfe requires MFE ≥ 0.5×TP on
+  the NQ path before the first opposite-side absorption can force exit.
+  Twin nq_absorb_approx = EXP-0073 behaviour (first opposite absorb after
+  entry, no path MFE). Kill vs base MAT + null. If path-MFE kills the edge,
+  demote 0073 to park. Do not stack with TP-extend.
+detector: mat_absorb_path_mfe
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+arms: [nq_absorb_path_mfe, nq_absorb_approx]
+kill:
+  oos_net_positive: true
+  beat_base_oos_avg: true
+  beat_null_oos_avg: true
+  min_n: 50
+runner: python -m research.mat_context.run_queue --exp EXP-0076

@@ -6,7 +6,12 @@ Matches Momentum AutoTrade (and v2) as closely as offline trades allow:
   - Entry = first NQ trade at/after burst bar end
   - Flat-only, signal cooldown
   - Symmetric TP/SL in NQ chart points; if a trade path touches both, stop wins
-  - Optional 1-tick (0.25 pt) slippage per side
+  - Brackets are tick offsets from the fill (Bookmap SimpleOrderSendParameters).
+    TP exits at the limit; SL exits at the stop. No extra exit slip on those
+    legs — older code slipped both entry and exit, which double-counted cost
+    vs Bookmap Replay SIM and could not match session P&L.
+  - Optional entry slip (``slip_ticks``) and market-exit slip (time / force / eod).
+    Round-trip ``commission_pts_rt`` is applied once per trade in the summary.
 """
 from __future__ import annotations
 
@@ -197,7 +202,8 @@ def _simulate_path(
     ``tp_extend_step_pts`` (default = initial ``tp_pts``). SL unchanged. Debounce
     until price backs away to 1.5× proximity.
     """
-    entry = float(path_px[entry_i]) + side * slip_pts  # worse fill
+    # Entry fill; brackets are offsets from this fill (Bookmap tpTicks/slTicks).
+    entry = float(path_px[entry_i]) + side * slip_pts  # optional worse entry
     entry_ts = int(path_ts[entry_i])
     tp = entry + side * tp_pts
     init_sl = entry - side * sl_pts
@@ -225,7 +231,7 @@ def _simulate_path(
 
         if be_trigger_pts > 0 and mfe >= be_trigger_pts and not be_armed:
             be_armed = True
-            # Move stop to entry (breakeven fill before exit slip)
+            # Move stop to entry (breakeven)
             sl = entry if side > 0 else entry
             if side > 0:
                 sl = max(sl, entry)
@@ -272,21 +278,24 @@ def _simulate_path(
 
         hit_tp = px >= tp if side > 0 else px <= tp
         hit_sl = px <= sl if side > 0 else px >= sl
+        # Bracket exits: fill at the working price (LMT at TP, STP at SL).
+        # Do not apply exit slip — Bookmap Replay fills these at the offset level.
         if hit_tp and hit_sl:
-            exit_px = sl - side * slip_pts
+            exit_px = sl
             pnl = side * (exit_px - entry)
             reason = _stop_reason(sl, entry, init_sl, be_armed, trail_armed, side)
             return exit_px, pnl, pnl > 0, j - entry_i, reason
         if hit_sl:
-            exit_px = sl - side * slip_pts
+            exit_px = sl
             pnl = side * (exit_px - entry)
             reason = _stop_reason(sl, entry, init_sl, be_armed, trail_armed, side)
             return exit_px, pnl, pnl > 0, j - entry_i, reason
         if hit_tp:
-            exit_px = tp - side * slip_pts
+            exit_px = tp
             pnl = side * (exit_px - entry)
             reason = "tp_ext" if extend_count > 0 else "tp"
             return exit_px, pnl, True, j - entry_i, reason
+        # Market-style exits still pay optional adverse slip.
         if time_ns > 0 and int(path_ts[j]) - entry_ts >= time_ns:
             exit_px = px - side * slip_pts
             pnl = side * (exit_px - entry)
@@ -534,11 +543,13 @@ def simulate_session(
         last_exit_ts = int(ts[exit_i])
         last_signal_ts = t0
 
+        # Record the fill used for PnL (path ± entry slip), not the raw path print.
+        entry_fill = float(px[entry_i]) + side * slip_pts
         tr = TradeResult(
             session_id=session_id,
             entry_ts_ns=t0,
             side=side,
-            entry_px=float(px[entry_i]),
+            entry_px=entry_fill,
             exit_px=exit_px,
             pnl=pnl,
             win=win,

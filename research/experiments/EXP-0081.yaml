@@ -1,0 +1,58 @@
+name: EXP-0081
+hypothesis: H72
+title: DOP break — pre-break final-approach chew (NQ, depth)
+description: >
+  Causal re-timing of EXP-0079's traversal idea (new feature timing, not
+  a retune of 0078/0079/0080 exits). Universe: NQ DOP breaks with depth.
+  Final approach (long): last print at/below DOP-20 before the break;
+  from there price must chew resting asks DOP-20..DOP into the break.
+  Mirror for shorts (bids DOP..DOP+20).
+  Primary gate (frozen): approach_fast = approach traversed in <= 60 s.
+  Features at break (all causal): approach_sec, approach_speed,
+  executed_into_approach_zone, approach_resting (snapshot at approach
+  start), consume_frac, pullback_in_approach, path_efficiency.
+  Arms: A all depth breaks; F approach_fast; S approach reached but slow.
+  No-approach breaks (trap excursion < 20 pts) counted/descriptive only.
+  Books at DOP entry: Book 2 vol RR (primary) + fixed asym SL20/TP40
+  (secondary, from DOP_ASYM_BRACKET study design).
+  Concordance: share of post-break fast traversals (EXP-0079) among
+  approach-fast vs approach-slow (mechanism check, descriptive).
+  Stages: 0 approach coverage + truncation causality + power (>=30
+  approach-reached, >=10 fast, >=10 slow); 1 event study A/F/S vs null;
+  2 Book 2 gate: F avg >= A avg + 1.0, F net > 0, F n >= 10; 3 Sep-Oct
+  semi-holdout one read after pass (approach features never computed
+  there; DOP tape outcomes seen in earlier studies, so not clean).
+  Fail = reject/park, no retune. Pass = virgin months only.
+
+detector: dop_approach  # runner: research/dop/exp_0081_approach.py
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+horizons_ms: [60000, 300000, 900000, 1800000]
+point_targets_nq: [5, 10, 20]
+
+approach:
+  zone_pts: 20.0
+  fast_cap_sec: 60
+  depth_seed_min_before_open: 30
+  grace_min: 5
+  pierce_ticks: 1
+  large_pct: 99.9
+  large_min: 15
+
+asym_nq:
+  sl_pts: 20.0
+  tp_pts: 40.0
+
+kill:
+  min_approach_reached: 30
+  min_fast: 10
+  min_slow: 10
+  min_gate_n: 10
+  min_avg_lift_pts: 1.0
+
+placebo_seed: 81
+
+discovery_months: ["0426", "0526", "0626", "0726", "0826"]
+semi_oos_months: ["0926", "1026"]
+exclude_sessions: ["smoke_synthetic"]
+run_semi_oos: false

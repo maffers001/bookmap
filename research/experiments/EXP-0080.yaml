@@ -1,0 +1,60 @@
+name: EXP-0080
+hypothesis: H71
+title: DOP break entry + beyond-zone stall-scratch exit (NQ, depth)
+description: >
+  Final DOP-thread test. Informed by EXP-0079 Stage 1 (Apr-Aug is now
+  training for this design): fast traversal of the DOP±10..20 zone marked
+  good DOP-entry trades, slow/no traversal marked bad ones, but entering
+  at zone exit gave the edge back. Here traversal speed is used as an
+  in-trade exit read on the original DOP entry, not as an entry.
+  Universe: NQ DOP breaks with depth (EXP-0079 zone features, reused).
+  Entry: DOP break print (Arm A, all depth-universe breaks).
+  Exit arms:
+    BASE bracket only (Book 2 vol RR SL1/TP2 k=1 clip 4-40).
+    MGMT same bracket + stall scratch:
+      - zone not entered within 15 min of break -> exit at break+15 min
+      - zone entered in time but not crossed within 60 s -> exit at
+        zone-entry + 60 s
+      - fast traversal (incl. jump-through) -> no scratch; bracket runs
+    Decision timestamps are causal (known when the clock expires);
+    simulator force-exit at first print >= decision time, TP/SL win ties.
+  Stages: 0 counts/power (>=40 depth breaks, >=15 fast, >=15 stall);
+  1 discovery P&L gate: MGMT avg >= BASE avg + 1.0 pt, MGMT net >
+  BASE net, MGMT maxDD <= BASE maxDD; scratched-subset diagnostic.
+  2 Sep-Oct ONE read only after discovery pass (zone features for
+  Sep-Oct have never been computed; EXP-0078 read tape outcomes there,
+  so this is a semi-holdout): MGMT avg > BASE avg and MGMT net > 0.
+  Fail anywhere = reject/park and the DOP thread is closed (no EXP-0081
+  on this sample). Pass = pending virgin-month validation only.
+
+detector: dop_stall_exit  # runner: research/dop/exp_0080_mgmt.py
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+
+dop_zone:  # must match EXP-0079 (zone cache reuse)
+  market: "NQ"
+  zone_inner_pts: 10.0
+  zone_outer_pts: 20.0
+  depth_seed_min_before_open: 30
+  traversal_cap_sec: 60
+  zone_entry_deadline_min: 15
+  traversal_observe_min: 30
+  grace_min: 5
+  pierce_ticks: 1
+  large_pct: 99.9
+  large_min: 15
+
+stall:
+  entry_deadline_min: 15
+  traversal_cap_sec: 60
+
+kill:
+  min_depth_breaks: 40
+  min_fast: 15
+  min_stall: 15
+  min_avg_lift_pts: 1.0
+
+discovery_months: ["0426", "0526", "0626", "0726", "0826"]
+semi_oos_months: ["0926", "1026"]
+exclude_sessions: ["smoke_synthetic"]
+run_semi_oos: false

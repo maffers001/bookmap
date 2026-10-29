@@ -2,8 +2,8 @@
 # Frozen before EXP-0067+ outcomes. Host = frozen MAT. Do not retune CFADE.
 
 name: MAT_CONTEXT_PROTOCOL
-next_exp: EXP-0067
-title: MAT context, CD, and exits
+next_exp: EXP-0075
+title: MAT context, CD, exits, VIX, near-VWAP/ATR, path absorb
 
 sample:
   exclude_sessions: ["200626", "220626"]  # May tapes misfiled as June
@@ -59,6 +59,16 @@ queue:
   - EXP-0071  # H62 structural SL
   - EXP-0072  # H63 TP-extend
   - EXP-0073  # H64 absorption exit after min-TP
+  - EXP-0074  # H65 prior-close VIX keep-gates
+  - EXP-0075  # H66 near-VWAP + ATR-expanded
+  - EXP-0076  # H67 path-aware 0.5R absorb exit
+
+vix:
+  source: FRED VIXCLS
+  causal: prior_close_before_session_date
+  lookback_closes: 60
+  absolute_arms: [15, 18, 20, 25]
+  relative_arm: hi_tercile  # prior >= p66.7 of trailing lookback
 
 session_rotation:
   lookback_ms: 900000   # 15 min

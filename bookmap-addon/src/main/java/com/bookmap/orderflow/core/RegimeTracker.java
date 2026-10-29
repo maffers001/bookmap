@@ -224,8 +224,21 @@ public final class RegimeTracker {
      * fewer than {@code minBars} bars.
      */
     public double medianRangeSinceSessionOpen(long asofNs, int minBars) {
-        if (sessionVwapFromNs < 0) {
+        Snapshot s = snapshotSession(asofNs, Integer.MAX_VALUE);
+        if (s.nBars < Math.max(1, minBars)) {
             return Double.NaN;
+        }
+        return s.medianMinuteRange;
+    }
+
+    /**
+     * Like {@link #snapshot(int, long)} but only minutes at/after session open.
+     * Matches research when the tape effectively starts at UK open (no quiet
+     * pre-open bars diluting med_r30 for {@code vwap_near}).
+     */
+    public Snapshot snapshotSession(long asofNs, int windowMin) {
+        if (sessionVwapFromNs < 0) {
+            return snapshot(windowMin, asofNs);
         }
         long openSlot = (sessionVwapFromNs / MINUTE_NS) * MINUTE_NS;
         List<MinuteBar> closed = new ArrayList<>();
@@ -237,20 +250,11 @@ public final class RegimeTracker {
         if (current != null && current.tsNs >= openSlot && current.endNs() <= asofNs) {
             closed.add(current);
         }
-        if (closed.size() < Math.max(1, minBars)) {
-            return Double.NaN;
+        if (closed.isEmpty()) {
+            double vwap = sessionVol > 0 ? sessionPv / sessionVol : Double.NaN;
+            return new Snapshot(0, 0, 0, vwap, 0, lastTradePx, 0);
         }
-        double[] ranges = new double[closed.size()];
-        for (int i = 0; i < closed.size(); i++) {
-            MinuteBar b = closed.get(i);
-            ranges[i] = b.high - b.low;
-        }
-        Arrays.sort(ranges);
-        double med = ranges[ranges.length / 2];
-        if (ranges.length % 2 == 0 && ranges.length >= 2) {
-            med = 0.5 * (ranges[ranges.length / 2 - 1] + ranges[ranges.length / 2]);
-        }
-        return med;
+        return snapshotFromBars(closed, windowMin);
     }
 
     /** Completed minute bars counted toward {@link #medianRangeSinceSessionOpen}. */

@@ -1,0 +1,78 @@
+name: EXP-0078
+hypothesis: H69
+title: Daily Open (DOP) break — trap-side volume/delta amount dose-response (ES + NQ)
+description: >
+  DOP = first traded price at/after UK 14:30 Europe/London per market.
+  After a 5-minute grace, volume builds on one side of the DOP (trap/false
+  side). First print >= 1 tick through the DOP to the opposite side is the
+  break; enter in the break direction (fade the trapped side). Long and short
+  are mirrored. Core claim: absolute trap-side volume and/or aggressor delta
+  (causally z-scored vs prior-14 same-market sessions) predict continuation —
+  dose-response, not share alone. Shape (V vs sideways) is secondary.
+  ARMS (frozen before any outcome is read):
+    A price-only: every first DOP break after grace (both sides).
+    B high trap-side amount (PRIMARY GATE): trap_vol_z >= 0 AND
+      trap_share >= 0.55 (identical thresholds both sides). Entry at break.
+    C amount + break-flow confirm (SECONDARY, cannot promote over failed B):
+      Arm B and traded-market trailing-5s aggressor imbalance in break
+      direction >= 0.20. Entry at break.
+  SESSION STATE: prior-14 same-market median trap_vol / trap_delta for z
+  (MAD). Warmup until 14 prior sessions with a break exist.
+  BOOKS (simulate_session events override, flat-only, 1-tick slip,
+  0.25 pt/RT, tape clipped to 21:00 UK): Book 1 psychology-faithful SL
+  1 tick beyond DOP on trap side, TP = 2R. Book 2 house yardstick vol RR
+  SL1/TP2 (make_vol_bracket_rr k=1, clip 4-40).
+  Sequential: Stage 0 causality + 21:00 coverage + power (>=30 Arm A per
+  market and >=10 each side pooled on discovery); Stage 1 event study
+  (dose-response terciles of trap_vol/trap_delta; Arms A/B/C vs nulls);
+  Stage 2 discovery P&L gate bar; Stage 3 Sep-Oct 2026 holdout ONCE after
+  Stages 1-2 pass. Any failure = reject/park, no retune on this sample.
+
+detector: dop_break  # runner: research/dop/exp_0078_dop.py
+bar_ms: 100
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+signal_cooldown_sec: 5.0
+horizons_ms: [10000, 60000, 300000, 900000, 1800000]
+point_targets_nq: [5, 10, 20]
+point_targets_es: [2, 4, 8]
+
+daily_open:
+  start_uk: "14:30"
+  window_end_uk: "21:00"
+  grace_min: 5
+  pierce_ticks: 1
+  first_break_only: true
+  max_first_print_delay_sec: 60
+  prior_sessions: 14
+  # Arm B gates (frozen a priori)
+  trap_vol_z_min: 0.0
+  trap_share_min: 0.55
+  # Arm C
+  break_imb_min: 0.20
+  break_flow_window_sec: 5
+  # Shape strata (descriptive; not Arm B)
+  v_extreme_vol_share_min: 0.40
+  v_excursion_pts_nq: 5.0
+  v_excursion_pts_es: 2.0
+
+dop_flow:
+  bar_ms: 100
+  placebo_draws: 1000
+  placebo_seed: 78
+  shifted_placebo_sec: 60
+
+kill:
+  min_arm_a_per_market: 30
+  min_side_pooled: 10
+  min_kept_n: 20
+  min_dropped_n: 20
+  min_avg_lift_pts_nq: 1.0
+  min_avg_lift_pts_es: 0.5
+  min_net_retained_frac: 0.60
+  max_dd_must_not_worsen: true
+
+discovery_months: ["0426", "0526", "0626", "0726", "0826"]
+holdout_months: ["0926", "1026"]
+exclude_sessions: ["smoke_synthetic"]
+run_holdout: false

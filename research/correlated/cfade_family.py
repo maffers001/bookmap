@@ -33,7 +33,10 @@ from research.run_cfade_all_months import _discover_sessions, _sid_chrono_key
 
 # --- Sample discipline -------------------------------------------------------
 
-EXCLUDE = {"200626", "220626"}  # May tapes misfiled under June names
+EXCLUDE = {
+    "200626", "220626",  # May tapes misfiled under June names
+    "300326",  # exact duplicate of 270326 (same trades hash / timestamps)
+}
 
 DIG4_23 = [
     "011026", "021026", "030826", "040826", "050826", "051026", "061026",
@@ -72,7 +75,8 @@ def frozen_bracket():
     return make_vol_bracket_rr(1.0, tp_r=2.0, sl_r=1.0, floor=4.0, cap=40.0)
 
 
-def frozen_sim_cfg(*, slip_ticks: float = 1.0, commission: float = COMMISSION) -> MatSimConfig:
+def frozen_sim_cfg(*, slip_ticks: float = 0.0, commission: float = COMMISSION) -> MatSimConfig:
+    """CFADE path sim — bracket exits match Bookmap (fill at TP/SL, no exit slip)."""
     return MatSimConfig(
         slip_ticks=slip_ticks,
         commission_pts_rt=commission,
@@ -91,7 +95,13 @@ def mat_vol_bracket():
     return make_vol_bracket(1.0, floor=6.0, cap=30.0)
 
 
-def mat_sim_cfg(*, slip_ticks: float = 1.0, es_stamp: str = "causal") -> MatSimConfig:
+def mat_sim_cfg(*, slip_ticks: float = 0.0, es_stamp: str = "causal") -> MatSimConfig:
+    """MAT path sim aligned with Bookmap Replay bracket fills.
+
+    Default ``slip_ticks=0``: TP/SL are offsets from the fill and exit at the
+    working price (no exit slip). ``commission_pts_rt`` remains a separate
+    round-trip cost for research nets; Bookmap SIM price P&L is ``gross``.
+    """
     return MatSimConfig(
         slip_ticks=slip_ticks,
         commission_pts_rt=COMMISSION,
@@ -132,7 +142,7 @@ def simulate_cfade(
     events: pa.Table | None = None,
     gate=None,
     bracket_fn=None,
-    slip_ticks: float = 1.0,
+    slip_ticks: float = 0.0,
     primary: str = "nq",
     commission: float | None = None,
     cfg: MatSimConfig | None = None,
@@ -168,7 +178,7 @@ def simulate_cfade(
     )
 
 
-def simulate_mat(pair: H.Pair, *, gate=None, bracket_fn=None, slip_ticks: float = 1.0) -> SimSummary:
+def simulate_mat(pair: H.Pair, *, gate=None, bracket_fn=None, slip_ticks: float = 0.0) -> SimSummary:
     g = gate if gate is not None else mat_frozen_gate()
     br = bracket_fn if bracket_fn is not None else mat_vol_bracket()
     return simulate_session(

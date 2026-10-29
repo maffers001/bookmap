@@ -1,0 +1,70 @@
+name: EXP-0079
+hypothesis: H70
+title: DOP break — beyond-zone resting stack and traversal speed (NQ, depth)
+description: >
+  Follow-up to parked EXP-0078 (no retune of 0078). New information: depth.
+  Universe = EXP-0078 DOP breaks (NQ only) on sessions with depth.parquet.
+  Beyond zone for a long break = resting asks DOP+10..DOP+20 pts
+  (40..80 ticks); mirrored bids for shorts.
+  Q2 PRIMARY (user claim): price moving through that zone with speed marks
+  a good trade. Measured first as mechanism (fast vs slow/no traversal from
+  the DOP entry), then as a tradable confirmation entry at zone exit.
+  Q1 SECONDARY: at-break zone state (resting size, pulled vs built over the
+  last 60 s) predicts continuation. Expected-null risk per EXP-0043
+  pre-touch scores; cannot promote over a failed Q2.
+  ARMS:
+    A DOP entry on all depth-universe breaks (control).
+    T fast-traversal subset at DOP entry (MECHANISM ONLY — traversal is
+      known only after the break; never a tradable gate at DOP).
+    C confirmation entry at zone exit (first print >= DOP+20 long /
+      <= DOP-20 short), only if zone entered within 15 min of the break
+      and traversed in <= 60 s. Entry = zone-exit print.
+  FEATURES (depth replay seeded from 30 min before UK open):
+    zone_resting at break (sum / max / n_large in band), stack_build_60s
+    (log ratio of zone size at break vs 60 s before; <0 = pulled),
+    time_to_zone / time_to_exit, traversal_sec, executed_into_zone,
+    consume_frac = executed / zone_resting, pullback_in_zone.
+  BOOKS (Book 2 house yardstick only; Book 1 risk from +20 entry to DOP
+  is not the claim): vol RR SL1/TP2 (k=1, clip 4-40), 1-tick slip,
+  0.25 pt/RT, exit 21:00 UK.
+  Stages: 0 depth feasibility + causality (zone features invariant to
+  truncation at break) + power (>=40 depth breaks pooled discovery,
+  >=15 fast traversals); 1 event study (A/T/C vs time-matched null;
+  Q1 strata descriptive); 2 P&L C vs A on Book 2 with random-skip
+  placebo; 3 Sep-Oct depth sessions reported as SEMI-OOS only after a
+  discovery pass (EXP-0078 already read Sep-Oct tape outcomes, so this
+  is not a clean holdout; clean validation requires future months).
+  Any failure = reject/park, no retune on this sample.
+
+detector: dop_zone  # runner: research/dop/exp_0079_zone.py
+bar_ms: 100
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+horizons_ms: [60000, 300000, 900000, 1800000]
+point_targets_nq: [5, 10, 20]
+
+dop_zone:
+  market: "NQ"
+  zone_inner_pts: 10.0
+  zone_outer_pts: 20.0
+  depth_seed_min_before_open: 30
+  traversal_cap_sec: 60
+  zone_entry_deadline_min: 15
+  traversal_observe_min: 30
+  grace_min: 5
+  pierce_ticks: 1
+  large_pct: 99.9
+  large_min: 15
+
+kill:
+  min_depth_breaks: 40
+  min_fast_traversals: 15
+  min_confirm_n: 15
+
+placebo_draws: 1000
+placebo_seed: 79
+
+discovery_months: ["0426", "0526", "0626", "0726", "0826"]
+semi_oos_months: ["0926", "1026"]
+exclude_sessions: ["smoke_synthetic"]
+run_semi_oos: false

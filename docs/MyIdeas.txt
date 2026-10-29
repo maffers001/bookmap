@@ -37,3 +37,8 @@ TODO Next:
     - practice bookmap at LVNs
     - need bigger trade ideas
     - take value seriously - outside va is cheap
+    - LVN trade on FX pairs - need to collect LVNs
+    - Investigate DOP trade - checking for volume one side and large delta the other [H69/EXP-0078 under investigation]
+    - Backtest gamma levels + lvn from replay data on Deepcharts
+    - download more months
+    - point AI toward specific price events like momentum breakouts

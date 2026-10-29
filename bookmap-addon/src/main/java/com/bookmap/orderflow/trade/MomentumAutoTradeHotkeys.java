@@ -19,14 +19,14 @@ import velox.api.layer1.layers.Layer1ApiInjectorRelay;
 
 /**
  * Classic Layer1 companion so Bookmap registers keyboard shortcuts under
- * Settings → Keyboard Shortcuts → Addons / MAT Hotkeys v4.
+ * Settings → Keyboard Shortcuts → Addons / MAT Hotkeys v5.
  * <p>
  * Opens the always-on-top {@link MatControlPanel}. Simplified MAT modules do
  * not appear in Keyboard Shortcuts; enable this addon once (same JAR).
  * Hotkeys and the panel update {@link MatSideFilter}.
  */
 @Layer1Injectable
-@Layer1StrategyName("MAT Hotkeys v4")
+@Layer1StrategyName("MAT Hotkeys v5")
 @Layer1ApiVersion(Layer1ApiVersionValue.VERSION2)
 public class MomentumAutoTradeHotkeys extends Layer1ApiInjectorRelay
         implements Layer1ApiFinishable, Layer1ActionMapper {
@@ -42,13 +42,13 @@ public class MomentumAutoTradeHotkeys extends Layer1ApiInjectorRelay
     public MomentumAutoTradeHotkeys(Layer1ApiProvider provider) {
         super(provider);
         MatControlPanel.showPanel();
-        Log.info("MAT Hotkeys v4 loaded (side panel + keyboard actions)");
+        Log.info("MAT Hotkeys v5 loaded (side panel + keyboard actions)");
     }
 
     @Override
     public void finish() {
         MatControlPanel.disposePanel();
-        Log.info("MAT Hotkeys v4 finished");
+        Log.info("MAT Hotkeys v5 finished");
     }
 
     @Override

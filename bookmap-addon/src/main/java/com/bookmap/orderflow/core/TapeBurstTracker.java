@@ -1,5 +1,8 @@
 package com.bookmap.orderflow.core;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
+
 /**
  * 100ms (configurable) tape-burst detector matching research EXP-0008:
  * one-sided aggression + fast prints + price progress.
@@ -45,6 +48,10 @@ public final class TapeBurstTracker {
 
     private int barsSinceBurst = 1_000_000;
     private Burst lastBurst;
+    /** Recent completed bursts (research pairs any within sync, not only last). */
+    private final Deque<Burst> recent = new ArrayDeque<>();
+    private static final int MAX_RECENT = 64;
+    private static final long RECENT_KEEP_NS = 5_000_000_000L; // 5s
 
     public TapeBurstTracker(int barMs, int minTrades, double minVol, double minImbalance,
                             double minProgressPrice, int cooldownBars) {
@@ -78,26 +85,71 @@ public final class TapeBurstTracker {
     }
 
     public boolean hasRecentBurst(int side, long nowNs, long windowNs) {
-        if (lastBurst == null || lastBurst.side != side) {
-            return false;
-        }
-        long dt = nowNs - lastBurst.tsNs;
-        // Replay rewind: burst in the "future" relative to current clock is invalid
-        if (dt < 0) {
-            return false;
-        }
-        return dt <= windowNs;
+        return findRecent(side, nowNs, windowNs) != null;
     }
 
     public long lagMsTo(int side, long nowNs) {
-        if (lastBurst == null || lastBurst.side != side) {
+        Burst b = findRecent(side, nowNs, Long.MAX_VALUE / 4);
+        if (b == null) {
             return Long.MAX_VALUE;
         }
-        long dt = nowNs - lastBurst.tsNs;
+        long dt = nowNs - b.tsNs;
         if (dt < 0) {
-            return Long.MAX_VALUE; // stale after rewind
+            return Long.MAX_VALUE;
         }
         return dt / 1_000_000L;
+    }
+
+    /**
+     * Research builds all bars offline then pairs. Live often closes NQ before
+     * the same 100ms ES bar (no ES print in the next slot yet). If the open ES
+     * bar is that same slot and would qualify, treat it as a completed burst.
+     */
+    public Burst peekOpenBarAsBurst(long nqBarEndTsNs) {
+        if (barStartNs < 0 || nqBarEndTsNs <= 0) {
+            return null;
+        }
+        long slot = (nqBarEndTsNs / barNs) * barNs;
+        if (barStartNs != slot) {
+            return null;
+        }
+        return qualifyCurrent(barStartNs + barNs - 1, /*record*/ false);
+    }
+
+    private Burst findRecent(int side, long nowNs, long windowNs) {
+        trimRecent(nowNs);
+        Burst best = null;
+        long bestDt = Long.MAX_VALUE;
+        for (Burst b : recent) {
+            if (b.side != side) {
+                continue;
+            }
+            long dt = nowNs - b.tsNs;
+            if (dt < 0 || dt > windowNs) {
+                continue;
+            }
+            if (dt < bestDt) {
+                bestDt = dt;
+                best = b;
+            }
+        }
+        // Also lastBurst in case recent was cleared
+        if (lastBurst != null && lastBurst.side == side) {
+            long dt = nowNs - lastBurst.tsNs;
+            if (dt >= 0 && dt <= windowNs && dt < bestDt) {
+                best = lastBurst;
+            }
+        }
+        return best;
+    }
+
+    private void trimRecent(long nowNs) {
+        while (!recent.isEmpty() && nowNs - recent.peekFirst().tsNs > RECENT_KEEP_NS) {
+            recent.removeFirst();
+        }
+        while (recent.size() > MAX_RECENT) {
+            recent.removeFirst();
+        }
     }
 
     /** Clear bar/burst state (call when replay clock jumps backwards). */
@@ -108,6 +160,7 @@ public final class TapeBurstTracker {
         openPx = highPx = lowPx = closePx = Double.NaN;
         barsSinceBurst = 1_000_000;
         lastBurst = null;
+        recent.clear();
     }
 
     private void startBar(long slot, double price, int size, boolean buyAggressor) {
@@ -132,6 +185,11 @@ public final class TapeBurstTracker {
 
     private Burst finishBar(long endTsNs) {
         barsSinceBurst++;
+        Burst b = qualifyCurrent(endTsNs, true);
+        return b;
+    }
+
+    private Burst qualifyCurrent(long endTsNs, boolean record) {
         double total = buyVol + sellVol;
         if (total <= 0 || nTrades <= 0 || Double.isNaN(openPx)) {
             return null;
@@ -143,11 +201,15 @@ public final class TapeBurstTracker {
                 && Math.abs(net) >= minProgressPrice;
         boolean shortBurst = fast && imbalance <= -minImbalance && net < 0
                 && Math.abs(net) >= minProgressPrice;
-        if (!(longBurst || shortBurst) || barsSinceBurst < cooldownBars) {
+        if (!(longBurst || shortBurst)) {
             return null;
         }
-        barsSinceBurst = 0;
-        lastBurst = new Burst(
+        // finishBar increments barsSinceBurst before calling; peek simulates that +1
+        int since = record ? barsSinceBurst : barsSinceBurst + 1;
+        if (since < cooldownBars) {
+            return null;
+        }
+        Burst b = new Burst(
                 endTsNs,
                 longBurst ? 1 : -1,
                 nTrades,
@@ -155,6 +217,12 @@ public final class TapeBurstTracker {
                 imbalance,
                 net,
                 closePx);
-        return lastBurst;
+        if (record) {
+            barsSinceBurst = 0;
+            lastBurst = b;
+            recent.addLast(b);
+            trimRecent(endTsNs);
+        }
+        return b;
     }
 }

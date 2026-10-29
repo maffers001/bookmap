@@ -11,9 +11,9 @@ Custom Bookmap Layer 1 add-ons for NQ scalping with ES confirmation:
 | **Liquidity Reaction** | Large-order attract / repel / absorb / dwell / withdraw |
 | **ES/NQ Flow Confirm** | Normalized ES vs NQ flow agreement (attach on NQ; keep ES open) |
 | **Momentum AutoTrade (ES+NQ)** | v1 â EXP-0008 tape momentum signals (+ optional CD pullback); optional bracket orders |
-| **Momentum AutoTrade v4 (ES+NQ)** | v1 + regime/trend/VWAP gates + vol-scaled brackets (EXP-0034); leave v1 unchanged (was labelled v2) |
+| **Momentum AutoTrade v5 (ES+NQ)** | v4 + EXP-0075 keep-gates (`rot_fresh` ∩ `vwap_near`); leave v1 unchanged |
 | **Correlated Fade AutoTrade (ES+NQ)** | H29 / EXP-0036_DIG4 frozen test auto-trade: fade an ES+NQ burst when NQ keeps pushing but ES flips against it; ER = 0.30 gate; vol RR brackets SL 1R / TP 2R |
-| **MAT Hotkeys v4** | Classic companion: always-on-top **MAT Side v4** panel + keyboard shortcuts for long/short side filter |
+| **MAT Hotkeys v5** | Classic companion: always-on-top **MAT Side v5** panel + keyboard shortcuts for long/short side filter |
 | **Pitch and Catch** | High-vol peak/trough (âpitchâ) then low-vol move away (âcatchâ); chart markers |
 | **HV Extreme Move AutoTrade** | HV tip ? clean Move pts leg ? tip markers; optional market + TP/SL brackets |
 | **Trapped Retest** | HV peak ? weak lower-vol retest ? fire on break beyond 2nd swing |
@@ -62,10 +62,10 @@ $cp = "C:\Program Files\Bookmap\lib\bm-l1api.jar;C:\Program Files\Bookmap\lib\bm
 $out = "build\classes\java\main"
 $sources = Get-ChildItem -Recurse -Filter "*.java" -Path "src\main\java" | % FullName
 javac -encoding UTF-8 -cp $cp -d $out @sources
-Push-Location $out; jar cf "..\..\..\libs\bookmap-orderflow-mat-v4.jar" .; Pop-Location
+Push-Location $out; jar cf "..\..\..\libs\bookmap-orderflow-mat-v5.jar" .; Pop-Location
 ```
 
-For a named MAT v4 build with Gradle: `$env:ORDERFLOW_JAR_NAME='bookmap-orderflow-mat-v4.jar'; .\gradlew.bat jar`
+For a named MAT v5 build with Gradle: `$env:ORDERFLOW_JAR_NAME='bookmap-orderflow-mat-v5.jar'; .\gradlew.bat jar`
 
 
 The build compiles against your installed Bookmap API jars (`%BOOKMAP_HOME%\lib\bm-l1api.jar` and `bm-simplified-api-wrapper.jar`, default `C:\Program Files\Bookmap`) so the add-on matches your Bookmap runtime.
@@ -142,7 +142,7 @@ Research lead from **EXP-0008** (tape momentum + ES sync). Optional **CD pullbac
 
 Reverse always respects **Allow longs/shorts**. Logs: `MAT REVERSE â¦`, `MAT TP EXTEND â¦`.
 
-**Side filter console + hotkeys (MAT v4):** the always-on-top **MAT Side v4** window opens when you **attach Momentum AutoTrade v4 (or v1) on the chart** (and also when **MAT Hotkeys v4** is enabled in API plugins). Buttons: Both / Longs / Shorts / Off + Longs/Shorts toggles. Closing hides it (filter unchanged). Re-open: detach/reattach MAT, or enable **MAT Hotkeys v4**, or bind Bookmap action **Show MAT Side panel**. Check the Bookmap log for `MAT Side v4 panel shown` / `MAT Hotkeys v4 loaded`.
+**Side filter console + hotkeys (MAT v5):** the always-on-top **MAT Side v5** window opens when you **attach Momentum AutoTrade v5 (or v1) on the chart** (and also when **MAT Hotkeys v5** is enabled in API plugins). Buttons: Both / Longs / Shorts / Off + Longs/Shorts toggles. Closing hides it (filter unchanged). Re-open: detach/reattach MAT, or enable **MAT Hotkeys v5**, or bind Bookmap action **Show MAT Side panel**. Check the Bookmap log for `MAT Side v5 panel shown` / `MAT Hotkeys v5 loaded`.
 
 With MAT attached and **Enable Ctrl+Shift side hotkeys = true** (default), or with the console focused:
 
@@ -156,9 +156,9 @@ With MAT attached and **Enable Ctrl+Shift side hotkeys = true** (default), or wi
 (Ctrl+Alt clashes with Windows / Evernote / Snipping Tool.) Log example: `MAT side filter: SHORTS only  [longs=false shorts=true]  (toggled longs)`. Panel **Allow longs/shorts** still seed/sync the same filter when changed.
 
 **Replay test (recommended first):**
-1. Rebuild JAR, remove/re-add the plugin in Bookmap if already loaded; enable **MAT Hotkeys v4** and **Momentum AutoTrade v4 (ES+NQ)** (or v1 for classic).
+1. Rebuild JAR, remove/re-add the plugin in Bookmap if already loaded; enable **MAT Hotkeys v5** and **Momentum AutoTrade v5 (ES+NQ)** (or v1 for classic).
 2. Open **Replay**, load a feed with **both NQ and ES**.
-3. Add **Momentum AutoTrade v4 (ES+NQ)** on the **NQ** chart; leave **Enable trading = false**.
+3. Add **Momentum AutoTrade v5 (ES+NQ)** on the **NQ** chart; leave **Enable trading = false**.
 4. Defaults match the study: 100ms bars, min 6 trades, vol=25, |imb|=0.55, ES sync 1500ms.
 5. Optional: set **Max ES lag ms = 250** (stronger subset from research) or **Require CD pullback to MA = true**.
 6. Run replay; watch markers + `MAT Signal`. Logs: `MAT SIGNAL` / `MAT2 SIGNAL` in Bookmap log.
@@ -166,42 +166,46 @@ With MAT attached and **Enable Ctrl+Shift side hotkeys = true** (default), or wi
 
 **Safety:** trading defaults **OFF**. Do not enable on a live account until you have validated on replay/sim.
 
-### Momentum AutoTrade v4 (ES+NQ)
+### Momentum AutoTrade v5 (ES+NQ)
 
-Same core as v1 (EXP-0008 tape + ES sync, reverse-on-stop, TP extend, Ctrl+Shift side hotkeys), plus optional **regime / trend / VWAP** gates and **vol-scaled brackets** from **EXP-0034**, plus **v4 open-vol calibration**: in the first N minutes after UK session open, brackets use the **prior-session** median 1-min range (persisted under `~/.bookmap-orderflow/mat_prior_vol_median.txt`); if none is stored, a **fixed open bracket** (default 10). After the open period, live vol k=1 as before. Log tags remain `MAT2 ?` for replay tooling.
+Same core as v1 (EXP-0008 tape + ES sync, reverse-on-stop, TP extend, Ctrl+Shift side hotkeys), plus **regime / trend / VWAP** gates and **vol-scaled brackets** (EXP-0034), **open-vol calibration** (v4), and **EXP-0075 / MAT075** keep-gates: session-scale **rot_fresh** (ratio &lt; 0.90, or not ready) ∩ **vwap_near** (|last−VWAP| / med_r30 ≤ 0.5, same side). Log tags remain `MAT2 …` for replay tooling.
 
-Do **not** enable trading on v1 and v4 at the same time ? they share `MatSideFilter`. CFADE shares the same open-vol store (`MatOpenVolAnchor`) but keeps its own asymmetric RR `resolveBracketPts`.
+Do **not** enable trading on v1 and v5 at the same time — they share `MatSideFilter`. CFADE shares the same open-vol store (`MatOpenVolAnchor`) but keeps its own asymmetric RR `resolveBracketPts`.
 
-JAR: `bookmap-addon/build/libs/bookmap-orderflow-mat-v4.jar` (or default `bookmap-orderflow.jar` from `gradle jar`). Remove any old mat-v2 plugin entry before installing.
+JAR: `bookmap-addon/build/libs/bookmap-orderflow-mat-v5.jar` (or default `bookmap-orderflow.jar` from `gradle jar`). Remove any old mat-v4 / mat-v2 plugin entry before installing.
 
-**Look-ahead note:** research now stamps bursts at **bar end** (corrected 2026-10-18). Older ~85% hit+10 tick figures used bar-start entry and are invalid vs live MAT. Corrected EXP-0008 `p_hit_10pts` Ë **0.56**.
+**Look-ahead note:** research now stamps bursts at **bar end** (corrected 2026-10-18). Older ~85% hit+10 tick figures used bar-start entry and are invalid vs live MAT. Corrected EXP-0008 `p_hit_10pts` ≈ **0.56**.
 
-**New params** (EXP-0034 defaults baked in):
+**Params** (EXP-0034 + EXP-0075 defaults baked in):
 
 | Param | Default | Meaning |
 |---|---|---|
 | **Regime window min** | 60 | Rolling 1-min bars for day-type |
-| **Regime gate: max range pts (0=off)** | **0** (off) | Skip when range exceeds this; leave off by default â 60m NQ range is usually Â»80 so this starved signals when stacked |
-| **Regime gate: max efficiency ratio (0=off)** | 0 (off) | Same for `\|net\| / path` |
+| **Regime gate: max range pts (0=off)** | **0** (off) | Skip when range exceeds this |
+| **Regime gate: max efficiency ratio (0=off)** | 0 (off) | Same for `|net| / path` |
 | **Regime hot action (0=skip 1=counter)** | 0 (skip) | When hot: skip all, or only allow against-trend |
 | **Trend window min** | 30 | Net lookback for trend mode |
 | **Trend mode (0=off 1=with 2=against)** | **1** (with) | Require burst with rolling net |
-| **Require VWAP side** | **true** | Long only = session VWAP; short only = |
-| **Vol-scaled brackets** | **true** | TP=SL = k Ã median 1-min range (floor/cap) â frozen base |
-| **Vol multiple k** / **Vol window min** / **Bracket min/max pts** | **1** / 30 / 6?30 | **k=1** (OOS 2026-10-18); clip 6?30 |
-| **Enable open vol anchor** | **true** | v4: open period uses prior-session median (else fixed) |
+| **Require VWAP side** | **true** | Long only ≥ session VWAP; short only ≤ |
+| **Require rot fresh (EXP-0075)** | **true** | Keep when not ready, or with-leg ratio &lt; max |
+| **Rot fresh max ratio** | **0.90** | Chase cutoff |
+| **Require VWAP near (EXP-0075)** | **true** | Same-side and \|dist\|/med_r30 ≤ max |
+| **VWAP near max \|dist\|/med_r30** | **0.5** | Near-VWAP band |
+| **Vol-scaled brackets** | **true** | TP=SL = k × median 1-min range (floor/cap) |
+| **Vol multiple k** / **Vol window min** / **Bracket min/max pts** | **1** / 30 / 6–30 | **k=1**; clip 6–30 |
+| **Enable open vol anchor** | **true** | Open period uses prior-session median (else fixed) |
 | **Open vol period min** | **20** | Minutes after VWAP UK open for open-vol path |
 | **Open fixed bracket pts** | **10** | Used in open period when no prior median file |
 | **ES confirm mode (0=causal 1=confirm)** | 0 | 1 = NQ-first: pending NQ burst fires when ES confirms within Max ES lag |
 | **VWAP session open UK min-of-day** | 870 | UK 14:30 |
 
-Logs: `MAT2 SIGNAL â¦`, `MAT2 SIGNAL(confirm) nqTs=â¦ esTs=â¦ lagMs=â¦`, `MAT2 REJECT regime_hot_skip|trend_mode_fail|vwap_side_fail â¦`.
+Logs: `MAT2 SIGNAL …`, `MAT2 SIGNAL(confirm) …`, `MAT2 REJECT …|rot_fresh_fail|vwap_near_fail …`.
 
-Defaults are **with-trend + VWAP + vol-scaled k=1** (range gate off). Trend uses **completed 1-minute bars only** (no intra-minute hindsight). VWAP is a running trade VWAP.
+Defaults are **with-trend + VWAP side + rot_fresh + vwap_near + vol-scaled k=1** (range gate off). Trend uses **completed 1-minute bars only** (no intra-minute hindsight). VWAP is a running trade VWAP.
 
 **Replay check vs offline reference:**  
 `python -m research.export_mat2_ref --session 021026 --stamp confirm --bracket vol_k1`  
-Install `bookmap-orderflow-mat-v4.jar` (or a confirm-tagged build), set **ES confirm mode=1**, **Vol-scaled=true**, **k=1**, Verbose=true; grep `MAT2 SIGNAL` / `MAT2 SIGNAL(confirm)` and match with `python -m research.compare_replay_ref`.
+Install `bookmap-orderflow-mat-v5.jar` (or a confirm-tagged build), set **ES confirm mode=1**, **Vol-scaled=true**, **k=1**, Verbose=true; grep `MAT2 SIGNAL` / `MAT2 SIGNAL(confirm)` and match with `python -m research.compare_replay_ref`.
 
 ### Correlated Fade AutoTrade (ES+NQ)
 
@@ -427,7 +431,7 @@ bookmap-addon/
     effort/       Effort vs Result
     liquidity/    Liquidity Reaction
     crossmarket/  ES/NQ Flow Confirm
-    trade/        Momentum AutoTrade v1 + v4 + MAT Hotkeys / MatControlPanel + Correlated Fade + LVN Confluence
+    trade/        Momentum AutoTrade v1 + v5 + MAT Hotkeys / MatControlPanel + Correlated Fade + LVN Confluence
     pitch/        Pitch and Catch
     hvmove/       HV Extreme Move
     retest/       Trapped Retest

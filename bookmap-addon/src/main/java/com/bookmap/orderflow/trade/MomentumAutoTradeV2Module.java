@@ -15,7 +15,9 @@ import com.bookmap.orderflow.core.CumulativeDeltaRange;
 import com.bookmap.orderflow.core.InstrumentClassifier;
 import com.bookmap.orderflow.core.PriceTicks;
 import com.bookmap.orderflow.core.MatOpenVolAnchor;
+import com.bookmap.orderflow.core.MatPriorRotAnchor;
 import com.bookmap.orderflow.core.RegimeTracker;
+import com.bookmap.orderflow.core.SessionRotationTracker;
 import com.bookmap.orderflow.core.TapeBurstTracker;
 import com.bookmap.orderflow.core.TapeBurstTracker.Burst;
 
@@ -59,10 +61,12 @@ import velox.api.layer1.simplified.TimeListener;
 import velox.api.layer1.simplified.TradeDataListener;
 
 /**
- * Momentum AutoTrade <b>v4</b> (class still {@code MomentumAutoTradeV2Module}) —
- * EXP-0008 tape momentum plus optional regime / trend / VWAP gates and
- * vol-scaled brackets (EXP-0034). Side filter console via {@link MatControlPanel}
- * when <b>MAT Hotkeys v4</b> is enabled.
+ * Momentum AutoTrade <b>v5 / MAT075</b> (class still {@code MomentumAutoTradeV2Module}) —
+ * EXP-0008 tape momentum plus regime / trend / VWAP gates, vol-scaled brackets
+ * (EXP-0034), open-vol anchor (v4), and <b>EXP-0075</b> keep-gates:
+ * session-scale {@code rot_fresh} (ratio &lt; 0.90) ∩ near-VWAP
+ * (|dist|/med_r30 ≤ 0.5). Side filter console via {@link MatControlPanel}
+ * when <b>MAT Hotkeys v5</b> is enabled.
  *
  * <p><b>v4 open-vol:</b> for the first {@code Open vol period min} after UK
  * session open, brackets use a <em>prior-session</em> median 1-min range
@@ -74,17 +78,18 @@ import velox.api.layer1.simplified.TradeDataListener;
  * on both at once (they share {@link MatSideFilter}). Log tags stay {@code MAT2}
  * for replay compare tooling.
  *
- * Frozen research defaults (OOS 2026-10-18): Trend mode = with-trend (1),
- * Require VWAP side = true, Max ES lag = 250, <b>Vol-scaled brackets ON</b> with
- * k=1 (clip 6–30). Regime range gate OFF. Optional {@code ES confirm mode=1}
- * holds NQ-first bursts until ES confirms within max lag.
+ * Frozen research defaults: Trend mode = with-trend (1), Require VWAP side = true,
+ * Max ES lag = 250, Vol-scaled brackets ON k=1 (clip 6–30),
+ * <b>Require rot fresh = true</b>, <b>Require VWAP near = true</b>.
+ * Regime range gate OFF. Optional {@code ES confirm mode=1} holds NQ-first
+ * bursts until ES confirms within max lag.
  *
  * Attach on NQ with ES also open. Default: signals only (enableTrading=false).
  */
 @Layer1SimpleAttachable
 @Layer1TradingStrategy
 @Layer1MultiAccountTradingSupported
-@Layer1StrategyName("Momentum AutoTrade v4 (ES+NQ)")
+@Layer1StrategyName("Momentum AutoTrade v5 (ES+NQ)")
 @Layer1ApiVersion(Layer1ApiVersionValue.VERSION2)
 public class MomentumAutoTradeV2Module implements
         CustomModule,
@@ -239,6 +244,26 @@ public class MomentumAutoTradeV2Module implements
     @Parameter(name = "Require VWAP side")
     Boolean requireVwapSide = true;
 
+    /**
+     * EXP-0075 / MAT075: skip with-leg entries when session rotation ratio ≥ max
+     * (chase). When rotation stats are not ready, keep (research {@code rot_ready=0}).
+     */
+    @Parameter(name = "Require rot fresh (EXP-0075)")
+    Boolean requireRotFresh = true;
+
+    @Parameter(name = "Rot fresh max ratio", step = 0.05)
+    Double rotFreshMaxRatio = 0.90;
+
+    /**
+     * EXP-0075 / MAT075: keep only when same-side of VWAP and
+     * |last−VWAP| / med_r30 ≤ max norm.
+     */
+    @Parameter(name = "Require VWAP near (EXP-0075)")
+    Boolean requireVwapNear = true;
+
+    @Parameter(name = "VWAP near max |dist|/med_r30", step = 0.1)
+    Double vwapNearMaxNorm = 0.5;
+
     /** Frozen base: TP=SL = clip(k × median 1-min range, min, max). */
     @Parameter(name = "Vol-scaled brackets")
     Boolean volScaledBrackets = true;
@@ -360,6 +385,7 @@ public class MomentumAutoTradeV2Module implements
         TapeBurstTracker burst;
         CumulativeDeltaRange cd;
         RegimeTracker regime;
+        SessionRotationTracker rotation;
         double lastPrice;
         double instrumentPips = 0.25;
         boolean vwapSessionMarked;
@@ -425,7 +451,7 @@ public class MomentumAutoTradeV2Module implements
         lastSyncedAllowShorts = false;
         MatTradeControl.register(flattenAction);
 
-        Log.info("Momentum AutoTrade v3 init on " + alias
+        Log.info("Momentum AutoTrade v5 init on " + alias
                 + " role=" + primary.role
                 + " trading=" + Boolean.TRUE.equals(enableTrading)
                 + " longs=" + MatSideFilter.allowLongs()
@@ -439,6 +465,8 @@ public class MomentumAutoTradeV2Module implements
                 + " pips=" + pips
                 + " trendMode=" + trendMode
                 + " requireVwap=" + requireVwapSide
+                + " requireRotFresh=" + Boolean.TRUE.equals(requireRotFresh)
+                + " requireVwapNear=" + Boolean.TRUE.equals(requireVwapNear)
                 + " regimeMaxRange=" + regimeMaxRangePts
                 + " regimeMaxEr=" + regimeMaxEr
                 + " verboseCand=" + verboseCandidateLog
@@ -557,6 +585,17 @@ public class MomentumAutoTradeV2Module implements
         // CD range bars: price in ticks → tickSize=1 so range = N ticks
         s.cd = new CumulativeDeltaRange(range, 1.0, sma, 5, 0.35);
         s.regime = new RegimeTracker();
+        s.rotation = new SessionRotationTracker();
+        MatPriorRotAnchor.Prior prior = MatPriorRotAnchor.load();
+        s.rotation.setPriorAvgs(prior.upAvgPts, prior.downAvgPts);
+        if (prior.usable()) {
+            Log.info("MAT2 prior-rot loaded up=" + prior.upAvgPts
+                    + " down=" + prior.downAvgPts
+                    + " from " + MatPriorRotAnchor.storePath());
+        } else {
+            Log.info("MAT2 prior-rot none at " + MatPriorRotAnchor.storePath()
+                    + " (session avg only until 2 same-dir rots)");
+        }
         s.vwapSessionMarked = false;
         return s;
     }
@@ -616,6 +655,9 @@ public class MomentumAutoTradeV2Module implements
             if (s.regime != null) {
                 s.regime.reset();
             }
+            if (s.rotation != null) {
+                s.rotation.reset();
+            }
             s.vwapSessionMarked = false;
         }
         lastSignalNs = 0;
@@ -640,6 +682,11 @@ public class MomentumAutoTradeV2Module implements
             double chartPx = PriceTicks.toChartPoints(price, state.instrumentPips);
             maybeMarkVwapSession(state, ts);
             state.regime.onTrade(ts, chartPx, size);
+            // Research annotates rotation on UK-window trades only (from session open).
+            // Feeding pre-open prints invents pivots and false rot_fresh rejects.
+            if (state.rotation != null && state.vwapSessionMarked) {
+                state.rotation.onTrade(ts, price);
+            }
         }
 
         if ("ES".equals(state.role)) {
@@ -725,18 +772,21 @@ public class MomentumAutoTradeV2Module implements
         }
 
         if (!eval.ok) {
-            // Confirm mode: hold NQ-first burst until ES arrives within maxEsLagMs
-            if (isConfirmMode()
-                    && ("ES_no_same_side_burst_in_sync".equals(eval.reason)
-                            || "ES_lag_gt_max".equals(eval.reason))) {
-                double maxLag = maxEsLagMs == null ? 250.0 : maxEsLagMs;
-                long expiry = nqBurst.tsNs + (long) (Math.max(maxLag, 1.0) * 1_000_000.0);
+            // Hold NQ briefly when ES same-slot bar not closed yet (live ordering).
+            // Confirm mode: wait up to maxEsLagMs for NQ-first. Causal: wait syncMs
+            // for same-stamp ES only (see tryPendingConfirm).
+            if ("ES_no_same_side_burst_in_sync".equals(eval.reason)
+                    || "ES_lag_gt_max".equals(eval.reason)) {
+                double waitMs = isConfirmMode()
+                        ? (maxEsLagMs == null ? 250.0 : maxEsLagMs)
+                        : (syncMs == null ? 1500.0 : syncMs);
+                long expiry = nqBurst.tsNs + (long) (Math.max(waitMs, 1.0) * 1_000_000.0);
                 pendingNqBurst = new PendingNqBurst(
                         nqBurst.side, nqBurst.tsNs, nqBurst.closePrice, expiry);
                 if (Boolean.TRUE.equals(verboseCandidateLog)) {
                     Log.info(String.format(
-                            "MAT2 pending NQ-first side=%d nqTs=%d expiry=%d reason=%s",
-                            nqBurst.side, nqBurst.tsNs, expiry, eval.reason));
+                            "MAT2 pending NQ side=%d nqTs=%d expiry=%d reason=%s confirm=%s",
+                            nqBurst.side, nqBurst.tsNs, expiry, eval.reason, isConfirmMode()));
                 }
             }
             signalIndicator.addPoint(0);
@@ -752,7 +802,7 @@ public class MomentumAutoTradeV2Module implements
      * if ES arrived within maxEsLagMs of the NQ bar end.
      */
     private void tryPendingConfirm(Burst esBurst) {
-        if (!isConfirmMode() || pendingNqBurst == null || esBurst == null) {
+        if (pendingNqBurst == null || esBurst == null) {
             return;
         }
         maybeExpirePending(esBurst.tsNs);
@@ -766,8 +816,13 @@ public class MomentumAutoTradeV2Module implements
         if (lagMs < 0) {
             return;
         }
+        // Causal: only same bar-end stamp (ES closed after NQ for the same slot).
+        // Confirm mode: allow NQ-first up to maxEsLagMs.
+        if (!isConfirmMode() && lagMs > 0) {
+            return;
+        }
         double maxLag = maxEsLagMs == null ? 0.0 : maxEsLagMs;
-        if (maxLag > 0 && lagMs > maxLag) {
+        if (isConfirmMode() && maxLag > 0 && lagMs > maxLag) {
             clearPendingNq("es_lag_gt_max");
             return;
         }
@@ -952,6 +1007,20 @@ public class MomentumAutoTradeV2Module implements
         long lagMs = es == null ? Long.MAX_VALUE : es.burst.lagMsTo(nqBurst.side, nqBurst.tsNs);
         boolean esPresent = es != null;
         boolean esRecent = esPresent && es.burst.hasRecentBurst(nqBurst.side, nqBurst.tsNs, syncNs);
+        // Same 100ms slot still open on ES (NQ closed first): peek like research offline pair
+        if (esPresent && !esRecent) {
+            Burst esPeek = es.burst.peekOpenBarAsBurst(nqBurst.tsNs);
+            if (esPeek != null && esPeek.side == side) {
+                esRecent = true;
+                lagMs = 0;
+                if (Boolean.TRUE.equals(verboseCandidateLog)) {
+                    Log.info(String.format(
+                            "MAT2 ES peek same-slot side=%d n=%d vol=%.0f imb=%.2f endTs=%d",
+                            esPeek.side, esPeek.nTrades, esPeek.totalVol, esPeek.imbalance,
+                            esPeek.tsNs));
+                }
+            }
+        }
         double maxLag = maxEsLagMs == null ? 0.0 : maxEsLagMs;
         boolean lagOk = maxLag <= 0 || lagMs <= maxLag;
 
@@ -1007,7 +1076,11 @@ public class MomentumAutoTradeV2Module implements
         int openMin = vwapSessionOpenUkMin == null ? 870 : vwapSessionOpenUkMin.intValue();
         if (openMin <= 0) {
             state.regime.markSessionOpen(tsNs);
+            if (state.rotation != null) {
+                state.rotation.reset();
+            }
             state.vwapSessionMarked = true;
+            Log.info("MAT2 session open marked (first trade); rotation reset");
             return;
         }
         long sec = tsNs / 1_000_000_000L;
@@ -1016,7 +1089,16 @@ public class MomentumAutoTradeV2Module implements
         int mod = zdt.getHour() * 60 + zdt.getMinute();
         if (mod >= openMin) {
             state.regime.markSessionOpen(tsNs);
+            if (state.rotation != null) {
+                state.rotation.reset();
+            }
             state.vwapSessionMarked = true;
+            Log.info("MAT2 UK session open marked mod=" + mod
+                    + "; rotation reset (UK-window only, prior up="
+                    + (state.rotation != null ? state.rotation.priorUpAvgPts() : Double.NaN)
+                    + " down="
+                    + (state.rotation != null ? state.rotation.priorDownAvgPts() : Double.NaN)
+                    + ")");
         }
     }
 
@@ -1070,6 +1152,58 @@ public class MomentumAutoTradeV2Module implements
                 return new EntryEval(false, "vwap_side_fail", lagMs);
             }
         }
+        // EXP-0075 / MAT075: rot_fresh ∩ vwap_near (defaults ON)
+        if (Boolean.TRUE.equals(requireRotFresh) && nqState.rotation != null) {
+            double maxRatio = rotFreshMaxRatio == null ? 0.90 : rotFreshMaxRatio;
+            SessionRotationTracker.Snapshot rot = nqState.rotation.snapshot(asof);
+            boolean fresh = nqState.rotation.isRotFresh(asof, side, maxRatio);
+            if (!fresh || Boolean.TRUE.equals(verboseCandidateLog)) {
+                boolean withLeg = side != 0 && side == rot.rotLegDir;
+                Log.info(String.format(
+                        "MAT2 ROT side=%d ready=%s fromPrior=%s ratio=%.3f max=%.2f withLeg=%s "
+                                + "ext=%.1f avg=%.1f leg=%d nSame=%d pivots=%d rots=%d fresh=%s",
+                        side,
+                        rot.rotReady,
+                        rot.fromPrior,
+                        rot.rotRatio,
+                        maxRatio,
+                        withLeg,
+                        rot.extensionPts,
+                        rot.avgPts,
+                        rot.rotLegDir,
+                        rot.nSameDir,
+                        rot.nPivots,
+                        rot.nRots,
+                        fresh));
+            }
+            if (!fresh) {
+                return new EntryEval(false, "rot_fresh_fail", lagMs);
+            }
+        }
+        if (Boolean.TRUE.equals(requireVwapNear)
+                && !Double.isNaN(st.vwap)
+                && !Double.isNaN(sr.lastPx)) {
+            // same-side of VWAP (research same_side_vwap)
+            boolean sameSide = (side > 0 && sr.lastPx >= st.vwap)
+                    || (side < 0 && sr.lastPx <= st.vwap);
+            int vw = volWindowMin == null ? 30 : Math.max(1, volWindowMin.intValue());
+            // Session-scoped med: research tapes often start at UK open; global
+            // last-30 would dilute with quiet pre-open bars from the live feed.
+            RegimeTracker.Snapshot sv = nqState.regime.snapshotSession(asof, vw);
+            double med = sv.medianMinuteRange;
+            double maxNorm = vwapNearMaxNorm == null ? 0.5 : vwapNearMaxNorm;
+            double norm = (med > 1e-9) ? Math.abs(sr.lastPx - st.vwap) / med : Double.NaN;
+            boolean nearOk = sameSide && Double.isFinite(norm) && norm <= maxNorm;
+            if (!nearOk || Boolean.TRUE.equals(verboseCandidateLog)) {
+                Log.info(String.format(
+                        "MAT2 VWAP_NEAR side=%d sameSide=%s last=%.2f vwap=%.2f med=%.2f "
+                                + "norm=%.3f max=%.2f nBarsSess=%d ok=%s",
+                        side, sameSide, sr.lastPx, st.vwap, med, norm, maxNorm, sv.nBars, nearOk));
+            }
+            if (!nearOk) {
+                return new EntryEval(false, "vwap_near_fail", lagMs);
+            }
+        }
         return new EntryEval(true, "ok", lagMs);
     }
 
@@ -1094,21 +1228,41 @@ public class MomentumAutoTradeV2Module implements
                 && MatOpenVolAnchor.inOpenPeriod(asof, openMin, openPeriod);
 
         double med;
+        String volSrc;
         if (openAnchor) {
             ensurePriorVolLoaded();
             if (Double.isFinite(priorVolMedian) && priorVolMedian > 0) {
                 med = priorVolMedian;
+                volSrc = "prior";
             } else {
                 // No prior session file — fixed open brackets (user fallback).
                 double fixed = openFixedBracketPts == null ? 10.0 : openFixedBracketPts;
-                return Math.max(floor, Math.min(cap, fixed));
+                double out = Math.max(floor, Math.min(cap, fixed));
+                Log.info(String.format(
+                        "MAT2 BRACKET volSrc=fixed med=n/a → %.2f (open period, no prior)", out));
+                return out;
             }
         } else {
-            RegimeTracker.Snapshot sv = nqState.regime.snapshot(vw, asof);
+            // Session-scoped med (UK open+): matches research when the tape
+            // effectively starts at open; avoids quiet pre-open diluting size.
+            RegimeTracker.Snapshot sv = nqState.regime.snapshotSession(asof, vw);
             med = sv.medianMinuteRange;
+            volSrc = "liveSess(n=" + sv.nBars + ")";
+            if (!(med > 0)) {
+                // Fallback: global rolling window if session not marked yet
+                sv = nqState.regime.snapshot(vw, asof);
+                med = sv.medianMinuteRange;
+                volSrc = "liveGlobal(n=" + sv.nBars + ")";
+            }
         }
         double raw = k * Math.max(med, 0.25);
-        return Math.max(floor, Math.min(cap, raw));
+        double out = Math.max(floor, Math.min(cap, raw));
+        if (Boolean.TRUE.equals(verboseCandidateLog)) {
+            Log.info(String.format(
+                    "MAT2 BRACKET volSrc=%s med=%.2f k=%.2f → %.2f (clip %.0f–%.0f)",
+                    volSrc, med, k, out, floor, cap));
+        }
+        return out;
     }
 
     private void ensurePriorVolLoaded() {
@@ -1288,7 +1442,7 @@ public class MomentumAutoTradeV2Module implements
         refreshTradingAccountId("realtime");
         Log.info(String.format(
                 "MAT2 realtime start — orders %s side=%s account=%s (pos=%d). "
-                        + "trendMode=%.0f reqVwap=%s maxRange=%.0f verbose=%s. "
+                        + "trendMode=%.0f reqVwap=%s rotFresh=%s vwapNear=%s maxRange=%.0f verbose=%s. "
                         + "Play/forward from here for live signals. Compare MAT2 CANDIDATE/SIGNAL "
                         + "lines to results/MAT2_REF_021026.md",
                 Boolean.TRUE.equals(enableTrading) ? "ENABLED" : "disabled (signal-only)",
@@ -1297,6 +1451,8 @@ public class MomentumAutoTradeV2Module implements
                 position,
                 trendMode == null ? 0.0 : trendMode,
                 Boolean.TRUE.equals(requireVwapSide),
+                Boolean.TRUE.equals(requireRotFresh),
+                Boolean.TRUE.equals(requireVwapNear),
                 regimeMaxRangePts == null ? 0.0 : regimeMaxRangePts,
                 Boolean.TRUE.equals(verboseCandidateLog)));
     }
@@ -1851,8 +2007,26 @@ public class MomentumAutoTradeV2Module implements
                 Log.info("MAT2 account listener remove failed: " + t);
             }
         }
+        // Persist prior-rot only after a real-time session with enough structure.
+        // Catchup/replay re-attach was overwriting the seeded prior with a
+        // half-built avg and causing rot_fresh false rejects on the next run.
+        if (realtimeStarted) {
+            for (InstrumentState s : byAlias.values()) {
+                if (s == null || s.rotation == null || !"NQ".equals(s.role)) {
+                    continue;
+                }
+                if (s.rotation.rotationCount() < 4) {
+                    continue;
+                }
+                double up = s.rotation.sessionAvgPts(1);
+                double down = s.rotation.sessionAvgPts(-1);
+                if ((Double.isFinite(up) && up > 0) || (Double.isFinite(down) && down > 0)) {
+                    MatPriorRotAnchor.save(up, down);
+                }
+            }
+        }
         byAlias.clear();
-        Log.info("Momentum AutoTrade v3 stopped. lastSignalSide=" + lastSignalSide
+        Log.info("Momentum AutoTrade v5 stopped. lastSignalSide=" + lastSignalSide
                 + " sideFilter=" + sideFilterLabel());
     }
 }

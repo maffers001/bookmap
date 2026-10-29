@@ -1,4 +1,4 @@
-"""Run MAT context queue EXP-0067…0073.
+"""Run MAT context queue EXP-0067…0076.
 
 Usage:
   python -m research.mat_context.run_queue              # all
@@ -30,6 +30,12 @@ from research.features.range_bar_profile import (
     nearest_supporting_node,
     structural_sl_pts,
 )
+from research.features.vix import (
+    annotate_vix,
+    label_vix_abs,
+    label_vix_tercile,
+    session_vix_table,
+)
 from research.mat_context.cache import MatTradeCache, build_cache
 from research.mat_context.gates import (
     gate_masks,
@@ -42,6 +48,20 @@ from research.mat_context.gates import (
 from research.mat_context.report import arm_pack, bucket_stats, kill_vs_base, write_exp_report
 
 
+def _attach_vix_to_cache(cache: MatTradeCache, *, force_fetch: bool = False) -> dict[str, dict[str, float]]:
+    """Stamp prior-close VIX onto each session's events + trade_features."""
+    vix_by = session_vix_table(cache.sessions, force_fetch=force_fetch)
+    for sid in cache.sessions:
+        b = cache.bundles[sid]
+        feat = vix_by.get(sid, {"vix_prior": float("nan")})
+        b.events = annotate_vix(b.events, feat)
+        tf = getattr(b, "trade_features", None)
+        if tf is not None and tf.num_rows:
+            b.trade_features = annotate_vix(tf, feat)  # type: ignore[attr-defined]
+    return vix_by
+
+
+
 def _split_parts(sims_by_sid: dict[str, object]) -> tuple[list, list, list]:
     parts, is_p, oos_p = [], [], []
     for sid, s in sims_by_sid.items():
@@ -50,7 +70,7 @@ def _split_parts(sims_by_sid: dict[str, object]) -> tuple[list, list, list]:
     return parts, is_p, oos_p
 
 
-def _resim_masked(cache: MatTradeCache, mask_name: str, *, slip: float = 1.0) -> dict[str, object]:
+def _resim_masked(cache: MatTradeCache, mask_name: str, *, slip: float = 0.0) -> dict[str, object]:
     """Re-simulate frozen MAT gate over annotated raw events filtered by mask."""
     out = {}
     for sid in cache.sessions:
@@ -495,6 +515,194 @@ def run_0073(cache: MatTradeCache, out: Path) -> dict:
     return report
 
 
+def run_0074(cache: MatTradeCache, out: Path, *, force_fetch: bool = False) -> dict:
+    """Prior-close VIX strata + keep-gates on frozen MAT (H65)."""
+    vix_by = _attach_vix_to_cache(cache, force_fetch=force_fetch)
+
+    # Descriptive strata on executed trades
+    aligned, labs_abs, labs_terc = [], [], []
+    for sid in cache.sessions:
+        b = cache.bundles[sid]
+        tf = getattr(b, "trade_features", None)
+        if tf is None or tf.num_rows == 0:
+            continue
+        feat = vix_by.get(sid, {})
+        prior = float(feat.get("vix_prior", float("nan")))
+        p33 = float(feat.get("vix_p33", float("nan")))
+        p66 = float(feat.get("vix_p66", float("nan")))
+        for i, tr in enumerate(b.sim.trades):
+            if i >= tf.num_rows:
+                break
+            aligned.append(tr)
+            labs_abs.append(label_vix_abs(prior))
+            labs_terc.append(label_vix_tercile(prior, p33, p66))
+
+    buckets = {
+        "vix_abs": bucket_stats(aligned, labs_abs),
+        "vix_tercile": bucket_stats(aligned, labs_terc),
+    }
+
+    gate = run_gate_exp(
+        cache, out / "_gates",
+        exp_name="EXP-0074",
+        title="Prior-close VIX keep-gates (H65)",
+        arm_names=["vix_ge_15", "vix_ge_18", "vix_ge_20", "vix_ge_25", "vix_hi_tercile"],
+        seed=7400,
+    )
+
+    # Session coverage summary
+    priors = [v["vix_prior"] for v in vix_by.values() if np.isfinite(v.get("vix_prior", float("nan")))]
+    coverage = {
+        "n_sessions": len(cache.sessions),
+        "n_with_vix": len(priors),
+        "vix_min": round(min(priors), 2) if priors else None,
+        "vix_max": round(max(priors), 2) if priors else None,
+        "vix_median": round(float(np.median(priors)), 2) if priors else None,
+        "n_hi_tercile": sum(1 for v in vix_by.values() if v.get("vix_hi_tercile", 0) >= 0.5),
+    }
+
+    md = [
+        "# EXP-0074 — Prior-close VIX on frozen MAT (H65)",
+        "",
+        "Causal: FRED VIXCLS close strictly before session calendar day.",
+        f"Coverage: {coverage['n_with_vix']}/{coverage['n_sessions']} sessions; "
+        f"VIX prior median={coverage['vix_median']} "
+        f"[{coverage['vix_min']}, {coverage['vix_max']}]; "
+        f"hi-tercile days={coverage['n_hi_tercile']}.",
+        "",
+        "## Absolute strata (executed MAT trades)",
+        "",
+        "| bucket | n | WR | net | avg | IS net | OOS net | OOS avg |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for lab, r in buckets["vix_abs"].items():
+        md.append(
+            f"| {lab} | {r['n']} | {r['wr']} | {r['net']:+.1f} | {r['avg']} | "
+            f"{r['is_net']:+.1f} | {r['oos_net']:+.1f} | {r['oos_avg']} |"
+        )
+    md += [
+        "",
+        "## Trailing-60d tercile strata",
+        "",
+        "| bucket | n | WR | net | avg | IS net | OOS net | OOS avg |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for lab, r in buckets["vix_tercile"].items():
+        md.append(
+            f"| {lab} | {r['n']} | {r['wr']} | {r['net']:+.1f} | {r['avg']} | "
+            f"{r['is_net']:+.1f} | {r['oos_net']:+.1f} | {r['oos_avg']} |"
+        )
+    md += [
+        "",
+        "## Keep-gates",
+        "",
+        "| arm | n | WR | net | avg | IS net | OOS net | OOS avg | kill |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---|",
+    ]
+    for k, v in gate["books"].items():
+        a, o = v["all"], v["oos"]
+        kill = gate["kills"].get(k, {})
+        md.append(
+            f"| {k} | {a['n']} | {a.get('wr')} | {a['net']:+.1f} | {a.get('avg')} | "
+            f"{v['is']['net']:+.1f} | {o['net']:+.1f} | {o.get('avg')} | "
+            f"{'PASS' if kill.get('pass') else ('—' if not kill else 'FAIL')} |"
+        )
+    md += ["", "```json", json.dumps(gate["kills"], indent=2), "```", ""]
+
+    report = {
+        "coverage": coverage,
+        "buckets": buckets,
+        "books": gate["books"],
+        "kills": gate["kills"],
+        "source": "FRED VIXCLS prior close",
+    }
+    write_exp_report(out, title="EXP-0074", md_lines=md, report=report)
+    return report
+
+
+def run_0076(cache: MatTradeCache, out: Path) -> dict:
+    """Path-aware 0.5R absorb exit vs EXP-0073 approx twin (H67)."""
+    from research.features.corr_absorb import AbsorbParams, absorption_bars
+    from research.features.momentum import trades_to_tape_bars
+    from research.mat_context.absorb_exit import build_absorb_exit_fn
+
+    base_sims = {sid: cache.bundles[sid].sim for sid in cache.sessions}
+    base = _pack_book(base_sims)
+    null = _pack_book(_null_book(cache, seed0=7600))
+    books = {"base": base, "null": null}
+    kills = {}
+    p = AbsorbParams()
+
+    for arm, require_mfe in (("nq_absorb_path_mfe", True), ("nq_absorb_approx", False)):
+        sims = {}
+        for sid in cache.sessions:
+            b = cache.bundles[sid]
+            nq_b = trades_to_tape_bars(b.nq, bar_ms=100)
+            nq_abs = absorption_bars(nq_b, p, market="NQ") if nq_b.num_rows else pa.table({})
+            ev = b.events
+            if ev.num_rows == 0:
+                sims[sid] = b.sim
+                continue
+            if nq_abs.num_rows == 0:
+                sims[sid] = b.sim
+                continue
+            abs_ts = nq_abs.column("event_ts_ns").to_numpy().astype(np.int64)
+            aggr = nq_abs.column("aggr_side").to_numpy().astype(int)
+            exit_fn = build_absorb_exit_fn(
+                b.nq, abs_ts, aggr, require_path_mfe=require_mfe, mfe_frac=0.5,
+            )
+            cols = {
+                "event_ts_ns": ev.column("event_ts_ns"),
+                "side": ev.column("side"),
+            }
+            if "med_r30" in ev.column_names:
+                cols["med_r30"] = ev.column("med_r30")
+            sims[sid] = simulate_session(
+                sid, b.nq, b.es, F.mat_sim_cfg(),
+                gate=F.mat_frozen_gate(), bracket_fn=F.mat_vol_bracket(),
+                vwap_from_ns=b.vwap_from_ns, events=pa.table(cols),
+                exit_fn=exit_fn,
+            )
+        books[arm] = _pack_book(sims)
+        kills[arm] = kill_vs_base(books[arm], base, null)
+
+    # Sensitivity: path vs approx OOS avg (not a promote requirement)
+    path_oos = books["nq_absorb_path_mfe"]["oos"].get("avg")
+    approx_oos = books["nq_absorb_approx"]["oos"].get("avg")
+    sens = {
+        "path_oos_avg": path_oos,
+        "approx_oos_avg": approx_oos,
+        "path_ge_approx_oos_avg": (
+            path_oos is not None and approx_oos is not None and path_oos >= approx_oos
+        ),
+    }
+    kills["nq_absorb_path_mfe"]["sensitivity_vs_approx"] = sens
+
+    md = [
+        "# EXP-0076 — Path-aware 0.5R absorb exit (H67)",
+        "",
+        "Primary: MFE ≥ 0.5×TP on NQ path before opposite-side absorb can force exit.",
+        "Twin: EXP-0073 approx (first opposite absorb after entry).",
+        f"Sensitivity path≥approx OOS avg: {sens['path_ge_approx_oos_avg']} "
+        f"(path={path_oos}, approx={approx_oos}).",
+        "",
+        "| arm | n | WR | net | avg | IS net | OOS net | OOS avg | kill |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---|",
+    ]
+    for k, v in books.items():
+        a, o = v["all"], v["oos"]
+        kill = kills.get(k, {})
+        md.append(
+            f"| {k} | {a['n']} | {a.get('wr')} | {a['net']:+.1f} | {a.get('avg')} | "
+            f"{v['is']['net']:+.1f} | {o['net']:+.1f} | {o.get('avg')} | "
+            f"{'PASS' if kill.get('pass') else ('—' if not kill else 'FAIL')} |"
+        )
+    md += ["", "```json", json.dumps(kills, indent=2), "```", ""]
+    report = {"books": books, "kills": kills, "sensitivity": sens}
+    write_exp_report(out, title="EXP-0076", md_lines=md, report=report)
+    return report
+
+
 def run_all(exps: list[str] | None = None) -> None:
     cfg = load_config()
     results = Path(cfg["results_dir"])
@@ -504,7 +712,8 @@ def run_all(exps: list[str] | None = None) -> None:
 
     wanted = set(exps) if exps else {
         "EXP-0067", "EXP-0068", "EXP-0069", "EXP-0070",
-        "EXP-0071", "EXP-0072", "EXP-0073",
+        "EXP-0071", "EXP-0072", "EXP-0073", "EXP-0074",
+        "EXP-0075", "EXP-0076",
     }
     synthesis = {}
 
@@ -548,9 +757,36 @@ def run_all(exps: list[str] | None = None) -> None:
         print("=== EXP-0073 ===", flush=True)
         synthesis["EXP-0073"] = run_0073(cache, results / "EXP-0073")
 
-    # Synthesis
+    if "EXP-0074" in wanted:
+        print("=== EXP-0074 ===", flush=True)
+        synthesis["EXP-0074"] = run_0074(cache, results / "EXP-0074")
+
+    if "EXP-0075" in wanted:
+        print("=== EXP-0075 ===", flush=True)
+        synthesis["EXP-0075"] = run_gate_exp(
+            cache, results / "EXP-0075",
+            exp_name="EXP-0075",
+            title="Near-VWAP + ATR-expanded (H66)",
+            arm_names=["vwap_near_0.5", "atr_expanded", "rot_fresh_and_vwap_near"],
+            seed=7500,
+        )
+
+    if "EXP-0076" in wanted:
+        print("=== EXP-0076 ===", flush=True)
+        synthesis["EXP-0076"] = run_0076(cache, results / "EXP-0076")
+
+    # Synthesis (append-only when running a subset: merge with existing)
     syn_out = results / "MAT_CONTEXT_SYNTHESIS"
     syn_out.mkdir(parents=True, exist_ok=True)
+    prev_path = syn_out / "report.json"
+    merged = {}
+    if prev_path.exists() and exps:
+        try:
+            merged = json.loads(prev_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            merged = {}
+    merged.update(synthesis)
+
     lines = [
         "# MAT context / CD / exits synthesis",
         "",
@@ -559,11 +795,18 @@ def run_all(exps: list[str] | None = None) -> None:
         "| EXP | hypothesis | best arm | OOS net | OOS avg | kill |",
         "|---|---|---|---:|---:|---|",
     ]
-    for exp, rep in synthesis.items():
+    hyp = {
+        "EXP-0067": "H58", "EXP-0068": "H59", "EXP-0069": "H60", "EXP-0070": "H61",
+        "EXP-0071": "H62", "EXP-0072": "H63", "EXP-0073": "H64", "EXP-0074": "H65",
+        "EXP-0075": "H66", "EXP-0076": "H67",
+    }
+    for exp in sorted(merged.keys()):
+        rep = merged[exp]
         kills = rep.get("kills") or {}
         books = rep.get("books") or {}
+        h = hyp.get(exp, "—")
         if exp == "EXP-0067":
-            lines.append(f"| {exp} | H58 | (strata only) | — | — | no promote |")
+            lines.append(f"| {exp} | {h} | (strata only) | — | — | no promote |")
             continue
         best = None
         best_avg = -1e18
@@ -574,12 +817,12 @@ def run_all(exps: list[str] | None = None) -> None:
                 best_avg = avg
                 best = arm
         if best is None:
-            lines.append(f"| {exp} | — | — | — | — | — |")
+            lines.append(f"| {exp} | {h} | — | — | — | — |")
             continue
         o = books[best]["oos"]
         passed = kills[best].get("pass", False)
         lines.append(
-            f"| {exp} | — | {best} | {o['net']:+.1f} | {o.get('avg')} | "
+            f"| {exp} | {h} | {best} | {o['net']:+.1f} | {o.get('avg')} | "
             f"{'PASS' if passed else 'FAIL'} |"
         )
     lines += [
@@ -588,17 +831,17 @@ def run_all(exps: list[str] | None = None) -> None:
         "",
         "- `extendTpIfFavourable=false` (Java fixed but gated on EXP-0072 promote)",
         "- `requireCdPullback=false`",
-        "- No rotation / ATR / VWAP-band / structural-SL panel controls added",
+        "- No rotation / ATR / VWAP-band / structural-SL / VIX panel controls added",
         "",
     ]
     (syn_out / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    (syn_out / "report.json").write_text(json.dumps(synthesis, indent=2, default=str), encoding="utf-8")
+    (syn_out / "report.json").write_text(json.dumps(merged, indent=2, default=str), encoding="utf-8")
     print(f"wrote {syn_out / 'summary.md'}", flush=True)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--exp", action="append", default=None, help="EXP-0067 … EXP-0073 (repeatable)")
+    ap.add_argument("--exp", action="append", default=None, help="EXP-0067 … EXP-0076 (repeatable)")
     args = ap.parse_args()
     run_all(args.exp)
 

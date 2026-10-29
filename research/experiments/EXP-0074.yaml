@@ -1,0 +1,22 @@
+name: EXP-0074
+hypothesis: H65
+title: Prior-close VIX keep-gates on frozen MAT
+description: >
+  Volatility-regime filter. Causal prior = FRED VIXCLS close strictly before
+  the session calendar day (UK 14:30–17:00 trades before same-day VIX close).
+  Absolute arms: vix_ge_15 / 18 / 20 / 25. Relative arm: vix_hi_tercile
+  (prior close ≥ p66.7 of trailing 60 VIX closes). Also publish absolute and
+  tercile strata on executed MAT trades (descriptive). Kill vs ungated MAT +
+  time-matched null. Host frozen MAT; do not retune CFADE.
+detector: mat_vix_prior_gate
+sample:
+  exclude_sessions: ["200626", "220626"]
+  is: DIG4_23d
+source: FRED VIXCLS (cached data/external/vixcls.csv)
+arms: [vix_ge_15, vix_ge_18, vix_ge_20, vix_ge_25, vix_hi_tercile]
+kill:
+  oos_net_positive: true
+  beat_base_oos_avg: true
+  beat_null_oos_avg: true
+  min_n: 50
+runner: python -m research.mat_context.run_queue --exp EXP-0074

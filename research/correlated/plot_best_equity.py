@@ -201,7 +201,7 @@ def main() -> None:
     md = [
         "# Best-strategy standalone equity curves",
         "",
-        "113 clean sessions (excl. 200626/220626). Costs 1-tick + 0.25 pt/RT.",
+        "113 clean sessions (excl. 200626/220626). Bookmap-parity fills (TP/SL at working price) + 0.25 pt/RT.",
         "",
         "## Summary",
         "",

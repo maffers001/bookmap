@@ -87,9 +87,148 @@
 | EXP-0070 | H61 VWAP dist/vol | ran — **reject / park** | 113d | both OOS net − |
 | EXP-0071 | H62 structural SL | ran — **reject / park** | 113d | WR~23–26%; OOS net − |
 | EXP-0072 | H63 TP-extend | ran — **reject / park** | 113d | OOS avg worse than base; Java default OFF |
-| EXP-0073 | H64 absorb exit | ran — **PASS nq_absorb_exit** | 113d | n=3621 net +832 OOS +460; dual fail; needs path-MFE + future months |
+| EXP-0073 | H64 absorb exit | ran — PASS approx → **demoted by 0076** | 113d | path-MFE FAIL; park absorb-exit |
+| EXP-0074 | H65 prior-close VIX | ran — **reject / park** | 113d | all arms FAIL oos_net; hi-tercile OOS −707; mid tercile descriptive only |
+| EXP-0075 | H66 near-VWAP / ATR-exp | ran — **PASS all 3 arms** | 113d | near +194; atr_exp +210; rot∩near +287 OOS; research only |
+| EXP-0076 | H67 path-MFE absorb | ran — **reject path; demote 0073** | 113d | path OOS −33; approx still +460 |
+| EXP-0077 | H68 CFADE×0061 hand-off | ran — **reject / park** | 113d | flat OOS +513 avg 0.24 &lt; indep avg 0.38 |
+| EXP-0078 | H69 DOP break trap-side amount | ran — **reject / park** | Apr–Aug discovery | reject / park — Stage 3 holdout fail (no retune); see notes |
+| EXP-0079 | H70 DOP beyond-zone traversal (depth) | ran — **reject / park** | Apr–Aug depth discovery | reject / park — Stage 2 discovery P&L fail (no semi-OOS read, no retune); see notes |
+| EXP-0080 | H71 DOP entry + stall-scratch exit | ran — **reject / park** | Apr–Aug discovery | reject / park — Stage 1 discovery fail (no Sep-Oct read, no retune); DOP thread closed; see notes |
+| EXP-0081 | H72 DOP pre-break approach chew | ran — **reject / park** | Apr–Aug depth discovery | reject / park — Stage 3 semi-holdout fail (no retune); see notes |
 
 ## Run notes
+
+### 2026-10-27 — EXP-0078 Daily Open (DOP) break registered (H69)
+
+- Frozen design: `research/experiments/EXP-0078.yaml` / H69.
+- DOP = first print at/after UK 14:30; grace 5 min; first ≥1-tick break
+  through DOP away from the majority-volume trap side; long and short
+  mirrored. Window UK 14:30–21:00; NQ + ES.
+- Core claim: absolute trap-side volume/delta amount (causal z vs prior-14)
+  predicts continuation (dose-response). Share and V/sideways shape secondary.
+- Arms: A all breaks; B trap_vol_z≥0 ∧ share≥0.55; C = B + break 5s imb≥0.20.
+- Books: Book 1 SL 1 tick beyond DOP on trap side TP 2R; Book 2 vol RR SL1/TP2.
+- Runner: `python -m research.dop.exp_0078_dop` (`--stage3` once after discovery pass).
+- Status: registered; run pending.
+
+### 2026-10-27 — EXP-0078 DOP break run (H69)
+
+- Verdict: **reject / park — Stage 3 holdout fail (no retune)**
+- Stage 0 PASS: 141 discovery breaks (NQ 69 / ES 72; long 84 / short 57);
+  Arm B kept 80; causality + power PASS. Tape ≥20:30 UK on 108/168 slots.
+- Stage 1: NQ Arm B @60s **+2.79** vs A −0.33 / null −0.09; dose-response
+  on NQ trap_delta_z hi +4.62 vs lo −8.86 (supports amount claim on NQ).
+  ES flatter; almost all events classified sideways (V cut rarely met).
+- Stage 2 discovery: NQ Book 2 Arm B **PASS** n=42 net +308 avg +7.33
+  (beats placebo p90 +6.81); Book 1 (SL beyond DOP) fails both markets.
+  ES Book 2 Arm B avg −0.14 (improves A but fails placebo / kept checks).
+  Side soft-flag: NQ B shorts avg +10.7 / longs +5.7 — both sides green.
+- Stage 3 holdout Sep–Oct (read once): NQ Book 2 Arm B n=9 avg +0.21 but
+  Arm A −8.90 and ES Book 2 Arm B avg **−3.44** → FAIL. No retune.
+- Results: `results/EXP-0078/`. Runner: `python -m research.dop.exp_0078_dop`.
+
+### 2026-10-27 — EXP-0079 DOP beyond-zone traversal registered (H70)
+
+- Frozen design: `research/experiments/EXP-0079.yaml` / H70. Follow-up to
+  parked EXP-0078 using depth (new information, not a retune).
+- NQ only. Beyond zone = asks DOP+10..+20 (long) / bids −10..−20 (short).
+- Primary: fast traversal (entered ≤15 min after break, crossed ≤60 s)
+  separates continuations; tradable arm = entry at zone exit (DOP±20).
+- At-break zone resting/pull secondary. Book 2 vol RR only.
+- Discovery Apr–Aug 2026 depth sessions; Sep–Oct semi-OOS only after a
+  discovery pass (0078 already read Sep–Oct tape outcomes).
+- Runner: `python -m research.dop.exp_0079_zone` (`--semi-oos` after pass).
+- Status: registered; run pending.
+
+### 2026-10-27 — EXP-0079 DOP zone traversal run (H70)
+
+- Verdict: **reject / park — Stage 2 discovery P&L fail (no semi-OOS read, no retune)**
+- Stage 0 PASS: 56 depth DOP breaks (long 36 / short 20), 30 fast traversals.
+  Note: 8/30 fast are single-print jump-throughs with zone resting = 0
+  (nothing to chew) — future designs should separate jump vs chew.
+- Stage 1 mechanism SUPPORTS user claim at DOP entry: fast T @60s **+9.31** /
+  @300s **+19.56** vs slow/no S **−8.24 / −8.26** (null +0.58/+2.63).
+  Q1 at-break state inverts priors: resting_hi hit10 **0.79** / @300 +18.97
+  vs resting_lo 0.42/+0.71; stack built (not pulled) better (+9.21 vs +0.22).
+- Stage 2 kills the tradable version: entry at zone exit (DOP±20) gives the
+  edge back — C avg **−4.47** (net −134) vs A avg +6.35 on same depth subset;
+  C forward @60s −1.30 from exit. Fast traversal marks a good DOP trade but
+  by +20 pts the move is spent for vol-RR brackets. Semi-OOS not read.
+- Results: `results/EXP-0079/`. Runner: `python -m research.dop.exp_0079_zone`.
+
+### 2026-10-27 — EXP-0080 DOP stall-scratch exit registered (H71)
+
+- Frozen design: `research/experiments/EXP-0080.yaml` / H71. Final DOP test;
+  design informed by EXP-0079 discovery (Apr–Aug = training here).
+- Entry DOP break (NQ depth universe, 0079 zone features reused);
+  scratch at break+15 min if zone not entered, or zone-entry+60 s if
+  entered but not crossed; fast traversals run Book 2 vol RR.
+- Discovery gate: MGMT avg ≥ BASE + 1.0 pt, net/maxDD not worse. Then one
+  Sep–Oct read (semi-holdout). Fail = DOP thread closed.
+- Runner: `python -m research.dop.exp_0080_mgmt` (`--semi-oos` after pass).
+- Status: registered; run pending.
+
+### 2026-10-27 — EXP-0080 DOP stall-scratch run (H71)
+
+- Verdict: **reject / park — Stage 1 discovery fail (no Sep-Oct read, no retune); DOP thread closed**
+- BASE (bracket only): n=56 net +355 avg **+6.35** maxDD 117.
+  MGMT (+ stall scratch): net +299 avg +5.34 maxDD 125 — all checks FAIL.
+- Why: scratched subset (21 trades) was **+0.67 avg under the bracket** —
+  slow-traversal trades recover within the bracket horizon; scratching at
+  the decision print locked **−2.00**. Fixed-horizon forward returns
+  (0079: slow −8 @300s) do not survive bracket path-dependence.
+- Sep–Oct not read. **DOP thread (H69–H71) closed**; no EXP-0081 on this
+  sample. Revisit only on virgin months or as discretionary display.
+- Results: `results/EXP-0080/`. Runner: `python -m research.dop.exp_0080_mgmt`.
+
+### 2026-10-27 — EXP-0081 DOP approach-chew registered (H72)
+
+- Frozen design: `research/experiments/EXP-0081.yaml` / H72. Causal
+  re-timing of the 0079 traversal claim to *before* the break.
+- Final approach = last print at/beyond DOP∓20 → chew into DOP; fast =
+  ≤60 s. Gate at DOP entry; Book 2 primary + fixed 20/40 secondary.
+- Discovery Apr–Aug depth sessions; Sep–Oct semi-holdout once after pass.
+- Runner: `python -m research.dop.exp_0081_approach` (`--semi-oos`).
+- Status: registered; run pending.
+
+### 2026-10-27 — EXP-0081 DOP approach-chew run (H72)
+
+- Verdict: **reject / park — Stage 3 semi-holdout fail (no retune)**
+- Stage 0/1: all 56 depth breaks had ≥20pt trap excursion; fast 36 / slow 20.
+  Event study lukewarm (F @300 +9.56 vs S +1.40; @900 +24.03 vs +1.89).
+  Concordance with 0079 post-break fast: none (0.53 vs 0.55) — approach
+  speed and post-break chew are different populations.
+- Stage 2 discovery PASS on P&L: Book 2 F n=36 net **+503 avg +13.98** vs
+  A +6.35; asym F avg +8.08 vs A +5.46.
+- Stage 3 Sep–Oct (one read): base book collapses again (A avg −8.90,
+  cf. EXP-0078 holdout); F avg **−2.40** (net −34, n=14) — gate halves the
+  damage but stays negative → FAIL on the frozen net>0 bar. No retune.
+- Results: `results/EXP-0081/`. Runner: `python -m research.dop.exp_0081_approach`.
+
+### 2026-10-26 — EXP-0075…0077 next package
+
+- **0075 / H66:** `vwap_near_0.5`, `atr_expanded`, `rot_fresh_and_vwap_near`
+  all PASS kill vs base+null. Strongest combo OOS avg +2.76 (n=132). Ship
+  gate: virgin months only; do not stack with other MAT filters on 113d.
+- **0076 / H67:** path-aware 0.5R absorb FAIL OOS −33 → demote EXP-0073 /
+  H64 absorb-exit to park. Approx twin replicates 0073 PASS.
+- **0077 / H68:** flat CFADE↔0061 hand-off FAIL vs independent sum OOS avg
+  (0.24 vs 0.38); 95 hand-offs. Keep legs independent. Runner:
+  `python -m research.correlated.exp_0077_handoff`.
+- Runners: `python -m research.mat_context.run_queue --exp EXP-0075`
+  / `--exp EXP-0076`.
+
+### 2026-10-26 — EXP-0074 prior-close VIX (H65)
+
+- Source: FRED VIXCLS cached `data/external/vixcls.csv`; causal prior close
+  before session day. Coverage 113/113; prior median 17.0 [14.3, 25.3].
+- Keep-gates all FAIL: `vix_ge_15/18/20/25`, `vix_hi_tercile`. `vix_ge_18`
+  closest (OOS −36, beats base avg) but net still negative.
+- Claim “MAT likes high VIX” contradicted by hi-tercile OOS −707. Absolute
+  `vix_15_18` bucket is the large OOS drag (−999). Mid tercile OOS +601 is
+  descriptive only — not pre-registered as a keep-gate.
+- Runner: `python -m research.mat_context.run_queue --exp EXP-0074`.
 
 ### 2026-10-26 — MAT context / CD / exits queue (EXP-0067…0073)
 
@@ -100,7 +239,8 @@
   untouched. Sep–Oct **not** virgin MAT holdout.
 - Synthesis: `results/MAT_CONTEXT_SYNTHESIS/summary.md`.
 - **Survivors (research only, need future months):** (1) EXP-0068
-  `rot_fresh_0.90`; (2) EXP-0073 `nq_absorb_exit`.
+  `rot_fresh_0.90`; (2) EXP-0075 near-VWAP / ATR-expanded / combo (see
+  later note). EXP-0073 absorb-exit demoted by EXP-0076.
 - **Java:** TP-extend decoupled (`stillFavourableForExtend`, 8s lookback,
   skip logs) in MAT v1/v2; CD SMA warmup 100 bars. Defaults stay OFF.
 - Rejects: faithful CD, VWAP-band, structural SL, TP-extend sim, ATR/speed
