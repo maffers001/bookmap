@@ -33,7 +33,7 @@ import velox.api.layer1.simplified.Api;
 import velox.api.layer1.simplified.AxisGroup;
 import velox.api.layer1.simplified.CustomModule;
 import velox.api.layer1.simplified.DepthDataListener;
-import velox.api.layer1.simplified.HistoricalDataListener;
+import velox.api.layer1.simplified.HistoricalModeListener;
 import velox.api.layer1.simplified.Indicator;
 import velox.api.layer1.simplified.InitialState;
 import velox.api.layer1.simplified.IntervalListener;
@@ -59,7 +59,7 @@ public class LstMomentumModule implements
         TimeListener,
         IntervalListener,
         MultiInstrumentListener,
-        HistoricalDataListener,
+        HistoricalModeListener,
         SliceEventTracker.Listener {
 
     @Parameter(name = "Use frozen V1 preset", step = 1.0)
@@ -93,7 +93,10 @@ public class LstMomentumModule implements
     Boolean alertOnSignal = true;
 
     @Parameter(name = "Signal log path (blank=off)")
-    String signalLogPath = "lst_momentum_signals.csv";
+    String signalLogPath = "C:/Work/Mat/bookmap/results/MOMENTUM_SLICE/logs/lst_momentum_signals.csv";
+
+    @Parameter(name = "Fire marker hold sec", step = 1.0)
+    Double fireHoldSec = 8.0;
 
     private String primaryAlias;
     private String currentAlias;
@@ -103,6 +106,10 @@ public class LstMomentumModule implements
     private SliceEventTracker tracker;
     private BufferedWriter logWriter;
     private boolean logHeaderWritten;
+    private long fireUntilNs;
+    private State lastLoggedState = State.IDLE;
+    private int depthUpdates;
+    private long lastDepthLogNs;
 
     private Indicator stateIndicator;
     private Indicator burstTpsIndicator;
@@ -133,6 +140,7 @@ public class LstMomentumModule implements
         Config cfg = buildConfig();
         tracker = new SliceEventTracker(cfg, this);
         tracker.setTickSize(pips);
+        tracker.setHistoryMode(true);
 
         stateIndicator = api.registerIndicator("LST State", GraphType.BOTTOM);
         burstTpsIndicator = api.registerIndicator("LST Burst tps", GraphType.BOTTOM);
@@ -191,6 +199,14 @@ public class LstMomentumModule implements
         cfg.enableLongs = !Boolean.FALSE.equals(showLongs);
         cfg.enableShorts = !Boolean.FALSE.equals(showShorts);
         return cfg;
+    }
+
+    @Override
+    public void onRealtimeStart() {
+        if (tracker != null) {
+            tracker.setHistoryMode(false);
+        }
+        Log.info("LST Momentum realtime start (historyMode=false)");
     }
 
     @Override
@@ -262,11 +278,22 @@ public class LstMomentumModule implements
             levelShortMarker.addPoint(Double.NaN);
             stopShortMarker.addPoint(Double.NaN);
         }
+        if (fireUntilNs > 0 && nowNs > fireUntilNs) {
+            lastFireLong = Double.NaN;
+            lastFireShort = Double.NaN;
+            fireUntilNs = 0;
+        }
         fireLongMarker.addPoint(lastFireLong);
         fireShortMarker.addPoint(lastFireShort);
-        // Clear fire markers after one interval paint
-        lastFireLong = Double.NaN;
-        lastFireShort = Double.NaN;
+
+        if (snap.state != lastLoggedState) {
+            Log.info(String.format(Locale.US,
+                    "LST Momentum state %s→%s side=%d level=%.2f domVsMed=%.2f trend=%.2f bookLevels=%d depthUpdates=%d",
+                    lastLoggedState, snap.state, snap.side,
+                    snap.dominantLevelPx, snap.domVsMed, snap.trend5mPts,
+                    tracker == null ? 0 : tracker.nqBookLevels(), depthUpdates));
+            lastLoggedState = snap.state;
+        }
     }
 
     @Override
@@ -274,17 +301,18 @@ public class LstMomentumModule implements
         if (tracker == null) {
             return;
         }
+        long ts = nowNs > 0 ? nowNs : System.nanoTime();
         String role = roleByAlias.getOrDefault(currentAlias, "OTHER");
         boolean buy = tradeInfo.isBidAggressor;
         double px = PriceTicks.toChartPoints(price, pips);
         if ("NQ".equals(role)) {
             nqLastForDist = px;
             if (!Boolean.FALSE.equals(enableNq)) {
-                tracker.onNqTrade(nowNs, px, size, buy);
+                tracker.onNqTrade(ts, px, size, buy);
             }
         } else if ("ES".equals(role)) {
             if (!Boolean.FALSE.equals(enableEs)) {
-                tracker.onEsTrade(nowNs, px, size, buy);
+                tracker.onEsTrade(ts, px, size, buy);
             }
         }
     }
@@ -297,6 +325,13 @@ public class LstMomentumModule implements
         String role = roleByAlias.getOrDefault(currentAlias, "OTHER");
         if ("NQ".equals(role) || "ES".equals(role)) {
             tracker.onDepth(role, isBid, price, size);
+            depthUpdates++;
+            if (nowNs - lastDepthLogNs > 30_000_000_000L) {
+                lastDepthLogNs = nowNs;
+                Log.info(String.format(Locale.US,
+                        "LST Momentum depth ok role=%s bookLevels=%d updates=%d lastPx=%d size=%d",
+                        role, tracker.nqBookLevels(), depthUpdates, price, size));
+            }
         }
     }
 
@@ -307,9 +342,13 @@ public class LstMomentumModule implements
         }
         if (signal.side > 0) {
             lastFireLong = signal.entryRefPx;
+            lastFireShort = Double.NaN;
         } else {
             lastFireShort = signal.entryRefPx;
+            lastFireLong = Double.NaN;
         }
+        long holdNs = (long) ((fireHoldSec == null ? 8.0 : fireHoldSec) * 1e9);
+        fireUntilNs = nowNs + holdNs;
         if (Boolean.TRUE.equals(alertOnSignal)) {
             Log.info(String.format(Locale.US,
                     "LST Momentum FIRE side=%d px=%.2f level=%.2f stop=%.2f trend=%.1f dom=%.2f tps=%.0f pb=%.2f",
@@ -344,17 +383,19 @@ public class LstMomentumModule implements
         }
         try {
             Path p = Paths.get(signalLogPath.trim());
-            boolean exists = Files.exists(p);
+            if (p.getParent() != null) {
+                Files.createDirectories(p.getParent());
+            }
+            boolean exists = Files.exists(p) && Files.size(p) > 0;
             logWriter = Files.newBufferedWriter(p, StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND);
             if (!exists) {
                 logWriter.write(Signal.csvHeader());
                 logWriter.newLine();
-                logHeaderWritten = true;
-            } else {
-                logHeaderWritten = true;
             }
+            logHeaderWritten = true;
             logWriter.flush();
+            Log.info("LST Momentum signal log → " + p.toAbsolutePath());
         } catch (IOException e) {
             Log.warn("LST Momentum: cannot open signal log: " + e.getMessage());
             logWriter = null;

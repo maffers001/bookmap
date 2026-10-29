@@ -49,6 +49,8 @@ public final class SliceEventTracker {
         public long burstWinNs = 2_000_000_000L;
         public long stallWinNs = 5_000_000_000L;
         public long stallMaxNs = 10_000_000_000L;
+        /** Drop STACK_ARMED if no dominant level appears within this window. */
+        public long armWithoutDomMaxNs = 2_000_000_000L;
         public long trendLookbackNs = 300_000_000_000L;
         public long trendExcludeNs = 30_000_000_000L;
         public long cooldownNs = 30_000_000_000L;
@@ -205,6 +207,32 @@ public final class SliceEventTracker {
     private double nqLastPx = Double.NaN;
     private double esLastPx = Double.NaN;
     private double tickSize = 0.25;
+    /**
+     * When true (Bookmap catchup / Loading events), subsample depth and keep a
+     * shorter tape buffer so historical load stays usable. Detection still runs.
+     */
+    private boolean historyMode = true;
+    private int depthUpdateCount;
+    /** Rolling NQ book snapshots so dominant level is taken pre-ignition (research −3 s). */
+    private final Deque<BookSnap> nqBookSnaps = new ArrayDeque<>();
+    private long lastBookSnapNs = -1;
+    /** Last trade / onTime clock — depth API has no timestamp. */
+    private long lastEventTsNs = -1;
+    private static final long BOOK_SNAP_EVERY_NS = 250_000_000L;
+    private static final long BOOK_SNAP_KEEP_NS = 20_000_000_000L;
+    private static final long DOM_LOOKBACK_NS = 3_000_000_000L;
+
+    private static final class BookSnap {
+        final long tsNs;
+        final TreeMap<Integer, Integer> bids;
+        final TreeMap<Integer, Integer> asks;
+
+        BookSnap(long tsNs, TreeMap<Integer, Integer> bids, TreeMap<Integer, Integer> asks) {
+            this.tsNs = tsNs;
+            this.bids = bids;
+            this.asks = asks;
+        }
+    }
 
     public SliceEventTracker(Config cfg, Listener listener) {
         this.cfg = cfg == null ? new Config() : cfg;
@@ -215,6 +243,15 @@ public final class SliceEventTracker {
         if (tickSize > 0) {
             this.tickSize = tickSize;
         }
+    }
+
+    /** Call {@code false} from {@code onRealtimeStart} / when replay cursor is live. */
+    public void setHistoryMode(boolean historyMode) {
+        this.historyMode = historyMode;
+    }
+
+    public boolean isHistoryMode() {
+        return historyMode;
     }
 
     public State state() {
@@ -271,11 +308,120 @@ public final class SliceEventTracker {
         if (book == null) {
             return;
         }
-        if (size <= 0) {
-            book.remove(priceTicks);
-        } else {
-            book.put(priceTicks, size);
+        depthUpdateCount++;
+        // Historical load: skip ES depth (unused for V1 dominant). Keep full NQ
+        // book — thinning NQ depth was dropping the dominant level on catchup.
+        if (historyMode && "ES".equals(role)) {
+            return;
         }
+        // Normalize: tick-index feeds (>=80k on modern NQ/ES) stay as-is; rare
+        // chart-point ints are converted to ticks so they match findDominant.
+        int key = priceTicks;
+        if (priceTicks > 0 && priceTicks < 80_000 && tickSize > 0) {
+            key = (int) Math.round(priceTicks / tickSize);
+        }
+        if (size <= 0) {
+            book.remove(key);
+        } else {
+            book.put(key, size);
+        }
+        if ("NQ".equals(role) && lastEventTsNs > 0) {
+            maybeSnapshotNqBook(lastEventTsNs);
+        }
+        // Depth often arrives after the tape arm — upgrade STACK_ARMED → SLICING.
+        if (episode != null && !episode.signalled && "NQ".equals(role)) {
+            tryUpgradeDominant();
+        }
+    }
+
+    private void maybeSnapshotNqBook(long tsNs) {
+        if (tsNs <= 0) {
+            return;
+        }
+        // Refresh the tip snap when depth updates land inside the same 250 ms slot
+        // so late L2 for that clock is included (depth has no own timestamp).
+        if (lastBookSnapNs > 0 && tsNs - lastBookSnapNs < BOOK_SNAP_EVERY_NS) {
+            if (!nqBookSnaps.isEmpty() && nqBookSnaps.peekLast().tsNs == lastBookSnapNs) {
+                nqBookSnaps.removeLast();
+                nqBookSnaps.addLast(new BookSnap(lastBookSnapNs, new TreeMap<>(nqBids), new TreeMap<>(nqAsks)));
+            }
+            return;
+        }
+        lastBookSnapNs = tsNs;
+        nqBookSnaps.addLast(new BookSnap(tsNs, new TreeMap<>(nqBids), new TreeMap<>(nqAsks)));
+        while (!nqBookSnaps.isEmpty() && nqBookSnaps.peekFirst().tsNs < tsNs - BOOK_SNAP_KEEP_NS) {
+            nqBookSnaps.removeFirst();
+        }
+    }
+
+    private BookSnap nearestNqSnap(long wantNs) {
+        // Prefer latest snap at/before wantNs (causal), within 2 s.
+        BookSnap before = null;
+        for (BookSnap s : nqBookSnaps) {
+            if (s.tsNs <= wantNs) {
+                before = s;
+            } else {
+                break;
+            }
+        }
+        if (before != null && wantNs - before.tsNs <= 2_000_000_000L) {
+            return before;
+        }
+        BookSnap best = null;
+        long bestAbs = Long.MAX_VALUE;
+        for (BookSnap s : nqBookSnaps) {
+            long d = Math.abs(s.tsNs - wantNs);
+            if (d < bestAbs) {
+                bestAbs = d;
+                best = s;
+            }
+        }
+        return best;
+    }
+
+    public int diagBookSnapCount() {
+        return nqBookSnaps.size();
+    }
+
+    /** NQ bid+ask level count (debug / warmup gate). */
+    public int nqBookLevels() {
+        return nqBids.size() + nqAsks.size();
+    }
+
+    // ---- diagnostics for parity / replay logs ----
+    private long diagNqTrades;
+    private long diagEsTrades;
+
+    public long diagNqTrades() {
+        return diagNqTrades;
+    }
+
+    public long diagEsTrades() {
+        return diagEsTrades;
+    }
+
+    public int diagLastNqBurstSide() {
+        return lastNqBurst == null ? 0 : lastNqBurst.side;
+    }
+
+    public int diagLastEsBurstSide() {
+        return lastEsBurst == null ? 0 : lastEsBurst.side;
+    }
+
+    public long diagLastNqBurstNs() {
+        return lastNqBurst == null ? 0 : lastNqBurst.confirmNs;
+    }
+
+    public long diagLastEsBurstNs() {
+        return lastEsBurst == null ? 0 : lastEsBurst.confirmNs;
+    }
+
+    public double diagLastNqPx() {
+        return nqLastPx;
+    }
+
+    public double diagLastEsPx() {
+        return esLastPx;
     }
 
     public void onNqTrade(long tsNs, double pricePts, double size, boolean buyAggressor) {
@@ -287,20 +433,41 @@ public final class SliceEventTracker {
     }
 
     public void onTime(long tsNs) {
+        if (tsNs > 0) {
+            lastEventTsNs = tsNs;
+            maybeSnapshotNqBook(tsNs);
+        }
         if (episode != null && !episode.signalled) {
             maybeResolve(tsNs);
         }
     }
 
     private void onTrade(String role, long tsNs, double pricePts, double size, boolean buy) {
+        if (tsNs > 0) {
+            lastEventTsNs = tsNs;
+        }
         Deque<Print> q = "NQ".equals(role) ? nqPrints : esPrints;
         if ("NQ".equals(role)) {
             nqLastPx = pricePts;
+            diagNqTrades++;
+            maybeSnapshotNqBook(tsNs);
         } else {
             esLastPx = pricePts;
+            diagEsTrades++;
         }
         q.addLast(new Print(tsNs, pricePts, size, buy));
-        trim(q, tsNs - cfg.trendLookbackNs - cfg.burstWinNs);
+        // History: keep enough for trend (−5m) but trim harder to cut load cost.
+        long keepNs = historyMode
+                ? cfg.trendLookbackNs + cfg.burstWinNs
+                : cfg.trendLookbackNs + cfg.burstWinNs;
+        trim(q, tsNs - keepNs);
+        if (historyMode && q.size() > 80_000) {
+            // Pathological dense tape during catchup — drop oldest half.
+            int drop = q.size() / 2;
+            for (int i = 0; i < drop; i++) {
+                q.pollFirst();
+            }
+        }
         LegBurst burst = detectBurst(role, q, tsNs);
         if (burst != null) {
             if ("NQ".equals(role)) {
@@ -317,7 +484,8 @@ public final class SliceEventTracker {
     }
 
     private void tryArm(long tsNs) {
-        if (episode != null && !episode.signalled) {
+        // Allow a new cross-confirm to replace a dead STACK_ARMED (no level yet).
+        if (episode != null && !episode.signalled && episode.state != State.STACK_ARMED) {
             return;
         }
         if (lastSignalNs > 0 && tsNs - lastSignalNs < cfg.cooldownNs) {
@@ -340,8 +508,9 @@ public final class SliceEventTracker {
         if (side < 0 && !cfg.enableShorts) {
             return;
         }
-        // Dominant level from NQ book at (approx) pre-burst
-        DomLevel dom = findDominant(side, lastNqBurst.prePx);
+        // Dominant level from NQ book ~3 s BEFORE ignition (research), not the
+        // post-slice live book (which already had the stack taken — dom~1.7 vs 14).
+        DomLevel dom = findDominantPreIgnition(side, lastNqBurst.prePx, lastNqBurst.ignitionNs);
         double trend = trend5m(nqPrints, side, lastNqBurst.ignitionNs);
         Episode ep = new Episode();
         ep.side = side;
@@ -386,37 +555,80 @@ public final class SliceEventTracker {
         }
     }
 
+    private void tryUpgradeDominant() {
+        Episode ep = episode;
+        if (ep == null || ep.signalled) {
+            return;
+        }
+        // Never replace a weak post-slice live book over a good pre-ignition snap.
+        if (!Double.isNaN(ep.dominantLevelPx) && ep.domVsMed >= cfg.domVsMedMin
+                && ep.state == State.SLICING) {
+            return;
+        }
+        DomLevel dom = findDominantPreIgnition(ep.side, ep.nqPrePx, ep.ignitionNs);
+        if (dom == null) {
+            return;
+        }
+        // Only upgrade if better prominence than what we have.
+        if (!Double.isNaN(ep.domVsMed) && dom.vsMed <= ep.domVsMed) {
+            return;
+        }
+        ep.dominantLevelPx = dom.pricePts;
+        ep.domVsMed = dom.vsMed;
+        if (ep.state == State.STACK_ARMED) {
+            ep.state = State.SLICING;
+            publishState(ep.state, ep.confirmNs);
+        }
+    }
+
+    private DomLevel findDominantPreIgnition(int side, double prePx, long ignitionNs) {
+        long want = ignitionNs - DOM_LOOKBACK_NS;
+        BookSnap snap = nearestNqSnap(want);
+        if (snap != null) {
+            TreeMap<Integer, Integer> sideBook = side > 0 ? snap.asks : snap.bids;
+            DomLevel hit = findDominantIn(side, prePx, sideBook, snap.bids, snap.asks);
+            if (hit != null) {
+                return hit;
+            }
+        }
+        // Fallback: live book (may be weak after the slice).
+        return findDominant(side, prePx);
+    }
+
     private void maybeResolve(long tsNs) {
         Episode ep = episode;
         if (ep == null || ep.signalled) {
             return;
         }
+        tryUpgradeDominant();
         if (tsNs < ep.confirmNs) {
             return;
         }
         long sinceConfirm = tsNs - ep.confirmNs;
-        if (sinceConfirm > cfg.stallMaxNs && ep.state == State.SLICING) {
-            // Timed out without signal
+        // STACK_ARMED with no book must not block forever (was a live bug on 100926).
+        if (ep.state == State.STACK_ARMED && sinceConfirm > cfg.armWithoutDomMaxNs) {
             clearEpisode(State.IDLE, tsNs);
             return;
         }
+        if (sinceConfirm > cfg.stallMaxNs) {
+            clearEpisode(State.IDLE, tsNs);
+            return;
+        }
+        if (Double.isNaN(ep.dominantLevelPx)) {
+            return;
+        }
 
-        boolean leftBehind = ep.peakPastPts > 0 && ep.pullbackPts >= 0
-                && (ep.pullbackPts / Math.max(ep.peakPastPts, 1e-9)) <= 1.0
-                && ep.side * (nqLastPx - ep.dominantLevelPx) > 0;
+        boolean leftBehind = ep.peakPastPts > 0
+                && ep.side * (nqLastPx - ep.dominantLevelPx) > tickSize;
 
         // Momentum: left behind + with-trend + dominant
         if (cfg.enableMomentum
                 && leftBehind
                 && ep.peakPastPts > 0
                 && !Double.isNaN(ep.domVsMed) && ep.domVsMed >= cfg.domVsMedMin
-                && !Double.isNaN(ep.trend5mPts) && ep.trend5mPts >= cfg.trendMinPts
-                && sinceConfirm >= 0) {
-            // Require price still past level (left behind)
-            if (ep.side * (nqLastPx - ep.dominantLevelPx) > tickSize) {
-                emitMomentum(ep, tsNs);
-                return;
-            }
+                && !Double.isNaN(ep.trend5mPts) && ep.trend5mPts >= cfg.trendMinPts) {
+            emitMomentum(ep, tsNs);
+            return;
         }
 
         // Pitch-and-catch stall over [confirm, confirm+5..10s]
@@ -547,15 +759,61 @@ public final class SliceEventTracker {
 
     private DomLevel findDominant(int side, double prePx) {
         TreeMap<Integer, Integer> book = side > 0 ? nqAsks : nqBids;
-        if (book.isEmpty()) {
+        return findDominantIn(side, prePx, book, nqBids, nqAsks);
+    }
+
+    /**
+     * Dominant ahead-of-pre level; vsMed = max / median(full bid+ask book) —
+     * matches Python {@code stack_metrics.median_level}.
+     */
+    private DomLevel findDominantIn(int side, double prePx, TreeMap<Integer, Integer> sideBook,
+                                    TreeMap<Integer, Integer> bids, TreeMap<Integer, Integer> asks) {
+        if (sideBook == null || sideBook.isEmpty() || Double.isNaN(prePx)) {
             return null;
         }
+        double med = medianSizes(bids, asks);
         int preTicks = (int) Math.round(prePx / tickSize);
-        int lo = side > 0 ? preTicks : preTicks - cfg.zoneTicks;
-        int hi = side > 0 ? preTicks + cfg.zoneTicks : preTicks;
+        DomLevel hit = scanDominantZone(sideBook, side, preTicks, med, true);
+        if (hit != null) {
+            return hit;
+        }
+        int prePtsInt = (int) Math.round(prePx);
+        return scanDominantZone(sideBook, side, prePtsInt, med, false);
+    }
+
+    private static double medianSizes(TreeMap<Integer, Integer> bids, TreeMap<Integer, Integer> asks) {
+        int n = (bids == null ? 0 : bids.size()) + (asks == null ? 0 : asks.size());
+        if (n == 0) {
+            return 0;
+        }
+        int[] vals = new int[n];
+        int i = 0;
+        if (bids != null) {
+            for (int sz : bids.values()) {
+                vals[i++] = sz;
+            }
+        }
+        if (asks != null) {
+            for (int sz : asks.values()) {
+                vals[i++] = sz;
+            }
+        }
+        java.util.Arrays.sort(vals);
+        int mid = vals.length / 2;
+        if ((vals.length & 1) == 1) {
+            return vals[mid];
+        }
+        return (vals[mid - 1] + vals[mid]) / 2.0;
+    }
+
+    private DomLevel scanDominantZone(TreeMap<Integer, Integer> book, int side, int pre,
+                                      double med, boolean tickKeys) {
+        int zone = tickKeys ? cfg.zoneTicks
+                : Math.max(1, (int) Math.round(cfg.zoneTicks * tickSize));
+        int lo = side > 0 ? pre + 1 : pre - zone;
+        int hi = side > 0 ? pre + zone : pre - 1;
         int bestPx = 0;
         int bestSz = 0;
-        long sum = 0;
         int n = 0;
         for (var e : book.entrySet()) {
             int px = e.getKey();
@@ -563,7 +821,6 @@ public final class SliceEventTracker {
                 continue;
             }
             int sz = e.getValue();
-            sum += sz;
             n++;
             if (sz > bestSz) {
                 bestSz = sz;
@@ -573,9 +830,8 @@ public final class SliceEventTracker {
         if (bestSz <= 0 || n == 0) {
             return null;
         }
-        double med = (double) sum / n;
         double vs = med > 0 ? bestSz / med : Double.NaN;
-        return new DomLevel(bestPx * tickSize, vs);
+        return new DomLevel(tickKeys ? bestPx * tickSize : bestPx, vs);
     }
 
     private double trend5m(Deque<Print> q, int side, long ignitionNs) {

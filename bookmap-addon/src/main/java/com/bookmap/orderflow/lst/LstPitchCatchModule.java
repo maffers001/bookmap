@@ -33,7 +33,7 @@ import velox.api.layer1.simplified.Api;
 import velox.api.layer1.simplified.AxisGroup;
 import velox.api.layer1.simplified.CustomModule;
 import velox.api.layer1.simplified.DepthDataListener;
-import velox.api.layer1.simplified.HistoricalDataListener;
+import velox.api.layer1.simplified.HistoricalModeListener;
 import velox.api.layer1.simplified.Indicator;
 import velox.api.layer1.simplified.InitialState;
 import velox.api.layer1.simplified.IntervalListener;
@@ -60,7 +60,7 @@ public class LstPitchCatchModule implements
         TimeListener,
         IntervalListener,
         MultiInstrumentListener,
-        HistoricalDataListener,
+        HistoricalModeListener,
         SliceEventTracker.Listener {
 
     @Parameter(name = "Use frozen V1 preset", step = 1.0)
@@ -94,7 +94,10 @@ public class LstPitchCatchModule implements
     Boolean alertOnSignal = true;
 
     @Parameter(name = "Signal log path (blank=off)")
-    String signalLogPath = "lst_pc_signals.csv";
+    String signalLogPath = "C:/Work/Mat/bookmap/results/MOMENTUM_SLICE/logs/lst_pc_signals.csv";
+
+    @Parameter(name = "Fire marker hold sec", step = 1.0)
+    Double fireHoldSec = 8.0;
 
     private String currentAlias;
     private final Map<String, String> roleByAlias = new HashMap<>();
@@ -103,6 +106,7 @@ public class LstPitchCatchModule implements
     private SliceEventTracker tracker;
     private BufferedWriter logWriter;
     private boolean logHeaderWritten;
+    private long fireUntilNs;
 
     private Indicator stateIndicator;
     private Indicator pullbackRatioIndicator;
@@ -134,6 +138,7 @@ public class LstPitchCatchModule implements
 
         tracker = new SliceEventTracker(buildConfig(), this);
         tracker.setTickSize(pips);
+        tracker.setHistoryMode(true);
 
         stateIndicator = api.registerIndicator("LST-PC State", GraphType.BOTTOM);
         pullbackRatioIndicator = api.registerIndicator("LST-PC PB ratio", GraphType.BOTTOM);
@@ -196,6 +201,14 @@ public class LstPitchCatchModule implements
         cfg.enableLongs = true;
         cfg.enableShorts = true;
         return cfg;
+    }
+
+    @Override
+    public void onRealtimeStart() {
+        if (tracker != null) {
+            tracker.setHistoryMode(false);
+        }
+        Log.info("LST-PC realtime start (historyMode=false)");
     }
 
     @Override
@@ -262,10 +275,13 @@ public class LstPitchCatchModule implements
             stopLongMarker.addPoint(Double.NaN);
         }
         levelMarker.addPoint(armed && !Double.isNaN(armedLevel) ? armedLevel : Double.NaN);
+        if (fireUntilNs > 0 && nowNs > fireUntilNs) {
+            lastFireLong = Double.NaN;
+            lastFireShort = Double.NaN;
+            fireUntilNs = 0;
+        }
         fireLongMarker.addPoint(lastFireLong);
         fireShortMarker.addPoint(lastFireShort);
-        lastFireLong = Double.NaN;
-        lastFireShort = Double.NaN;
     }
 
     @Override
@@ -303,9 +319,12 @@ public class LstPitchCatchModule implements
         lastStallDur = signal.stallDurS;
         if (signal.side > 0) {
             lastFireLong = signal.entryRefPx;
+            lastFireShort = Double.NaN;
         } else {
             lastFireShort = signal.entryRefPx;
+            lastFireLong = Double.NaN;
         }
+        fireUntilNs = nowNs + (long) ((fireHoldSec == null ? 8.0 : fireHoldSec) * 1e9);
         if (Boolean.TRUE.equals(alertOnSignal)) {
             Log.info(String.format(Locale.US,
                     "LST-PC FIRE fadeSide=%d px=%.2f pitch=%.2f stop=%.2f level=%.2f pb=%.2f slow=%.2f stall=%.1fs",
@@ -340,7 +359,10 @@ public class LstPitchCatchModule implements
         }
         try {
             Path p = Paths.get(signalLogPath.trim());
-            boolean exists = Files.exists(p);
+            if (p.getParent() != null) {
+                Files.createDirectories(p.getParent());
+            }
+            boolean exists = Files.exists(p) && Files.size(p) > 0;
             logWriter = Files.newBufferedWriter(p, StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND);
             if (!exists) {
@@ -349,6 +371,7 @@ public class LstPitchCatchModule implements
             }
             logHeaderWritten = true;
             logWriter.flush();
+            Log.info("LST-PC signal log → " + p.toAbsolutePath());
         } catch (IOException e) {
             Log.warn("LST-PC: cannot open signal log: " + e.getMessage());
             logWriter = null;
