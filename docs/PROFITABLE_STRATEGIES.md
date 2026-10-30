@@ -134,6 +134,7 @@ Suggested commands / artefacts (update paths as runners evolve):
 | Date | Data (months / n sessions) | Strategy | Result | Notes / artefact |
 |---|---|---|---|---|
 | *(seed)* 2026-10-29 | See rows above | Tier 1–2 baselines | — | Doc created; baselines are historical, not a new virgin read |
+| 2026-10-29 | Mar+Jun clean **38d** (depth parquet now filled) | CFADE / MAT075 / LST Mom+PC | CFADE **+183** (Mar −385 / Jun +568); MAT075 **+23** (Mar −5 / Jun +28); Mom **+76** n=32; PC **−30** n=41 | Depth filled for sids that LST holdout had skipped (`160326`,`270326`,`160626`,`170626`,`180626`). Artefact: `results/RETEST_MAR_JUN_DEPTH/` |
 
 ---
 

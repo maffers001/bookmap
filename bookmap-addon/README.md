@@ -18,7 +18,8 @@ Custom Bookmap Layer 1 add-ons for NQ scalping with ES confirmation:
 | **HV Extreme Move AutoTrade** | HV tip ? clean Move pts leg ? tip markers; optional market + TP/SL brackets |
 | **Trapped Retest** | HV peak ? weak lower-vol retest ? fire on break beyond 2nd swing |
 | **Stop Run** | Inferred stop-run fingerprint beyond swing/session/overnight levels (EXP-0041 / H32); visual markers only â no auto-trade |
-| **LVN Confluence AutoTrade (ES)** | ES open-cluster â© IRT LVN2/3 first-touch fade; console loads pre-open LVN file; default SL8/TP24 (adjustable); trading OFF until enabled |
+| **LVN Levels** | Display-only LVN/HVN/DOP from tick VAP seed; IRT-style window/sensitivity/join knobs; see `docs/LVN_INDICATOR_DESIGN.md` |
+| **LVN Confluence AutoTrade (ES)** | ES open-cluster â© LVN first-touch fade; consumes shared levels; console for trading; default SL8/TP24; trading OFF until enabled |
 | **Market Profile** | Developing VAL / VAH / VPOC from UK session open (default 14:30); 70% value area; chart lines + price tags |
 
 ## Prerequisites
@@ -243,12 +244,41 @@ Logs: `CFADE CONFIRM#â¦`, `CFADE PROBE â¦` (partial NQ-still / ES-agains
 
 **Not implemented (ops rules in the spec):** no auto-flatten at 17:00 and no cross-session "3 losing sessions" stop â handle manually.
 
+### LVN Levels (display)
+
+Tick-built volume profile nodes (LVN / HVN) + DOP. Design:
+[`docs/LVN_INDICATOR_DESIGN.md`](../docs/LVN_INDICATOR_DESIGN.md).
+
+**Morning / replay seed**
+
+```powershell
+.\.venv\Scripts\python.exe -m research.irt_lvn.build_vap_seed --market both --through 13:55
+```
+
+Writes `data/irt/vap_seed_ES/` and `vap_seed_NQ/` (`meta.json`, `daily.csv`,
+`minutes.csv`). `--through` is the **Join with Bookmap** UK time (rebuild if
+you leave IRT later).
+
+**In Bookmap:** attach **LVN Levels** on ES and/or NQ → console **Load ES/NQ
+seed…** → set Window / Sens / Join / DOP open → **Apply**. Live prints after
+Join append to the VAP; nodes refresh on the timer (default 5 min) or Apply.
+
+| Knob | ES default | NQ default |
+|---|---|---|
+| Time per Profile (days) | 90 | 30 |
+| Sensitivity (prices) | 15 | 100 |
+| Join with Bookmap (UK) | 13:55 | 13:55 |
+| DOP session open (UK) | 14:30 | 14:30 |
+
+Chart lines: `LVN Above/Below 1..6`, `HVN Above/Below 1..6`, `DOP`. No orders.
+
 ### LVN Confluence AutoTrade (ES)
 
-Frozen open-cluster ? IRT LVN first-touch fade (research
-`study_es_lvn_bracket_8_24` outer book). **Attach on ES.** LVN2/LVN3 are
-**not** computed in Bookmap ï¿½ export them from Investor/RT before the open
-and load via the always-on-top **LVN Confluence ES** console.
+Frozen open-cluster ∩ LVN first-touch fade (research
+`study_es_lvn_bracket_8_24` outer book). **Attach on ES.** Prefer attaching
+**LVN Levels** for developing nodes; confluence reads shared
+`LvnLevelsState`. Fallback: IRT chart export LVN2/LVN3 via the **LVN
+Confluence ES** console.
 
 JAR: `bookmap-addon/build/libs/bookmap-orderflow-lvn.jar` (or rebuild the
 default `bookmap-orderflow.jar` ï¿½ same classes). Core:
@@ -267,14 +297,17 @@ default `bookmap-orderflow.jar` ï¿½ same classes). Core:
 
 **Developing LVN stack (optional, recommended for multi-level display)**
 
-IRT Profile `devNodes` (ES: 90d / sens **15 ticks**; NQ: 30d / sens **100 ticks**) is reverse-engineered offline from `@ES#` / `@NQ#` 1-tick files:
+Developing stack uses the same **tick-built** Profile rule on both markets
+(ES: 90d / sens **15 ticks**; NQ: ~30–35d / sens **100 ticks**) from `@ES#` /
+`@NQ#` 1-tick files — not IRT’s ES 1‑min bar-smear. See
+[`docs/IRT_LVN_PROFILE.md`](../docs/IRT_LVN_PROFILE.md).
 
 ```text
 .\\.venv\Scripts\python.exe research\irt_lvn\_build_minute_vap.py
 .\\.venv\Scripts\python.exe -m research.irt_lvn.build_lvn_stack --market both --every 5
 ```
 
-Outputs: `results/LVN_STACK/LVN_STACK_ES.csv` and `LVN_STACK_NQ.csv`. Console -> **Load ES/NQ LVN stack...**. Chart then plots nearest **LVNs above / below** mid (defaults **3 / 3**, knobs on the settings row, max 6 each). Confluence uses the full as-of stack when loaded; otherwise falls back to LVN2/LVN3. Validation notes: `results/LVN_PROFILE_VALIDATE/summary.md`.
+Outputs: `results/LVN_STACK/LVN_STACK_ES.csv` and `LVN_STACK_NQ.csv`. Console -> **Load ES/NQ LVN stack...**. Chart then plots nearest **LVNs above / below** mid (defaults **3 / 3**, knobs on the settings row, max 6 each). Confluence uses the full as-of stack when loaded; otherwise falls back to LVN2/LVN3.
 
 
 **Defaults (console-adjustable; Apply applies to new orders only)**
@@ -294,9 +327,8 @@ Unfilled entry limits are cancelled at entry-until; open position is market-flat
 |---|---|
 | **LVN Signal** | `+1` long / `?1` short / `0` |
 | **LVN Fade Long / Short** | Entry markers while armed / on fill |
-| **LVN2 / LVN3** | Loaded level lines for this chartï¿½s market (when **Show LVNs on chart** is ON) |
-| **LVN Above 1..6 / LVN Below 1..6** | Developing stack nearest N above/below mid |
-| **HVN1 / HVN2 / HVN3** | High-volume nodes from the same export row (when **Show HVNs on chart** is ON) |
+| **LVN2 / LVN3** | Fallback export lines when LVN Levels is not attached |
+| **Open 14:30 / VPOC** | Session open mid / session volume POC |
 
 Logs: `LVN SNAP ï¿½`, `LVN ARM ï¿½`, `LVN FILL ï¿½`, `LVN ORDER ï¿½`, `LVN TRADE CLOSED ï¿½`, `LVN FLATTEN ï¿½`.
 
@@ -436,6 +468,7 @@ bookmap-addon/
     hvmove/       HV Extreme Move
     retest/       Trapped Retest
     profile/      Market Profile (developing VAL/VAH/VPOC)
+    lvn/          LVN Levels (seed VAP + LVN/HVN/DOP display)
     core/         + OpenClusterDetector + LvnLevelFile + MarketProfileTracker
 ```
 

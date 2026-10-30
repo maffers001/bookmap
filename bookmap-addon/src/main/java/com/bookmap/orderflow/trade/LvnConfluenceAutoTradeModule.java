@@ -130,22 +130,11 @@ public class LvnConfluenceAutoTradeModule implements
     private Indicator shortMarker;
     private Indicator lvn2Marker;
     private Indicator lvn3Marker;
-    private Indicator hvn1Marker;
-    private Indicator hvn2Marker;
-    private Indicator hvn3Marker;
     private Indicator openMarker;
     private Indicator vpocMarker;
-    /** Developing stack slots (pre-registered; unused → NaN). */
-    private final Indicator[] lvnAboveMarkers = new Indicator[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
-    private final Indicator[] lvnBelowMarkers = new Indicator[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
-    private final double[] lvnAboveIconPx = new double[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
-    private final double[] lvnBelowIconPx = new double[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
     /** Last price we stamped an on-chart text icon for (re-stamp when it changes). */
     private double lvn2IconPx = Double.NaN;
     private double lvn3IconPx = Double.NaN;
-    private double hvn1IconPx = Double.NaN;
-    private double hvn2IconPx = Double.NaN;
-    private double hvn3IconPx = Double.NaN;
     private double openIconPx = Double.NaN;
     private double vpocIconPx = Double.NaN;
     private boolean signalThisInterval;
@@ -156,10 +145,8 @@ public class LvnConfluenceAutoTradeModule implements
     private double sessionVpocPts = Double.NaN;
     private long sessionVpocVol;
 
-    /** All LVN lines — cyan. */
+    /** LVN2/LVN3 fallback lines — cyan. */
     private static final Color COL_LVN = new Color(0, 255, 255);
-    /** All HVN lines — bright green. */
-    private static final Color COL_HVN = new Color(0, 255, 80);
     /** Next Long / Next Short. */
     private static final Color COL_NEXT = new Color(220, 40, 40);
     /** 14:30 session open mid. */
@@ -205,21 +192,10 @@ public class LvnConfluenceAutoTradeModule implements
         signalIndicator = api.registerIndicator("LVN Signal", GraphType.BOTTOM, Double.NaN, true, true);
         longMarker = api.registerIndicator("Next Long", GraphType.PRIMARY, Double.NaN, true, true);
         shortMarker = api.registerIndicator("Next Short", GraphType.PRIMARY, Double.NaN, true, true);
+        // Chart LVN Above/Below / HVN / DOP owned by LVN Levels module.
+        // Keep LVN2/LVN3 + Open/VPOC here for trading context when Levels is absent.
         lvn2Marker = api.registerIndicator("LVN2", GraphType.PRIMARY, Double.NaN, true, true);
         lvn3Marker = api.registerIndicator("LVN3", GraphType.PRIMARY, Double.NaN, true, true);
-        for (int i = 0; i < LvnStackFile.MAX_DISPLAY_EACH_SIDE; i++) {
-            lvnAboveMarkers[i] = api.registerIndicator(
-                    "LVN Above " + (i + 1), GraphType.PRIMARY, Double.NaN, true, true);
-            lvnBelowMarkers[i] = api.registerIndicator(
-                    "LVN Below " + (i + 1), GraphType.PRIMARY, Double.NaN, true, true);
-            styleLevelLine(lvnAboveMarkers[i], COL_LVN, 50);
-            styleLevelLine(lvnBelowMarkers[i], COL_LVN, 50);
-            lvnAboveIconPx[i] = Double.NaN;
-            lvnBelowIconPx[i] = Double.NaN;
-        }
-        hvn1Marker = api.registerIndicator("HVN1", GraphType.PRIMARY, Double.NaN, true, true);
-        hvn2Marker = api.registerIndicator("HVN2", GraphType.PRIMARY, Double.NaN, true, true);
-        hvn3Marker = api.registerIndicator("HVN3", GraphType.PRIMARY, Double.NaN, true, true);
         openMarker = api.registerIndicator("Open 14:30", GraphType.PRIMARY, Double.NaN, true, true);
         vpocMarker = api.registerIndicator("VPOC", GraphType.PRIMARY, Double.NaN, true, true);
         signalIndicator.setColor(new Color(255, 180, 40));
@@ -227,16 +203,13 @@ public class LvnConfluenceAutoTradeModule implements
         shortMarker.setColor(COL_NEXT);
         styleLevelLine(lvn2Marker, COL_LVN, 50);
         styleLevelLine(lvn3Marker, COL_LVN, 50);
-        styleLevelLine(hvn1Marker, COL_HVN, 40);
-        styleLevelLine(hvn2Marker, COL_HVN, 40);
-        styleLevelLine(hvn3Marker, COL_HVN, 40);
         styleLevelLine(openMarker, COL_OPEN, 55);
         styleLevelLine(vpocMarker, COL_VPOC, 45);
         longMarker.setWidth(3);
         shortMarker.setWidth(3);
         longMarker.setRenderPriority(70);
         shortMarker.setRenderPriority(70);
-        lvn2IconPx = lvn3IconPx = hvn1IconPx = hvn2IconPx = hvn3IconPx = Double.NaN;
+        lvn2IconPx = lvn3IconPx = Double.NaN;
         openIconPx = vpocIconPx = Double.NaN;
         sessionVolByTick.clear();
         sessionVpocPts = Double.NaN;
@@ -282,7 +255,16 @@ public class LvnConfluenceAutoTradeModule implements
         if (detector == null) {
             return;
         }
+        // Prefer LVN Levels module state (seed / live detect)
+        List<Double> fromLevels = com.bookmap.orderflow.lvn.LvnLevelsState.allLvnsFor(instrumentRole);
+        if (fromLevels != null && !fromLevels.isEmpty()) {
+            detector.setLvns(fromLevels);
+            return;
+        }
         LvnStackFile.Stack stack = LvnStrategyState.stackFor(instrumentRole);
+        if (stack == null || stack.isEmpty()) {
+            stack = com.bookmap.orderflow.lvn.LvnLevelsState.stackFor(instrumentRole);
+        }
         if (stack != null && !stack.isEmpty()) {
             LocalDateTime asOf = ukTime(nowNs).toLocalDateTime();
             List<Double> all = stack.allPricesAsOf(asOf);
@@ -986,7 +968,6 @@ public class LvnConfluenceAutoTradeModule implements
 
         applyLevelsToDetector();
         plotLvnLines();
-        plotHvnLines();
         plotOpenLine();
         plotVpocLine();
 
@@ -1042,62 +1023,23 @@ public class LvnConfluenceAutoTradeModule implements
         ind.setRenderPriority(priority);
     }
 
-    /** Draw this chart's market LVNs when console toggle is on. */
+    /**
+     * Fallback LVN2/LVN3 when LVN Levels module is not attached.
+     * Developing Above/Below / HVN / DOP are owned by {@code LvnLevelsModule}.
+     */
     private void plotLvnLines() {
         if (!LvnStrategyState.showLvnsOnChart()) {
             hideLine(lvn2Marker);
             hideLine(lvn3Marker);
-            hideStackSlots();
             return;
         }
-        LvnStrategyState.Settings s = LvnStrategyState.settings();
-        LvnStackFile.Stack stack = LvnStrategyState.stackFor(instrumentRole);
-        Double mid = detector != null ? detector.midPts() : null;
-        if (stack != null && !stack.isEmpty() && mid != null && mid > 0) {
-            // Prefer developing stack: nearest N above / below mid
+        // If Levels module already publishes LVNs for this market, skip duplicate lines
+        List<Double> fromLevels = com.bookmap.orderflow.lvn.LvnLevelsState.allLvnsFor(instrumentRole);
+        if (fromLevels != null && !fromLevels.isEmpty()) {
             hideLine(lvn2Marker);
             hideLine(lvn3Marker);
-            LocalDateTime asOf = ukTime(nowNs).toLocalDateTime();
-            List<Double> selected = stack.selectAround(asOf, mid, s.lvnAbove, s.lvnBelow);
-            List<Double> below = new java.util.ArrayList<>();
-            List<Double> above = new java.util.ArrayList<>();
-            for (double px : selected) {
-                if (px < mid - 1e-9) {
-                    below.add(px);
-                } else if (px > mid + 1e-9) {
-                    above.add(px);
-                }
-            }
-            // nearest below first (highest), nearest above first (lowest)
-            below.sort((a, b) -> Double.compare(b, a));
-            above.sort(Double::compare);
-            for (int i = 0; i < LvnStackFile.MAX_DISPLAY_EACH_SIDE; i++) {
-                if (i < s.lvnBelow && i < below.size()) {
-                    lvnBelowIconPx[i] = plotLevel(
-                            lvnBelowMarkers[i], lvnBelowIconPx[i], below.get(i), COL_LVN);
-                } else {
-                    hideLine(lvnBelowMarkers[i]);
-                    lvnBelowIconPx[i] = Double.NaN;
-                }
-                if (i < s.lvnAbove && i < above.size()) {
-                    lvnAboveIconPx[i] = plotLevel(
-                            lvnAboveMarkers[i], lvnAboveIconPx[i], above.get(i), COL_LVN);
-                } else {
-                    hideLine(lvnAboveMarkers[i]);
-                    lvnAboveIconPx[i] = Double.NaN;
-                }
-            }
-            if (Boolean.TRUE.equals(verboseLog) && !loggedLvnPlot) {
-                loggedLvnPlot = true;
-                Log.info(String.format(Locale.US,
-                        "LVN stack lines %s above=%d below=%d mid=%.2f",
-                        instrumentRole, Math.min(s.lvnAbove, above.size()),
-                        Math.min(s.lvnBelow, below.size()), mid));
-            }
             return;
         }
-        // Fallback: frozen LVN2/LVN3 from IRT chart export
-        hideStackSlots();
         LvnLevelFile.Levels lv = LvnStrategyState.levelsFor(instrumentRole);
         if (lv == null || !lv.hasAny()) {
             hideLine(lvn2Marker);
@@ -1109,36 +1051,9 @@ public class LvnConfluenceAutoTradeModule implements
         if (Boolean.TRUE.equals(verboseLog) && !loggedLvnPlot) {
             loggedLvnPlot = true;
             Log.info(String.format(Locale.US,
-                    "LVN chart lines %s at %.2f / %.2f (price tags via icon)",
+                    "LVN chart lines %s at %.2f / %.2f (fallback; prefer LVN Levels module)",
                     instrumentRole, lv.lvn2, lv.lvn3));
         }
-    }
-
-    private void hideStackSlots() {
-        for (int i = 0; i < LvnStackFile.MAX_DISPLAY_EACH_SIDE; i++) {
-            if (lvnAboveMarkers[i] != null) {
-                hideLine(lvnAboveMarkers[i]);
-            }
-            if (lvnBelowMarkers[i] != null) {
-                hideLine(lvnBelowMarkers[i]);
-            }
-            lvnAboveIconPx[i] = Double.NaN;
-            lvnBelowIconPx[i] = Double.NaN;
-        }
-    }
-
-    /** Draw HVN1/2/3 from the same export as-of row when console toggle is on. */
-    private void plotHvnLines() {
-        LvnLevelFile.Levels lv = LvnStrategyState.levelsFor(instrumentRole);
-        if (!LvnStrategyState.showHvnsOnChart() || lv == null || !lv.hasAnyHvn()) {
-            hideLine(hvn1Marker);
-            hideLine(hvn2Marker);
-            hideLine(hvn3Marker);
-            return;
-        }
-        hvn1IconPx = plotLevel(hvn1Marker, hvn1IconPx, lv.hvn1, COL_HVN);
-        hvn2IconPx = plotLevel(hvn2Marker, hvn2IconPx, lv.hvn2, COL_HVN);
-        hvn3IconPx = plotLevel(hvn3Marker, hvn3IconPx, lv.hvn3, COL_HVN);
     }
 
     /** Blue line at 14:30 open mid when console toggle is on. */

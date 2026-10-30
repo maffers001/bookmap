@@ -45,6 +45,9 @@ TODO Next:
     - point AI toward specific price events like momentum breakouts
     - MBO research
     - Market on Open/Close
+    - MAT filter - both ES and NQ above DOP and VPOC
 
 
-    - 30 sec pinbar - which is V shaped reversal, see if volume is trapped
+    - 30 sec pinbar
+        - which is V shaped reversal, see if volume is trapped
+        - large trades trapped at bottom
