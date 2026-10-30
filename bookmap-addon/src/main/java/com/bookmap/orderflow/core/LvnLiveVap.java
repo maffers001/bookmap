@@ -278,6 +278,29 @@ public final class LvnLiveVap {
             }
         }
 
+        if (seed != null) {
+            LocalDate lastSeedDay = null;
+            for (LocalDate d : seed.daily.keySet()) {
+                if (lastSeedDay == null || d.isAfter(lastSeedDay)) {
+                    lastSeedDay = d;
+                }
+            }
+            for (LvnVapSeedFile.MinuteBucket mb : seed.minutes) {
+                LocalDate d = mb.minute.toLocalDate();
+                if (lastSeedDay == null || d.isAfter(lastSeedDay)) {
+                    lastSeedDay = d;
+                }
+            }
+            if (lastSeedDay != null && endDay.isAfter(lastSeedDay)) {
+                long gap = java.time.temporal.ChronoUnit.DAYS.between(lastSeedDay, endDay);
+                if (!warning.isEmpty()) {
+                    warning += " | ";
+                }
+                warning += "STALE SEED ends " + lastSeedDay + " · session " + endDay
+                        + " (missing " + gap + "d — rebuild seed --day " + endDay + ")";
+            }
+        }
+
         if (joinThrough != null && firstLivePrint != null && firstLivePrint.isAfter(joinThrough)) {
             if (!warning.isEmpty()) {
                 warning += " | ";

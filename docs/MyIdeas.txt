@@ -45,8 +45,9 @@ TODO Next:
     - point AI toward specific price events like momentum breakouts
     - MBO research
     - Market on Open/Close
-    - MAT filter - both ES and NQ above DOP and VPOC
-
+    - MAT filter - both ES and NQ above DOP and VPOC    
+    - Size being pulled at highs/lows - breakout?
+    - effort indicator - measure delta per rotation
 
     - 30 sec pinbar
         - which is V shaped reversal, see if volume is trapped

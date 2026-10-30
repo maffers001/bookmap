@@ -123,12 +123,14 @@ public final class LvnLevelsState {
         public final String statusDetail;
         public final String lastEvent;
         public final LocalDate sessionDate;
+        public final LvnApproachAlert.Config alert;
 
         Snapshot(MarketLevels es, MarketLevels nq,
                  MarketKnobs esKnobs, MarketKnobs nqKnobs,
                  boolean showLvn, boolean showHvn, boolean showDop,
                  Path esSeedPath, Path nqSeedPath,
-                 String statusDetail, String lastEvent, LocalDate sessionDate) {
+                 String statusDetail, String lastEvent, LocalDate sessionDate,
+                 LvnApproachAlert.Config alert) {
             this.es = es;
             this.nq = nq;
             this.esKnobs = esKnobs;
@@ -141,6 +143,7 @@ public final class LvnLevelsState {
             this.statusDetail = statusDetail;
             this.lastEvent = lastEvent;
             this.sessionDate = sessionDate;
+            this.alert = alert;
         }
     }
 
@@ -169,6 +172,14 @@ public final class LvnLevelsState {
     private static final ConcurrentHashMap<String, Integer> ATTACH = new ConcurrentHashMap<>();
     private static final List<Consumer<Snapshot>> LISTENERS = new CopyOnWriteArrayList<>();
     private static final List<Runnable> APPLY_HOOKS = new CopyOnWriteArrayList<>();
+    private static final LvnApproachAlert APPROACH_ALERT = new LvnApproachAlert();
+
+    static {
+        APPROACH_ALERT.setListener(ev -> {
+            lastEvent = ev.message;
+            fire();
+        });
+    }
 
     private LvnLevelsState() {}
 
@@ -417,6 +428,29 @@ public final class LvnLevelsState {
         fire();
     }
 
+    public static LvnApproachAlert.Config alertConfig() {
+        return APPROACH_ALERT.config();
+    }
+
+    public static synchronized void applyAlertConfig(LvnApproachAlert.Config in, String via) {
+        APPROACH_ALERT.applyConfig(in);
+        LvnApproachAlert.Config c = APPROACH_ALERT.config();
+        lastEvent = String.format(Locale.US,
+                "Alert %s mode=%s ES approach=%.1f pullback=%.1f | NQ approach=%.1f pullback=%.1f cool=%ds corrWin=%ds LVN=%s DOP=%s sound=%s (%s)",
+                c.enabled ? "ON" : "OFF", c.mode,
+                c.esApproachPts, c.esPullbackPts, c.nqApproachPts, c.nqPullbackPts,
+                c.cooldownSec, c.corrWindowSec,
+                c.watchLvn, c.watchDop, c.sound, via);
+        fire();
+    }
+
+    /**
+     * Realtime mid sample for approach alerts (call from Levels module interval).
+     */
+    public static void onMidUpdate(String market, double mid, long nowNs) {
+        APPROACH_ALERT.onMid(market, mid, nowNs);
+    }
+
     public static LocalDate sessionDate() {
         return sessionDateUk != null ? sessionDateUk : LocalDate.now(LvnStackFile.UK);
     }
@@ -436,6 +470,7 @@ public final class LvnLevelsState {
             nqDop = Double.NaN;
             ES_VAP.clearLive();
             NQ_VAP.clearLive();
+            APPROACH_ALERT.resetSession();
         }
         if (ES_VAP.hasSeed()) {
             ES_VAP.setJoinThrough(LocalDateTime.of(day, LvnLiveVap.parseUkHm(ES_KNOBS.joinUkHm)));
@@ -513,7 +548,8 @@ public final class LvnLevelsState {
         return new Snapshot(
                 esLevels, nqLevels, ES_KNOBS.copy(), NQ_KNOBS.copy(),
                 SHOW_LVN.get(), SHOW_HVN.get(), SHOW_DOP.get(),
-                esSeedPath, nqSeedPath, statusDetail, lastEvent, sessionDate());
+                esSeedPath, nqSeedPath, statusDetail, lastEvent, sessionDate(),
+                APPROACH_ALERT.config());
     }
 
     private static String refreshStatus() {

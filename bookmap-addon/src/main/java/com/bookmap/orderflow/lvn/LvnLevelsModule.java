@@ -261,6 +261,9 @@ public class LvnLevelsModule implements
         }
         maybeRebuild(pendingRebuild);
         plotLevels();
+        if (Double.isFinite(lastMidPts) && lastMidPts > 0 && nowNs > 0) {
+            LvnLevelsState.onMidUpdate(instrumentRole, lastMidPts, nowNs);
+        }
     }
 
     /** Apply / seed-bind hook — queue only; the interval tick does the work off the EDT. */
@@ -458,9 +461,14 @@ public class LvnLevelsModule implements
         }
         if (!(chartPts > 0)) {
             ind.addPoint(Double.NaN);
-            return iconPx;
+            return Double.NaN;
         }
         double axis = toPrimaryAxis(chartPts);
+        // Break the series before a price jump so Bookmap does not draw a
+        // vertical connector between the old and new level.
+        if (Double.isFinite(iconPx) && Math.abs(iconPx - chartPts) > 1e-6) {
+            ind.addPoint(Double.NaN);
+        }
         ind.addPoint(axis);
         if (Double.isNaN(iconPx) || Math.abs(iconPx - chartPts) > 1e-6) {
             BufferedImage icon = renderPriceIcon(formatPriceLabel(chartPts), color);

@@ -49,6 +49,21 @@ LvnConfluenceAutoTrade  ←── LvnLevelsState (LVN set for confluence)
 Not a profile node. First trade at/after DOP open (default 14:30 UK) each
 session → frozen `DOP` line until day roll.
 
+### Approach alert
+
+Console knobs (Apply alert): enable, mode (**Correlated** / Either / Single ES /
+Single NQ), per-market **Approach** and **Pullback** (chart pts), cooldown,
+corr window, watch LVN / DOP, sound.
+
+Rule: mid must come from **outside** the Approach band of a displayed LVN or
+DOP, enter within Approach pts, and not move ≥ Pullback pts **away from the
+level** during that approach. Fires on clean band entry → Bookmap log +
+optional beep + console event line. Correlated mode waits for the other market
+to tag within the window (needs Levels attached on both charts).
+
+Defaults: ES Approach=5 Pullback=3, NQ Approach=20 Pullback=10, cooldown 60s,
+corr window 30s, mode Correlated, sound on.
+
 ### Detector
 
 Strict local min/max over ±S rows at 0.25 tick (`LvnNodeDetector`, mirror of
@@ -59,8 +74,9 @@ separately.
 
 | Piece | Role |
 |---|---|
-| `LvnLevelsModule` | Display-only; knobs; seed load; plot lines |
-| `LvnLevelsState` | Process-wide levels, knobs, seed bind |
+| `LvnLevelsModule` | Display-only; knobs; seed load; plot lines; mid → alert |
+| `LvnLevelsState` | Process-wide levels, knobs, seed bind, alert config |
+| `LvnApproachAlert` | Approach/pullback band / single+correlated router |
 | `LvnNodeDetector` | Valleys / peaks |
 | `LvnLiveVap` | Seed + sliding window + live prints |
 | `LvnVapSeedFile` | Load seed directory / CSV |
@@ -77,6 +93,9 @@ separately.
 
 ## Replay
 
-Build a seed covering the study lookback through the replay day, load it in
-Levels, run replay. Changing Sensitivity / window re-detects without a new
-stack CSV. Optional fixed `LVN_STACK_*.csv` remains a confluence fast-path only.
+Build the seed **for the replay day** (`--day YYYY-MM-DD`), load it in
+Levels, run replay. A seed built for an earlier day leaves the days between
+seed-through and the replay session out of the profile — the console warns
+`STALE SEED ends … · session …`. Changing Sensitivity / window re-detects
+without a new stack CSV. Optional fixed `LVN_STACK_*.csv` remains a
+confluence fast-path only.

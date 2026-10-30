@@ -15,6 +15,7 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -65,6 +66,20 @@ public final class LvnLevelsPanel {
     private final JCheckBox showLvn = new JCheckBox("Show LVNs", true);
     private final JCheckBox showHvn = new JCheckBox("Show HVNs", true);
     private final JCheckBox showDop = new JCheckBox("Show DOP", true);
+
+    private final JCheckBox alertEnabled = new JCheckBox("Approach alert", false);
+    private final JComboBox<String> alertMode = new JComboBox<>(new String[] {
+            "Correlated", "Either market", "Single ES", "Single NQ"
+    });
+    private final JSpinner alertEsApproach = new JSpinner(new SpinnerNumberModel(5.0, 0.25, 200.0, 0.25));
+    private final JSpinner alertEsPullback = new JSpinner(new SpinnerNumberModel(3.0, 0.0, 200.0, 0.25));
+    private final JSpinner alertNqApproach = new JSpinner(new SpinnerNumberModel(20.0, 0.25, 500.0, 1.0));
+    private final JSpinner alertNqPullback = new JSpinner(new SpinnerNumberModel(10.0, 0.0, 500.0, 1.0));
+    private final JSpinner alertCooldown = new JSpinner(new SpinnerNumberModel(60, 0, 3600, 5));
+    private final JSpinner alertCorrWin = new JSpinner(new SpinnerNumberModel(30, 1, 600, 1));
+    private final JCheckBox alertWatchLvn = new JCheckBox("LVN", true);
+    private final JCheckBox alertWatchDop = new JCheckBox("DOP", true);
+    private final JCheckBox alertSound = new JCheckBox("Sound", true);
 
     private File lastDir = new File("C:\\Work\\Mat\\bookmap\\data\\irt");
     private final Consumer<LvnLevelsState.Snapshot> listener = this::refreshUi;
@@ -118,6 +133,7 @@ public final class LvnLevelsPanel {
         JPanel nqBox = marketBox("NQ (attach LVN Levels on NQ chart — same console)",
                 nqWindow, nqSens, nqJoin, nqDopOpen,
                 nqLvnUp, nqLvnDn, nqHvnUp, nqHvnDn, nqRefresh);
+        JPanel alertBox = alertBox();
 
         statusArea.setEditable(false);
         statusArea.setLineWrap(true);
@@ -132,7 +148,8 @@ public final class LvnLevelsPanel {
         eventLabel.setAlignmentX(0f);
 
         JLabel hint = new JLabel(
-                "Colors: LVN cyan | HVN lime | DOP dark blue.  Join UK = seed handoff HH:mm.");
+                "Colors: LVN cyan | HVN lime | DOP dark blue.  Join UK = seed handoff HH:mm.  "
+                        + "Alert: enter Approach band from outside with no ≥Pullback pts away from the level.");
         hint.setAlignmentX(0f);
 
         root.add(top);
@@ -141,6 +158,8 @@ public final class LvnLevelsPanel {
         root.add(Box.createVerticalStrut(6));
         root.add(nqBox);
         root.add(Box.createVerticalStrut(6));
+        root.add(alertBox);
+        root.add(Box.createVerticalStrut(6));
         root.add(hint);
         root.add(Box.createVerticalStrut(4));
         root.add(statusScroll);
@@ -148,11 +167,80 @@ public final class LvnLevelsPanel {
         root.add(eventLabel);
 
         frame.setContentPane(root);
-        frame.setMinimumSize(new Dimension(860, 420));
+        frame.setMinimumSize(new Dimension(860, 520));
         frame.pack();
-        frame.setSize(Math.max(frame.getWidth(), 900), Math.max(frame.getHeight(), 460));
+        frame.setSize(Math.max(frame.getWidth(), 920), Math.max(frame.getHeight(), 560));
 
         LvnLevelsState.addListener(listener);
+    }
+
+    private JPanel alertBox() {
+        JPanel box = new JPanel(new GridBagLayout());
+        box.setBorder(BorderFactory.createTitledBorder(
+                BorderFactory.createEtchedBorder(),
+                "Approach alert (displayed LVNs / DOP)",
+                TitledBorder.LEFT, TitledBorder.TOP));
+        box.setAlignmentX(0f);
+        GridBagConstraints c = new GridBagConstraints();
+        c.insets = new Insets(3, 6, 3, 6);
+        c.anchor = GridBagConstraints.WEST;
+
+        int col = 0;
+        c.gridy = 0;
+        c.gridx = col++;
+        box.add(alertEnabled, c);
+        c.gridx = col++;
+        box.add(new JLabel("Mode"), c);
+        c.gridx = col++;
+        alertMode.setPrototypeDisplayValue("Either market");
+        box.add(alertMode, c);
+        c.gridx = col++;
+        box.add(alertWatchLvn, c);
+        c.gridx = col++;
+        box.add(alertWatchDop, c);
+        c.gridx = col++;
+        box.add(alertSound, c);
+        c.gridx = col++;
+        JButton applyAlert = new JButton("Apply alert");
+        applyAlert.addActionListener(e -> applyAlert());
+        box.add(applyAlert, c);
+
+        alertEsApproach.setToolTipText("ES: must enter from outside this many chart pts of the level");
+        alertEsPullback.setToolTipText("ES: invalidate if mid moves this many pts away from the level during approach (0 = off)");
+        alertNqApproach.setToolTipText("NQ: must enter from outside this many chart pts of the level");
+        alertNqPullback.setToolTipText("NQ: invalidate if mid moves this many pts away from the level during approach (0 = off)");
+
+        col = 0;
+        c.gridy = 1;
+        c.gridx = col++;
+        box.add(new JLabel("ES Approach"), c);
+        c.gridx = col++;
+        box.add(alertEsApproach, c);
+        c.gridx = col++;
+        box.add(new JLabel("ES Pullback"), c);
+        c.gridx = col++;
+        box.add(alertEsPullback, c);
+        c.gridx = col++;
+        box.add(new JLabel("Cooldown s"), c);
+        c.gridx = col++;
+        box.add(alertCooldown, c);
+
+        col = 0;
+        c.gridy = 2;
+        c.gridx = col++;
+        box.add(new JLabel("NQ Approach"), c);
+        c.gridx = col++;
+        box.add(alertNqApproach, c);
+        c.gridx = col++;
+        box.add(new JLabel("NQ Pullback"), c);
+        c.gridx = col++;
+        box.add(alertNqPullback, c);
+        c.gridx = col++;
+        box.add(new JLabel("Corr window s"), c);
+        c.gridx = col++;
+        alertCorrWin.setToolTipText("Max seconds between ES and NQ tags for a correlated alert");
+        box.add(alertCorrWin, c);
+        return box;
     }
 
     private static JPanel marketBox(
@@ -253,6 +341,56 @@ public final class LvnLevelsPanel {
         LvnLevelsState.applyKnobs(market, k, "panel");
     }
 
+    private void applyAlert() {
+        LvnApproachAlert.Config c = new LvnApproachAlert.Config();
+        c.enabled = alertEnabled.isSelected();
+        c.mode = modeFromUi((String) alertMode.getSelectedItem());
+        c.esApproachPts = ((Number) alertEsApproach.getValue()).doubleValue();
+        c.esPullbackPts = ((Number) alertEsPullback.getValue()).doubleValue();
+        c.nqApproachPts = ((Number) alertNqApproach.getValue()).doubleValue();
+        c.nqPullbackPts = ((Number) alertNqPullback.getValue()).doubleValue();
+        c.cooldownSec = (Integer) alertCooldown.getValue();
+        c.corrWindowSec = (Integer) alertCorrWin.getValue();
+        c.watchLvn = alertWatchLvn.isSelected();
+        c.watchDop = alertWatchDop.isSelected();
+        c.sound = alertSound.isSelected();
+        LvnLevelsState.applyAlertConfig(c, "panel");
+    }
+
+    private static LvnApproachAlert.Mode modeFromUi(String label) {
+        if (label == null) {
+            return LvnApproachAlert.Mode.CORRELATED;
+        }
+        switch (label) {
+            case "Single ES":
+                return LvnApproachAlert.Mode.ES;
+            case "Single NQ":
+                return LvnApproachAlert.Mode.NQ;
+            case "Either market":
+                return LvnApproachAlert.Mode.EITHER;
+            case "Correlated":
+            default:
+                return LvnApproachAlert.Mode.CORRELATED;
+        }
+    }
+
+    private static String modeToUi(LvnApproachAlert.Mode mode) {
+        if (mode == null) {
+            return "Correlated";
+        }
+        switch (mode) {
+            case ES:
+                return "Single ES";
+            case NQ:
+                return "Single NQ";
+            case EITHER:
+                return "Either market";
+            case CORRELATED:
+            default:
+                return "Correlated";
+        }
+    }
+
     private void refreshUi(LvnLevelsState.Snapshot snap) {
         SwingUtilities.invokeLater(() -> {
             syncing = true;
@@ -264,6 +402,19 @@ public final class LvnLevelsPanel {
                 showLvn.setSelected(snap.showLvn);
                 showHvn.setSelected(snap.showHvn);
                 showDop.setSelected(snap.showDop);
+                if (snap.alert != null) {
+                    alertEnabled.setSelected(snap.alert.enabled);
+                    alertMode.setSelectedItem(modeToUi(snap.alert.mode));
+                    alertEsApproach.setValue(snap.alert.esApproachPts);
+                    alertEsPullback.setValue(snap.alert.esPullbackPts);
+                    alertNqApproach.setValue(snap.alert.nqApproachPts);
+                    alertNqPullback.setValue(snap.alert.nqPullbackPts);
+                    alertCooldown.setValue(snap.alert.cooldownSec);
+                    alertCorrWin.setValue(snap.alert.corrWindowSec);
+                    alertWatchLvn.setSelected(snap.alert.watchLvn);
+                    alertWatchDop.setSelected(snap.alert.watchDop);
+                    alertSound.setSelected(snap.alert.sound);
+                }
                 statusArea.setText(snap.statusDetail == null ? "" : snap.statusDetail);
                 eventLabel.setText(snap.lastEvent == null ? "" : snap.lastEvent);
             } finally {
