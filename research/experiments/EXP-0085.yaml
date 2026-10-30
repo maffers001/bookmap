@@ -1,0 +1,89 @@
+name: EXP-0085
+hypothesis: H76
+title: MAT after an inefficient rotation — rotation delta-efficiency gate (NQ)
+description: >
+  User claim (2026-10-30): MAT works better as a reversal trigger after
+  aggressive effort has failed. A completed session rotation that cost
+  far more aligned aggressor delta per point than a typical
+  same-direction rotation (e.g. 30pt down on delta -1000 vs a typical
+  -400, IR=2.5) marks unrewarded effort; a MAT burst AGAINST that
+  rotation, as price starts to undo it, should outperform MAT generally.
+  Plan document: docs/MAT_ROTATION_DELTA_EFFICIENCY_PLAN.md.
+  Distinct from closed work: H1/H54 effort was 100ms-10s bar level;
+  H24/H59 rotation gates used length/extension only, never delta;
+  H39 faded MAT itself (here MAT is the undo entry, traded with its
+  burst); H28/H64 absorption was bar-level entry/exit.
+
+  Two questions, two verdicts. Q1 mechanism: ungated MAT (detect_signals,
+  same brackets) counter-rotation after inefficient rotations vs the
+  counter-efficient twin. Q2 tradable: same restriction on the FROZEN
+  MAT book (trend+VWAP). The frozen gate is expected to delete many
+  counter trades; if Q2 is empty/fails but Q1 passes, the consequence is
+  a NEW preregistration for a counter-MAT variant without trend/VWAP on
+  virgin months -- trend/VWAP may NOT be relaxed inside EXP-0085.
+
+detector: mat_rotation_delta  # runner: research/mat_context/exp_0085_rotation_delta.py (to be built)
+plan_doc: docs/MAT_ROTATION_DELTA_EFFICIENCY_PLAN.md
+
+window: "UK 14:30-17:00"
+exclude_sessions: ["200626", "220626", "300326", "smoke_synthetic"]
+is_definition: DIG4_23d  # per MAT_CONTEXT_PROTOCOL; remainder = "OOS" (Sep-Oct already MAT-mined: PASS still needs virgin months to ship)
+
+rotation:
+  swing_lookback_ms: 900000       # session_rotation.py frozen (EXP-0068)
+  swing_confirm_ms: 60000
+  min_rotation_pts: 15.0
+  usable_from: end_confirm_ts_ns  # rotation delta uses trades in [start_pivot_ts, end_pivot_ts] only
+
+delta_efficiency:
+  market: NQ                      # ES delta over same window = descriptive split only
+  aligned_delta: "direction * sum(size * (+1 buy_aggressor / -1 sell_aggressor)) over [t_start, t_end]"
+  effort_per_pt: "aligned_delta / length_pts"
+  baseline: "median effort_per_pt of previous same-direction completed rotations, last 4, min 2, same session; else immediately preceding clean session median"
+  ineff_ratio: "effort_per_pt / baseline"
+  class_inefficient: "IR >= 1.50"   # primary, frozen (user example = 2.5)
+  class_efficient: "IR <= 1.00"
+  class_divergent: "aligned_delta <= 0 (never the gate)"
+  neighbour_ir_report_only: [1.25, 2.00]
+
+primary_eligibility:
+  relation: counter               # MAT side == -rotation direction
+  class: inefficient
+  max_age_after_confirm_min: 30
+  max_retrace_frac: 0.50
+  neighbours_report_only: {retrace_frac: 0.25, age_min: 15}
+
+frozen_mat:
+  es_stamp: causal
+  gate_book_A: trend_with + vwap_side   # cfade_family.mat_frozen_gate
+  gate_book_B: none                     # signal-level mechanism book
+  brackets: "vol k=1 floor=6 cap=30 symmetric"
+  commission_pts_rt: 0.25
+  slip_sensitivity_ticks: [1.0, 2.0]
+  flat_only: true
+  signal_cooldown_sec: 5.0
+
+books: [A_all, A_ctr_ineff, A_ctr_eff, B_all, B_ctr_ineff, B_ctr_eff, B_with_ineff, C_confirm_only, null]
+# C_confirm_only: enter at end_confirm of inefficient rotations, side=-direction, same brackets (no MAT)
+# P&L by re-simulation from kept events (simulate_session), not post-filtering executed trades.
+# Sensitivity book: first counter MAT per (session, rotation) only.
+
+horizons_ms: [10000, 60000, 300000]
+point_targets_nq: [5, 10, 20]
+
+stages:
+  stage0: "truncation invariance + 3 hand-checked rotations; park on counts if ungated ctr_ineff signals < 100, ctr_eff twin < 100, or A_ctr_ineff resim trades < 20"
+  stage1: "event study: ctr_ineff - ctr_eff >= +1.0pt @60s and >= +2.0pt @300s, beats null @60s, IR dose bins monotone (top > bottom); else fail"
+  stage2: "per-book OOS pass: net > 0, avg >= *_all OOS avg + 1.0, avg > ctr_eff twin, avg > random-keep p90 (1000 draws), n_OOS >= 50; report days+, maxDD, top3, LOO, slip2, side and month splits"
+  stage3: "Q2 pass -> virgin months before ship; Q1-only pass -> new EXP-0086 counter-MAT preregistration; both fail -> reject/park, no retune"
+
+kill:
+  min_ungated_signals_each_counter_class: 100
+  min_frozen_resim_trades: 20
+  min_oos_trades_promote: 50
+  min_avg_lift_pts: 1.0
+  stage1_lift_60s_pts: 1.0
+  stage1_lift_300s_pts: 2.0
+
+placebo_seed: 85
+run: true  # 2026-10-30: Stage 1 fail — see results/EXP-0085/

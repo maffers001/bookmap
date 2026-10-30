@@ -1,0 +1,58 @@
+name: EXP-0088
+hypothesis: H79
+title: MAT burst absorption at tracked level — breakthrough keep-gate (C4 one-shot)
+description: >
+  Permitted C4 successor to H28: multi-second, level-anchored absorption
+  (not 100ms bars). Run LargeLevelTracker; a MAT event is level-engaged if
+  a burst-side tracked level (ASK for long) is contacted within
+  [stamp, stamp+3s] with executed_into >= 10. breakthrough = penetration
+  >= 4 ticks AND consume_ratio >= 1.0; absorbed = engaged but not
+  breakthrough; no_level = control. Primary = keep breakthrough on frozen
+  MAT. Exactly one pre-registered attempt then close either way.
+  Distinct from H28 (100ms dual absorb fade), H2 (level fade), H64
+  (absorb as exit).
+
+detector: mat_burst_level  # runner: research/mat_context/exp_0088_burst_absorption.py
+window: "UK 14:30-17:00"
+exclude_sessions: ["200626", "220626", "300326", "smoke_synthetic"]
+is_definition: DIG4_23d
+
+level:
+  engage_window_sec: 3.0
+  min_executed: 10
+  breakthrough_pierce_ticks: 4
+  breakthrough_consume_ratio: 1.0
+  depth_seed_min_before_open: 30
+  market: NQ
+
+arms: [base, breakthrough, absorbed, no_level]
+primary: breakthrough
+twin: absorbed
+
+frozen_mat:
+  es_stamp: causal
+  gate: trend_with + vwap_side
+  brackets: "vol k=1 floor=6 cap=30 symmetric"
+  commission_pts_rt: 0.25
+  slip_sensitivity_ticks: [0.0, 1.0, 2.0]
+  flat_only: true
+  signal_cooldown_sec: 5.0
+
+horizons_ms: [10000, 60000, 300000]
+point_targets_nq: [5, 10, 20]
+
+stages:
+  stage0: "truncation; park if breakthrough signals < 50 or resim trades < 20"
+  stage1: "breakthrough - absorbed >= +1.0pt @60s and >= +2.0pt @300s, beats null"
+  stage2: "OOS net > 0, avg >= base + 1.0, avg > absorbed twin, avg > random-keep p90, n_OOS >= 50"
+
+kill:
+  min_primary_signals: 50
+  min_resim_trades: 20
+  min_oos_trades_promote: 50
+  min_avg_lift_pts: 1.0
+  stage1_lift_60s_pts: 1.0
+  stage1_lift_300s_pts: 2.0
+
+placebo_seed: 88
+run: false

@@ -99,6 +99,10 @@
 | EXP-0082 | H73 DOP compact trap node + clean departure | ran — **reject / park** | Apr–Aug tape discovery | reject / park — Stage 0 underpowered (counts are the result; no retune); see notes |
 | EXP-0083 | H74 DOP compact resting cluster (depth) | ran — **reject / park** | Apr–Aug depth discovery | reject / park — Stage 2 discovery P&L fail (no semi read, no retune); see notes |
 | EXP-0084 | H75 DOP support-side resting cluster | ran — **reject / park** | Apr–Aug depth discovery | reject / park — Stage 3 semi-holdout fail (no retune); see notes |
+| EXP-0085 | H76 MAT after inefficient rotation (delta-efficiency) | ran — **reject / park** | 131 clean sessions | Stage 1 fail: ctr_ineff @60s +4.59 < ctr_eff +5.30; IR dose inverted; see notes |
+| EXP-0086 | H77 MAT book corridor at stamp | ran — **reject / park** | depth sessions | reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune); see notes |
+| EXP-0087 | H78 MAT stack survival scratch (+2s) | ran — **reject / park** | depth sessions | reject / park — Stage 2 P&L fail (no retune); see notes |
+| EXP-0088 | H79 MAT burst level absorption (C4) | ran — **reject / park** | depth sessions | reject / park — Stage 1 event-study fail (C4 closed; no Stage 2 P&L, no retune); see notes |
 
 ## Run notes
 
@@ -289,6 +293,78 @@
   same seasonal collapse as the base DOP book. No retune.
 - Results: `results/EXP-0084/`.
 - Runner: `python -m research.dop.exp_0084_rest_support`.
+
+### 2026-10-30 — EXP-0086…0088 MAT resting-book programme registered (H77–H79)
+
+- Frozen designs: `research/experiments/EXP-0086.yaml` / H77 (corridor),
+  `EXP-0087.yaml` / H78 (stack survival scratch), `EXP-0088.yaml` / H79
+  (burst level absorption, C4 one-shot).
+- Shared host: frozen MAT (causal ES, trend+VWAP, vol k=1). Shared
+  feature layer: `research/features/book_corridor.py` (generalises
+  `_best_band` from DOP rest clusters). Depth NQ only; book seeded
+  pre-window via `load_depth_window_with_book`.
+- Run order 0086 → 0087 → 0088; each Stage 0–2 with independent kill
+  bars. Pass = research only; virgin months before ship. No stacking
+  of the three on this sample. All fail ⇒ close the thread.
+- Status: **all three reject / park** — thread closed. Synthesis:
+  `results/MAT_BOOK_SYNTHESIS/summary.md`.
+
+### 2026-10-30 — MAT resting-book programme closed (H77–H79 synthesis)
+
+- All three EXPs reject / park on frozen MAT + NQ depth (131 sessions).
+- H77 corridor: Stage 1 fail (60s lift vs wall_only +0.62 < +1.0).
+- H78 scratch: Stage 1 mechanism PASS (scratched ≪ survived); Stage 2
+  OOS net still negative.
+- H79 breakthrough: Stage 1 fail (300s lift vs absorbed +1.89 < +2.0);
+  C4 closed.
+- Synthesis: `results/MAT_BOOK_SYNTHESIS/summary.md`. No Java / live
+  changes; do not re-dig without virgin months + new registration.
+
+### 2026-10-30 — EXP-0088 MAT burst absorption run (H79, C4 closed)
+
+- Verdict: **reject / park — Stage 1 event-study fail (C4 closed; no Stage 2 P&L, no retune)**
+- Results: `results/EXP-0088/`.
+- Runner: `python -m research.mat_context.exp_0088_burst_absorption`.
+- C4 one-shot closed; no further absorption-on-MAT retunes on this sample.
+
+### 2026-10-30 — EXP-0087 MAT stack survival run (H78)
+
+- Verdict: **reject / park — Stage 2 P&L fail (no retune)**
+- Results: `results/EXP-0087/`.
+- Runner: `python -m research.mat_context.exp_0087_stack_survival`.
+
+### 2026-10-30 — EXP-0086 MAT book corridor run (H77)
+
+- Verdict: **reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune)**
+- Results: `results/EXP-0086/`.
+- Runner: `python -m research.mat_context.exp_0086_book_corridor`.
+
+### 2026-10-30 — EXP-0085 MAT rotation delta-efficiency registered (H76)
+
+- Frozen design: `research/experiments/EXP-0085.yaml` / H76; full plan
+  `docs/MAT_ROTATION_DELTA_EFFICIENCY_PLAN.md`.
+- Claim: a completed session rotation costing ≥1.5× the typical aligned
+  delta per point (e.g. 30 pt down on −1000 vs typical −400) is failed
+  effort; MAT bursts against it (the undo) outperform MAT generally.
+- Two verdicts: Q1 ungated MAT (mechanism) vs Q2 frozen trend+VWAP MAT;
+  C_confirm_only control isolates MAT timing; IR dose-response required.
+- Stages 0 (causality/power) → 1 (event study) → 2 (re-sim P&L vs twin /
+  null / random-keep p90). No retune; Q1-only pass ⇒ new EXP-0086.
+- Status: registered then run same day — see run note below.
+
+### 2026-10-30 — EXP-0085 MAT rotation delta-efficiency run (H76)
+
+- Verdict: **reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune)**
+- Stage 0 PASS: 131 sessions, ctr_ineff n=549 / ctr_eff n=1047; frozen
+  A_ctr_ineff trades only **36** (trend+VWAP deletes 93% of primary
+  signals — Q2 gate-deletion finding even before P&L).
+- Stage 1 FAIL: ctr_ineff @60s **+4.59** vs ctr_eff **+5.30** (wrong sign
+  vs claim; still beats null −0.32). @300s +11.95 vs +16.18. IR dose
+  inverted (ir_le_0 +5.38 > ir_gt_1.75 +3.00). with_ineff strongly
+  negative (−3.24 @60s). Counter-rotation MAT looks healthy in general;
+  extra wasted effort does **not** improve the undo.
+- Results: `results/EXP-0085/`.
+- Runner: `python -m research.mat_context.exp_0085_rotation_delta`.
 
 ### 2026-10-26 — EXP-0075…0077 next package
 

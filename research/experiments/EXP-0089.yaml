@@ -1,0 +1,62 @@
+name: EXP-0089
+hypothesis: H80
+title: Defended-retest of dominant resting MBO order (Q1)
+description: >
+  After a causally-large dominant resting order is first contacted and
+  filled (≥10), price departs ≥8 pts then returns within 0.5 pt of P
+  within 300 s without trading through by >2 ticks. At retest arrival,
+  fade only if the level is re-defended (stack ≥50% of original and
+  approach net MBO adds ≥0). Twin = completed (stack <25% or net-cancelled).
+  Fragmented (dominance <0.25) and ±40 pt placebo retests are controls.
+  ES-paired defence is a reported split, never a gate. Distinct from
+  H2/H36 (unconditional level fade) and H34 StackConsume (IRT levels).
+
+detector: defended_retest
+plan_doc: docs/MBO_LIFECYCLE_PLAN.md
+window: "UK 14:30-17:00"
+exclude_sessions: ["200626", "220626", "300326", "smoke_synthetic"]
+is_definition: DIG4_23d
+
+lifecycle:
+  large_q: 0.99
+  dominance_min: 0.50
+  fragmented_max: 0.25
+  min_executed: 10
+
+retest:
+  depart_pts: 8.0
+  tol_pts: 0.5
+  max_retest_sec: 300.0
+  through_ticks: 2
+  defended_remain: 0.50
+  completed_remain: 0.25
+  placebo_shift_pts: 40.0
+
+arms: [defended, completed, fragmented, placebo]
+primary: defended
+twin: completed
+
+brackets:
+  style: "vol 2:1 fade"
+  sl_clip: [6, 20]
+  tp_mult: 2.0
+  commission_pts_rt: 0.25
+  slip_sensitivity_ticks: [0.0, 1.0, 2.0]
+
+horizons_ms: [10000, 60000, 300000]
+point_targets_nq: [5, 10, 20]
+
+stages:
+  stage0: "truncation + counts; park if defended < 30 or completed < 30 on discovery"
+  stage1: "defended - completed >= +1.0pt @60s and defended > placebo @60s; dose in dominance/reload reported"
+  stage2: "OOS net > 0, avg >= twin + 1.0, avg > random-keep p90, n_OOS >= 30; slip 1-2 reported"
+
+kill:
+  min_defended: 30
+  min_completed: 30
+  min_oos_trades_promote: 30
+  min_avg_lift_pts: 1.0
+  stage1_lift_60s_pts: 1.0
+
+placebo_seed: 89
+run: false

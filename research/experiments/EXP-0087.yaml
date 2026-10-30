@@ -1,0 +1,56 @@
+name: EXP-0087
+hypothesis: H78
+title: MAT stack survival after stamp — scratch exit if support collapses (+2s)
+description: >
+  Static book snapshots are spoofable. H34 StackConsume at +2s was the
+  only level-specific survivor. Claim: if the support band identified at
+  the MAT stamp loses half its resting size within 2s, scratch the trade
+  (market exit at first print >= stamp+2s; TP/SL still win if earlier).
+  Primary = scratch exit vs ungated base on the SAME entries.
+  Delayed +2s entry (support survives AND wall has not grown) is
+  descriptive only and cannot promote inside this EXP.
+  Reuses EXP-0086 cached bands; independent hypothesis (runs even if
+  corridor gate fails). Distinct from H64/H67 tape absorb-exit.
+
+detector: mat_stack_survival  # runner: research/mat_context/exp_0087_stack_survival.py
+window: "UK 14:30-17:00"
+exclude_sessions: ["200626", "220626", "300326", "smoke_synthetic"]
+is_definition: DIG4_23d
+
+survival:
+  decision_sec: 2.0
+  descriptive_sec: 5.0
+  remain_scratch_max: 0.50
+  reuse_exp0086_events: true
+
+arms: [base, scratch_support]
+primary: scratch_support
+twin: base
+
+frozen_mat:
+  es_stamp: causal
+  gate: trend_with + vwap_side
+  brackets: "vol k=1 floor=6 cap=30 symmetric"
+  commission_pts_rt: 0.25
+  slip_sensitivity_ticks: [0.0, 1.0, 2.0]
+  flat_only: true
+  signal_cooldown_sec: 5.0
+
+horizons_ms: [10000, 60000, 300000]
+point_targets_nq: [5, 10, 20]
+
+stages:
+  stage0: "truncation at decision time; park if scratch fires < 50 or both books n < 20"
+  stage1: "scratched subset path worse than survived @60s/@300s (mechanism); else fail"
+  stage2: "scratch book OOS avg >= base + 1.0, net > 0, beat random-keep p90, n_OOS >= 50"
+
+kill:
+  min_scratch_fires: 50
+  min_resim_trades: 20
+  min_oos_trades_promote: 50
+  min_avg_lift_pts: 1.0
+  stage1_lift_60s_pts: 1.0
+  stage1_lift_300s_pts: 2.0
+
+placebo_seed: 87
+run: false

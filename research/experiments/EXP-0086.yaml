@@ -1,0 +1,58 @@
+name: EXP-0086
+hypothesis: H77
+title: MAT book corridor at stamp — support stack ∧ no path wall (NQ depth)
+description: >
+  User claim refined by DOP EXP-0083/0084: a concentrated resting stack
+  BEHIND the MAT trade (bids below a long / asks above a short) with NO
+  concentrated wall AHEAD improves frozen MAT. Geometry anchors to the
+  MAT entry fill (first NQ trade at/after stamp), not the Daily Open.
+  Primary arm = corridor (support share >= 0.50 AND path share < 0.50).
+  Distinct from H45 (top-3 BBO imbalance), H74/H75 (DOP-zone clusters),
+  H62 (traded-volume structural SL).
+
+detector: mat_book_corridor  # runner: research/mat_context/exp_0086_book_corridor.py
+window: "UK 14:30-17:00"
+exclude_sessions: ["200626", "220626", "300326", "smoke_synthetic"]
+is_definition: DIG4_23d
+
+corridor:
+  # zone=20 (not 10): with band=5, uniform share≈0.25 so share≥0.50 means
+  # real concentration. zone=10 made uniform≈0.51 and corridor empty by geometry
+  # (registration fix before Stage 1/2; smoke counts only).
+  zone_pts: 20.0
+  band_pts: 5.0
+  share_min: 0.50
+  depth_seed_min_before_open: 30
+  market: NQ
+
+arms: [base, support_only, wall_only, corridor]
+primary: corridor
+twin: wall_only  # contrast; support_only also reported
+
+frozen_mat:
+  es_stamp: causal
+  gate: trend_with + vwap_side
+  brackets: "vol k=1 floor=6 cap=30 symmetric"
+  commission_pts_rt: 0.25
+  slip_sensitivity_ticks: [0.0, 1.0, 2.0]
+  flat_only: true
+  signal_cooldown_sec: 5.0
+
+horizons_ms: [10000, 60000, 300000]
+point_targets_nq: [5, 10, 20]
+
+stages:
+  stage0: "truncation + 3 hand-checks; park if corridor signals < 50 or resim trades < 20"
+  stage1: "corridor - wall_only >= +1.0pt @60s and >= +2.0pt @300s, beats null @60s"
+  stage2: "OOS net > 0, avg >= base + 1.0, avg > wall_only twin, avg > random-keep p90, n_OOS >= 50"
+
+kill:
+  min_primary_signals: 50
+  min_resim_trades: 20
+  min_oos_trades_promote: 50
+  min_avg_lift_pts: 1.0
+  stage1_lift_60s_pts: 1.0
+  stage1_lift_300s_pts: 2.0
+
+placebo_seed: 86
+run: false

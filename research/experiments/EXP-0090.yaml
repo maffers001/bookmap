@@ -1,0 +1,60 @@
+name: EXP-0090
+hypothesis: H81
+title: Consumed-level acceptance — left_behind continuation / breach fade (Q2)
+description: >
+  Lifecycle state=consumed (pierce ≥4 ticks ∧ consume_ratio ≥1.0, no reload
+  within 2s). At contact+5s classify acceptance: left_behind (clear ≥1pt,
+  never return, pullback ≤25% of peak-past) → continuation; retest_hold
+  (approach within 1.5pts without breach) → descriptive; breach_back →
+  fade. Mandatory twins: tape-only bursts with no tracked level; NQ-only
+  vs ES-consumed-paired split; overlap with LST MOMENTUM_V1 reported.
+  Shape informed by EXP-0088 C4 verdict. Distinct from H12 sweeps and
+  LST Momentum (dominant-stack slice, not single-order lifecycle).
+
+detector: consumed_acceptance
+plan_doc: docs/MBO_LIFECYCLE_PLAN.md
+window: "UK 14:30-17:00"
+exclude_sessions: ["200626", "220626", "300326", "smoke_synthetic"]
+is_definition: DIG4_23d
+
+lifecycle:
+  consumed_pierce_ticks: 4
+  consumed_consume_ratio: 1.0
+  consumed_no_reload_sec: 2.0
+
+acceptance:
+  accept_sec: 5.0
+  clear_pts: 1.0
+  approach_pts: 1.5
+  max_pullback_frac: 0.25
+
+arms: [left_behind, retest_hold, breach_back, tape_only]
+primary: left_behind
+twin: tape_only
+fade_arm: breach_back
+
+brackets:
+  style: "vol 2:1 continuation / fade"
+  sl_clip: [6, 20]
+  tp_mult: 2.0
+  commission_pts_rt: 0.25
+  slip_sensitivity_ticks: [0.0, 1.0, 2.0]
+
+horizons_ms: [10000, 60000, 300000]
+point_targets_nq: [5, 10, 20]
+
+stages:
+  stage0: "truncation + counts; park if left_behind < 30 or tape_only < 30"
+  stage1: "left_behind - tape_only >= +1.0pt @60s and >= +2.0pt @300s; breach_back fade reported"
+  stage2: "OOS net > 0, avg >= twin + 1.0, avg > random-keep p90, n_OOS >= 30"
+
+kill:
+  min_left_behind: 30
+  min_tape_only: 30
+  min_oos_trades_promote: 30
+  min_avg_lift_pts: 1.0
+  stage1_lift_60s_pts: 1.0
+  stage1_lift_300s_pts: 2.0
+
+placebo_seed: 90
+run: false

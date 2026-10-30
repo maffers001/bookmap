@@ -1012,6 +1012,73 @@ Path-side Arm R is contrast only.
 Sep–Oct semi once after a pass. Fail = reject/park.
 **Result (EXP-0084): reject / park — Stage 3 semi-holdout fail (no retune).** See `results/EXP-0084/`.
 
+## H76 — MAT after an inefficient rotation (rotation delta-efficiency)
+
+A completed session-scale rotation (15 min lookback / 60 s confirm,
+≥15 pts, as EXP-0068) whose **aligned aggressor delta per point**
+\(E=A/L\) is ≥1.5× the causal median for prior same-direction rotations
+marks unrewarded effort (user example: 30 pt down on delta −1000 vs a
+typical −400, IR=2.5). A MAT burst **against** that rotation, within
+30 min of its confirmation and before 50% is retraced, should outperform
+MAT generally — MAT as the entry trigger for the undo, traded with its
+burst. Distinct from H1/H54 (bar-level effort), H24/H59 (rotation length
+only), H39 (fading MAT itself), H28/H64 (bar absorption).
+
+**Test:** EXP-0085 (`research/experiments/EXP-0085.yaml`,
+`docs/MAT_ROTATION_DELTA_EFFICIENCY_PLAN.md`). Two verdicts: Q1 ungated
+MAT counter-inefficient vs counter-efficient twin (mechanism); Q2 same
+restriction on frozen trend+VWAP MAT (tradable). Stage 0 power/causality,
+Stage 1 event-study dose-response in IR, Stage 2 re-sim P&L vs twin /
+null / random-keep p90. Q1-only pass ⇒ new counter-MAT preregistration
+on virgin months; trend/VWAP may not be relaxed inside EXP-0085.
+**Result (EXP-0085): reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune).** See `results/EXP-0085/`.
+
+## H77 — MAT book corridor at stamp (support ∧ ¬wall)
+
+A concentrated resting stack *behind* a MAT entry (bids in the 20 pts
+below a long / asks above a short) with *no* concentrated wall ahead
+(path-side share < 0.50) improves frozen MAT continuation. Geometry
+anchors to the entry fill; best ≤5 pt band share ≥ 0.50 (zone=20 so
+uniform share ≈0.25; zone=10 was vacuous). Informed by DOP EXP-0083
+(path wall hurts) / EXP-0084 (support helps on discovery). Distinct
+from H45 (BBO imbalance), H74/H75 (DOP zones), H62 (traded volume SL).
+
+**Test:** EXP-0086 (`research/experiments/EXP-0086.yaml`). Primary
+`corridor`; twins `wall_only` / `support_only`; Stage 0–2 on depth
+sessions. Research pass only — virgin months before ship.
+**Result (EXP-0086): reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune).** See `results/EXP-0086/`.
+
+## H78 — MAT stack survival after stamp (scratch if support collapses)
+
+If the support band identified at the MAT stamp loses ≥50% of its
+resting size within 2 s, scratch the trade (market exit at stamp+2s;
+TP/SL still win if earlier). Motivated by H34 StackConsume-at-+2s as
+the only level-specific survivor. Delayed +2s entry is descriptive
+only. Distinct from H64/H67 tape absorb-exit. Independent of H77
+(runs even if corridor fails); reuses EXP-0086 cached bands.
+
+**Test:** EXP-0087 (`research/experiments/EXP-0087.yaml`). Primary
+scratch-exit vs base on the same entries.
+**Result (EXP-0087): reject / park — Stage 2 P&L fail (no retune).** See `results/EXP-0087/`.
+
+## H79 — MAT burst absorption at tracked level (C4 one-shot)
+
+Permitted C4 successor to H28: multi-second, level-anchored. A MAT
+event is *level-engaged* if a burst-side tracked level (ASK for long)
+is contacted within [stamp, stamp+3s] with executed_into ≥ 10.
+`breakthrough` = pierce ≥ 4 ticks ∧ consume_ratio ≥ 1.0; `absorbed` /
+`no_level` are twins. Primary = keep breakthrough on frozen MAT.
+Exactly one pre-registered attempt then close either way. Distinct
+from H28 (100 ms dual absorb fade) and H64 (absorb as exit).
+
+**Test:** EXP-0088 (`research/experiments/EXP-0088.yaml`).
+**Result (EXP-0088): reject / park — Stage 1 event-study fail (C4 closed; no Stage 2 P&L, no retune).** See `results/EXP-0088/`.
+
+**Programme close (H77–H79):** all three resting-book-on-MAT ideas
+failed their kill bars on this sample. Thread closed with H43–H45 /
+H76; see `results/MAT_BOOK_SYNTHESIS/summary.md`. No Java / live-gate
+change; no stacking; no further C4 absorption retunes here.
+
 ---
 
 ## Unregistered candidates (no H-number yet)
