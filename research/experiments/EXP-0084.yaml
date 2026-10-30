@@ -1,0 +1,55 @@
+name: EXP-0084
+hypothesis: H75
+title: DOP break — compact resting cluster on SUPPORT side (NQ, depth)
+description: >
+  New primary claim after EXP-0083 inverted the path-side story (user,
+  2026-10-30): a compact resting cluster on the OPPOSITE side to the
+  break path (support / trap-side resting) marks trapped inventory that
+  fuels continuation, whereas path-side resting (EXP-0083 Arm R) marked
+  a wall. Same feature family, opposite book side as the gate — not a
+  retune of the failed R threshold.
+  Universe: NQ first DOP breaks on depth sessions. Trap zone = 30 pts
+  adjacent to DOP on the trap side. Support-side book: bids in that zone
+  on a long setup (resting buyers behind the move), asks on a short.
+  Snapshots break-300/-180/-60s; best <=5pt band share of support-zone
+  resting; Arm S (PRIMARY) = max pre-break support share >= 0.50.
+  Path-side Arm R is reported as a contrast arm only (already rejected
+  as a gate in EXP-0083) and cannot promote. Descriptive splits:
+  support size / persistence / distance, and path-side share.
+  Books: Book 2 vol RR primary + fixed asym SL20/TP40.
+  Stages: 0 coverage + truncation + power (>=30 A, >=10 S); 1 event
+  study A/S/(R contrast) vs null; 2 Book 2 gate S avg >= A avg + 1.0,
+  S net > 0, S n >= 10; 3 Sep-Oct semi one read after pass. Fail =
+  reject/park, no retune of the 0.50 cut on this sample.
+
+detector: dop_rest_support  # runner: research/dop/exp_0084_rest_support.py
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+horizons_ms: [60000, 300000, 900000, 1800000]
+point_targets_nq: [5, 10, 20]
+
+rest_cluster:
+  zone_pts: 30.0
+  band_pts: 5.0
+  share_min: 0.50
+  snapshot_offsets_sec: [300, 180, 60]
+  pullback_pts: 2.0
+  depth_seed_min_before_open: 30
+  grace_min: 5
+  pierce_ticks: 1
+
+asym_nq:
+  sl_pts: 20.0
+  tp_pts: 40.0
+
+kill:
+  min_arm_a: 30
+  min_gate_n: 10
+  min_avg_lift_pts: 1.0
+
+placebo_seed: 84
+
+discovery_months: ["0426", "0526", "0626", "0726", "0826"]
+semi_oos_months: ["0926", "1026"]
+exclude_sessions: ["smoke_synthetic"]
+run_semi_oos: false

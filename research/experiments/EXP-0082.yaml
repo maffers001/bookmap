@@ -1,0 +1,67 @@
+name: EXP-0082
+hypothesis: H73
+title: DOP break — compact trap-side volume node + clean departure (NQ, tape)
+description: >
+  New feature family on the parked DOP thread (not a retune of
+  EXP-0078..0081 thresholds). EXP-0078 summed ALL trap-side volume between
+  the open and the break, however dispersed in price; EXP-0081 timed the
+  final 20pt approach. Neither asked WHERE the trap volume sat, what the
+  aggressor delta was inside that location, or how price left it.
+  Universe: NQ first DOP breaks (tape only, no depth needed), long and
+  short mirrored. For a long break the trap side is below the DOP.
+  Compact node (frozen): the contiguous <=5pt price band on the trap side
+  holding the most pre-break trap-side volume; compact = that band holds
+  >= 50% of all trap-side volume. Node delta = aggressor delta inside the
+  band, signed so trapped aggression is positive (buy aggressors below
+  the DOP on a long setup; sell aggressors above on a short), reported as
+  node_delta_share = node_trap_delta / node_vol.
+  Departure: from the last pre-break print inside the node band to the
+  break print. A pullback = retracement against the break direction of
+  >= 2pts from the running progress extreme; clean = <= 1 such pullback.
+  Claim: traders concentrated in a compact node who get no pullback to
+  exit into are trapped and fuel continuation after the DOP break.
+  Arms: A all first breaks; C compact only; L clean only; K compact AND
+  clean (PRIMARY GATE). Node-delta is a frozen dose-response / split
+  inside A and K (positive vs non-positive, terciles), not a gate, so a
+  delta cut cannot be tuned to rescue a failed K.
+  Books at DOP entry: Book 2 vol RR (primary) + fixed asym SL20/TP40
+  (secondary, as EXP-0081).
+  Stages: 0 coverage + truncation causality + power (>=30 A, >=10 K);
+  1 event study A/C/L/K + dose-response (share5, node_delta_share,
+  pullback count/depth) vs time-matched null; 2 Book 2 gate: K avg >=
+  A avg + 1.0, K net > 0, K n >= 10; 3 only after a discovery pass:
+  Sep-Oct semi-holdout (DOP tape outcomes read by EXP-0078/0081) AND
+  March semi-virgin (features never computed; only base Arm A outcomes
+  read 2026-10-27) in one read. Stage 3 pass = pooled K net > 0 and
+  K avg > A avg, subgroups reported. Fail = reject/park, no retune.
+
+detector: dop_compact  # runner: research/dop/exp_0082_compact.py
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+horizons_ms: [60000, 300000, 900000, 1800000]
+point_targets_nq: [5, 10, 20]
+
+compact:
+  band_pts: 5.0
+  compact_share_min: 0.50
+  pullback_pts: 2.0
+  clean_max_pullbacks: 1
+  grace_min: 5
+  pierce_ticks: 1
+
+asym_nq:
+  sl_pts: 20.0
+  tp_pts: 40.0
+
+kill:
+  min_arm_a: 30
+  min_gate_n: 10
+  min_avg_lift_pts: 1.0
+
+placebo_seed: 82
+
+discovery_months: ["0426", "0526", "0626", "0726", "0826"]
+semi_oos_months: ["0926", "1026"]
+march_months: ["0326"]
+exclude_sessions: ["smoke_synthetic"]
+run_semi_oos: false

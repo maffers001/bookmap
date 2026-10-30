@@ -1,0 +1,60 @@
+name: EXP-0083
+hypothesis: H74
+title: DOP break — compact resting cluster on trap side before break (NQ, depth)
+description: >
+  Depth counterpart of parked EXP-0082 (user, 2026-10-30): the compact
+  range may be a RESTING cluster on the heatmap, not traded volume.
+  Universe: NQ first DOP breaks on depth sessions (as EXP-0079..0081).
+  Trap zone (frozen): the 30 pts on the trap side adjacent to the DOP
+  (long: DOP-30..DOP; short mirrored). Path-side resting book: asks in
+  that zone on a long setup (resting sellers price must chew through to
+  reach the DOP), bids on a short. At each causal snapshot
+  break-300s / -180s / -60s, find the contiguous <=5pt band in the zone
+  holding the most path-side resting size; cluster_share = band resting
+  / total zone resting. Primary feature cluster_share_pre = max share
+  over the three pre-break snapshots (cluster seen in the last minutes
+  before the break); persistence = number of those snapshots with
+  share >= 0.50. Support-side resting (bids below on a long) is recorded
+  descriptively only.
+  Primary gate (frozen): R = cluster_share_pre >= 0.50 at the DOP entry.
+  Descriptive splits (never gates): cluster size terciles, persistence,
+  support-side share, cluster remaining at the break, and pullbacks
+  (>=2pt, 1s-sampled tape) from the last in-cluster-band print to the
+  break. Books: Book 2 vol RR (primary) + fixed asym SL20/TP40.
+  Stages: 0 coverage + truncation causality + power (>=30 A, >=10 R);
+  1 event study A/R vs null + splits; 2 Book 2 gate: R avg >= A avg + 1.0,
+  R net > 0, R n >= 10; 3 Sep-Oct semi-holdout one read after a pass
+  (depth features never computed there; DOP tape outcomes seen).
+  March not read (depth on 5/19 sessions only). Fail = reject/park.
+
+detector: dop_rest_cluster  # runner: research/dop/exp_0083_rest_cluster.py
+slip_ticks: 1.0
+commission_pts_rt: 0.25
+horizons_ms: [60000, 300000, 900000, 1800000]
+point_targets_nq: [5, 10, 20]
+
+rest_cluster:
+  zone_pts: 30.0
+  band_pts: 5.0
+  share_min: 0.50
+  snapshot_offsets_sec: [300, 180, 60]
+  pullback_pts: 2.0
+  depth_seed_min_before_open: 30
+  grace_min: 5
+  pierce_ticks: 1
+
+asym_nq:
+  sl_pts: 20.0
+  tp_pts: 40.0
+
+kill:
+  min_arm_a: 30
+  min_gate_n: 10
+  min_avg_lift_pts: 1.0
+
+placebo_seed: 83
+
+discovery_months: ["0426", "0526", "0626", "0726", "0826"]
+semi_oos_months: ["0926", "1026"]
+exclude_sessions: ["smoke_synthetic"]
+run_semi_oos: false

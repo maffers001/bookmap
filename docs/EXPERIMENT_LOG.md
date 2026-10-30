@@ -96,6 +96,9 @@
 | EXP-0079 | H70 DOP beyond-zone traversal (depth) | ran — **reject / park** | Apr–Aug depth discovery | reject / park — Stage 2 discovery P&L fail (no semi-OOS read, no retune); see notes |
 | EXP-0080 | H71 DOP entry + stall-scratch exit | ran — **reject / park** | Apr–Aug discovery | reject / park — Stage 1 discovery fail (no Sep-Oct read, no retune); DOP thread closed; see notes |
 | EXP-0081 | H72 DOP pre-break approach chew | ran — **reject / park** | Apr–Aug depth discovery | reject / park — Stage 3 semi-holdout fail (no retune); see notes |
+| EXP-0082 | H73 DOP compact trap node + clean departure | ran — **reject / park** | Apr–Aug tape discovery | reject / park — Stage 0 underpowered (counts are the result; no retune); see notes |
+| EXP-0083 | H74 DOP compact resting cluster (depth) | ran — **reject / park** | Apr–Aug depth discovery | reject / park — Stage 2 discovery P&L fail (no semi read, no retune); see notes |
+| EXP-0084 | H75 DOP support-side resting cluster | ran — **reject / park** | Apr–Aug depth discovery | reject / park — Stage 3 semi-holdout fail (no retune); see notes |
 
 ## Run notes
 
@@ -205,6 +208,87 @@
   cf. EXP-0078 holdout); F avg **−2.40** (net −34, n=14) — gate halves the
   damage but stays negative → FAIL on the frozen net>0 bar. No retune.
 - Results: `results/EXP-0081/`. Runner: `python -m research.dop.exp_0081_approach`.
+
+### 2026-10-30 — EXP-0082 DOP compact trap node registered (H73)
+
+- Frozen design: `research/experiments/EXP-0082.yaml` / H73. Revisit of
+  the parked DOP thread with new features (user, 2026-10-30): where the
+  trap-side volume sat, not how much there was in total.
+- Compact node = ≤5pt trap-side band with most pre-break volume;
+  compact = ≥50% of trap volume. Node aggressor delta (trapped-signed)
+  is dose-response only. Departure = last in-node print → break;
+  pullback = ≥2pt retracement; clean = ≤1. Primary Arm K = compact ∧
+  clean at the DOP entry, Book 2 (asym 20/40 secondary). NQ tape only.
+- Discovery Apr–Aug; Sep–Oct semi + March semi-virgin one read only
+  after a discovery pass. Fail = reject/park, no retune.
+- Runner: `python -m research.dop.exp_0082_compact` (`--semi-oos`).
+- Status: registered; run pending.
+
+### 2026-10-30 — EXP-0082 DOP compact trap node run (H73)
+
+- Verdict: **reject / park — Stage 0 underpowered (counts are the result; no retune)**
+- Stage 0: 69 NQ breaks, **compact 0 / clean 1 / K 0**. The premise fails
+  descriptively: best-5pt band share of trap volume median **0.12**
+  (max 0.36; same in 15-min window) — trap volume is spread over the
+  median 84pt excursion, and in-node delta share ≈ 0 (buy/sell wash).
+- Exploratory dose-response (training only, `_explore_outcomes.py`):
+  no support — share5 Spearman vs @30min **−0.29** (top tercile worst),
+  node-delta top tercile @300s **−9.2** (mid best; non-monotone),
+  pullback counts non-monotone (mid tercile best). No gate frozen from
+  this; semi sets not read.
+- Results: `results/EXP-0082/`.
+- Runner: `python -m research.dop.exp_0082_compact`.
+
+### 2026-10-30 — EXP-0083 DOP compact resting cluster registered (H74)
+
+- Frozen design: `research/experiments/EXP-0083.yaml` / H74. Depth
+  counterpart of parked EXP-0082 (user): compact range as a resting
+  heatmap cluster, not traded volume.
+- Trap zone = 30 pts adjacent to DOP on trap side; path-side resting
+  (asks on long / bids on short); snapshots at break−300/−180/−60 s;
+  best ≤5pt band share of zone resting; Arm R = max pre-break share
+  ≥ 0.50 at DOP entry, Book 2 (asym secondary). Size / persistence /
+  support-side / pullbacks descriptive only. NQ depth universe.
+- Discovery Apr–Aug; Sep–Oct semi one read only after a pass.
+  March skipped (depth on 5/19 sessions).
+- Runner: `python -m research.dop.exp_0083_rest_cluster` (`--semi-oos`).
+- Status: registered; run pending.
+
+### 2026-10-30 — EXP-0083 DOP resting cluster run (H74)
+
+- Verdict: **reject / park — Stage 2 discovery P&L fail (no semi read, no retune)**
+- Stage 0 PASS: 55 depth breaks, **R = 18** — unlike traded volume
+  (EXP-0082), compact resting clusters do occur in the last 5 min.
+- Stage 1/2 invert the claim: R hit10 **0.28** vs A 0.56, @300s **−4.21**
+  vs +7.87; Book 2 R n=18 net **−17 avg −0.93** vs A +7.19. Share
+  terciles non-monotone (mid +26.4 @300s, hi −4.2): a compact path-side
+  resting band behaves as a wall that stalls the break, not fuel.
+  Persistent clusters (≥2 snapshots) worst (−17.9 @300s, n=6).
+- Results: `results/EXP-0083/`.
+- Runner: `python -m research.dop.exp_0083_rest_cluster`.
+
+### 2026-10-30 — EXP-0084 DOP support-side resting registered (H75)
+
+- Frozen design: `research/experiments/EXP-0084.yaml` / H75. New
+  primary after EXP-0083 inverted path-side (user): compact resting
+  on the SUPPORT / trap side fuels the break.
+- Same zone/band/snapshots as EXP-0083; Arm S = support share ≥ 0.50
+  at DOP entry, Book 2. Path-side R contrast only.
+- Discovery Apr–Aug; Sep–Oct semi one read after a pass.
+- Runner: `python -m research.dop.exp_0084_rest_support` (`--semi-oos`).
+- Status: registered; run pending.
+
+### 2026-10-30 — EXP-0084 DOP support-side resting run (H75)
+
+- Verdict: **reject / park — Stage 3 semi-holdout fail (no retune)**
+- Stage 0/1 discovery: S n=27 @300s **+15.80** vs A +6.64 / R −4.21
+  (sign flip vs path-side matches the claim on training). S_not_R
+  strongest descriptive cell (+17.15 @300s, n=20).
+- Stage 2 PASS: Book 2 S n=27 net +450 avg **+16.68** vs A +6.35.
+- Stage 3 Sep–Oct FAIL: S n=10 avg **−11.50** (worse than A −8.90);
+  same seasonal collapse as the base DOP book. No retune.
+- Results: `results/EXP-0084/`.
+- Runner: `python -m research.dop.exp_0084_rest_support`.
 
 ### 2026-10-26 — EXP-0075…0077 next package
 

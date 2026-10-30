@@ -950,6 +950,68 @@ Sep–Oct semi-holdout once after a pass (approach features never computed
 there); clean validation requires future months. Fail = reject/park.
 **Result (EXP-0081): reject / park — Stage 3 semi-holdout fail (no retune).** See `results/EXP-0081/`.
 
+## H73 — DOP break: compact trap-side volume node + clean departure
+
+New feature family (not a retune of H69–H72). Before an NQ DOP break,
+find where the trap-side volume actually sat: the contiguous ≤5pt band
+on the trap side (below the DOP on a long break, mirrored above) holding
+the most pre-break volume. Hypothesis: if ≥50% of trap-side volume is
+concentrated in that compact node, the aggressor delta inside the node
+is trapped-side aggression, and price then leaves the node for the DOP
+break with ≤1 pullback of ≥2pts (trapped traders get no exit), the
+break continues better than an average first DOP break.
+
+**Primary (frozen a priori):** Arm K (compact ∧ clean departure) beats
+Arm A (all first breaks) on Book 2 at the DOP entry. Node delta is a
+dose-response / split only — never a gate — so it cannot rescue a
+failed K. Tape only (no depth), NQ only.
+
+**Test:** EXP-0082 (`research/features/dop_compact.py`,
+`research/dop/exp_0082_compact.py`). Discovery Apr–Aug 2026; after a
+discovery pass, one read of Sep–Oct (semi) + March (semi-virgin for
+these features). Fail = reject/park, no retune.
+**Result (EXP-0082): reject / park — Stage 0 underpowered (counts are the result; no retune).** See `results/EXP-0082/`.
+
+## H74 — DOP break: compact resting cluster on the trap side (depth)
+
+Depth counterpart of H73 (user, 2026-10-30): the compact pre-break range
+may be a **resting** cluster on the heatmap rather than traded volume.
+In the 30 pts on the trap side adjacent to the DOP, take the path-side
+resting book (asks below the DOP on a long setup — resting sellers price
+must chew through; mirrored bids on a short). At snapshots 300/180/60 s
+before the break, find the ≤5pt band holding the most resting size.
+Hypothesis: if that band holds ≥50% of zone resting in the last minutes
+before the break (a compact cluster that then gets run over / left
+behind), the break continues better than an average first DOP break.
+
+**Primary (frozen a priori):** Arm R (max pre-break cluster share
+≥ 0.50) beats Arm A on Book 2 at the DOP entry. Cluster size,
+persistence, support-side resting, cluster remaining at break, and
+departure pullbacks are descriptive splits only.
+
+**Test:** EXP-0083 (`research/features/dop_rest_cluster.py`,
+`research/dop/exp_0083_rest_cluster.py`). Discovery Apr–Aug depth
+sessions; Sep–Oct semi one read after a pass. Fail = reject/park.
+**Result (EXP-0083): reject / park — Stage 2 discovery P&L fail (no semi read, no retune).** See `results/EXP-0083/`.
+
+## H75 — DOP break: compact resting cluster on the SUPPORT side (depth)
+
+After H74 inverted (path-side compact resting marks weak breaks), the
+user claim (2026-10-30): a compact resting cluster on the **opposite**
+side to the break path — support / trap-side resting (bids behind a
+long break, asks behind a short) — is trapped inventory that fuels
+continuation when price runs away. Same feature family as H74, opposite
+book side as the gate (new claim, not a retune of the failed R cut).
+
+**Primary (frozen a priori):** Arm S (max pre-break support-side
+cluster share ≥ 0.50) beats Arm A on Book 2 at the DOP entry.
+Path-side Arm R is contrast only.
+
+**Test:** EXP-0084 (`research/features/dop_rest_cluster.py`,
+`research/dop/exp_0084_rest_support.py`). Discovery Apr–Aug depth;
+Sep–Oct semi once after a pass. Fail = reject/park.
+**Result (EXP-0084): reject / park — Stage 3 semi-holdout fail (no retune).** See `results/EXP-0084/`.
+
 ---
 
 ## Unregistered candidates (no H-number yet)
