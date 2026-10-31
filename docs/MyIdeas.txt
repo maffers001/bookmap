@@ -35,7 +35,7 @@ TODO Next:
         - * find a way to load lvns from IRT
         - run large order against LVNs
         - * add alert for dual S/R - see if P&C works with dual S/R
-        - * practice levels P&C in Bookmap at LVNs
+        - * practice levels P&C in Bookmap at LVNs  - TARGETTING 1:2
     - need trade ideas with 1:2 R:R
     - take value seriously - outside va is cheap
     - LVN trade on FX pairs - need to collect LVNs
@@ -52,3 +52,9 @@ TODO Next:
     - 30 sec pinbar
         - which is V shaped reversal, see if volume is trapped
         - large trades trapped at bottom
+
+Discretionary
+- stop placement behind two HVNs - hvns will be defended
+- review trades and see where there was a stack - did these trades do better as
+ per AI DOP research where stack held
+ - review RIPS trades this month

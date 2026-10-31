@@ -52,6 +52,21 @@ See `research/experiments/EXP-0090.yaml`. Primary bar: left_behind − tape_only
 
 If floors fail: park standalone; keep lifecycle as feature-on-trigger only.
 
+## Results (2026-10-30)
+
+| ID | Verdict | Note |
+|---|---|---|
+| EXP-0088 / H79 | reject / park Stage 1 | breakthrough @60s +4.03 vs absorbed +1.08 (lift OK) but @300s lift +1.89 < +2.0; C4 closed |
+| Counts (25d NQ) | defended floor FAIL | defended=12≪30; consumed=82; primary=29; pulled dominates |
+| EXP-0089 / H80 | reject / park Stage 0 | defended retests≈0 on DIG4∩MBO |
+| EXP-0090 / H81 | reject / park Stage 0 | left_behind=6≪30; breach_back=54 modal |
+| Phase 4 paired | **earns prereg** | n=52, δ@60s +3.56 → EXP-0091 / H82 frozen YAML; runner deferred to virgin months |
+| Phase 4 iceberg | no | n=0 |
+
+No shippable standalone MBO book. Lifecycle layer remains a
+feature-on-trigger annotator. Next: EXP-0091 on virgin months only
+(count peek contaminated DIG4).
+
 ## Out of scope
 
 Single-trader identity; whole-session percentiles; H13 vacuum revival;

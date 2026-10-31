@@ -103,6 +103,9 @@
 | EXP-0086 | H77 MAT book corridor at stamp | ran — **reject / park** | depth sessions | reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune); see notes |
 | EXP-0087 | H78 MAT stack survival scratch (+2s) | ran — **reject / park** | depth sessions | reject / park — Stage 2 P&L fail (no retune); see notes |
 | EXP-0088 | H79 MAT burst level absorption (C4) | ran — **reject / park** | depth sessions | reject / park — Stage 1 event-study fail (C4 closed; no Stage 2 P&L, no retune); see notes |
+| EXP-0089 | H80 Defended-retest dominant MBO order | ran — **reject / park** | DIG4∩MBO | Stage 0 underpowered (defended=0, completed=1); see notes |
+| EXP-0090 | H81 Consumed-level acceptance | ran — **reject / park** | DIG4∩MBO | Stage 0 underpowered (left_behind=6 < 30); see notes |
+| EXP-0091 | H82 Paired ES/NQ lifecycle MAT feature | registered — runner deferred | DIG4∩MBO count peek 15d | earned by Phase 4 counts (n=52 δ+3.56); virgin months only |
 
 ## Run notes
 
@@ -326,6 +329,23 @@
 - Results: `results/EXP-0088/`.
 - Runner: `python -m research.mat_context.exp_0088_burst_absorption`.
 - C4 one-shot closed; no further absorption-on-MAT retunes on this sample.
+- Stage 0: breakthrough 689 / absorbed 7549 / no_level 5084; truncation PASS.
+- Stage 1: bt @60s **+4.03** vs absorbed +1.08 (lift OK) / null +0.65; @300s
+  lift +1.89 < required +2.0 → FAIL.
+
+### 2026-10-30 — MBO lifecycle programme (H80–H82)
+
+- Plan: `docs/MBO_LIFECYCLE_PLAN.md`. Layer: `research/features/mbo_lifecycle.py`.
+- Stage-0 counts (25 NQ sessions): defended **12**≪30, consumed 82, primary 29,
+  pulled 7403 — `results/MBO_LIFECYCLE_COUNTS/`. Standalone Q1 parked on counts.
+- EXP-0089 / H80 defended-retest: Stage 0 underpowered (defended=0, completed=1
+  on DIG4∩MBO). `results/EXP-0089/`.
+- EXP-0090 / H81 consumed acceptance: Stage 0 underpowered (left_behind=6≪30;
+  breach_back=54). `results/EXP-0090/`.
+- Phase 4 paired/iceberg on MAT triggers (15 DIG4∩MBO): paired n=52 δ@60s
+  **+3.56** → earns EXP-0091 / H82 preregistration (runner deferred to virgin
+  months; count peek contaminates DIG4). Iceberg n=0. `results/MBO_PAIRED_ICEBERG/`.
+- No Java / virgin retest of standalones (none survived).
 
 ### 2026-10-30 — EXP-0087 MAT stack survival run (H78)
 
@@ -1228,3 +1248,16 @@ Same mistake pattern as the first EXP-0036 fade close: treating continuation hit
 - Java: retest mode defaults in `HvExtremeMoveModule`; jar `bookmap-orderflow-hvext-v2.jar`.
 - Results: `results/EXP-0038/`.
 
+
+### 2026-10-30 — EXP-0089 defended-retest (H80)
+
+- Verdict: **reject / park — Stage 0 underpowered (counts are the result; no retune)**
+- Results: `results/EXP-0089/`.
+- Runner: `python -m research.mbo_lifecycle.exp_0089_defended_retest`.
+- Plan: `docs/MBO_LIFECYCLE_PLAN.md`.
+
+### 2026-10-30 — EXP-0090 consumed acceptance (H81)
+
+- Verdict: **reject / park — Stage 0 underpowered (counts are the result; no retune)**
+- Results: `results/EXP-0090/`.
+- Runner: `python -m research.mbo_lifecycle.exp_0090_consumed_acceptance`.

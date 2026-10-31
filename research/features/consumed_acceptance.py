@@ -49,29 +49,36 @@ def classify_acceptance(
     if peak < cfg.clear_pts:
         return {**empty, "arm": "never_cleared", "peak_past_pts": peak}
 
-    peak_i = int(np.argmax(past))
-    after = past[peak_i:]
-    pullback = float(peak - after.min()) if len(after) else 0.0
-    pull_frac = pullback / peak if peak > 0 else 1.0
-    # breach: past <= 0 after having cleared
     crossed = np.where(past >= cfg.clear_pts)[0]
     i0 = int(crossed[0])
     post = past[i0:]
+    peak = float(post.max())
+    peak_i = int(np.argmax(post))
+    after_peak = post[peak_i:]
+    pullback = float(peak - after_peak.min()) if len(after_peak) else 0.0
+    pull_frac = pullback / peak if peak > 0 else 1.0
     breached = bool((post <= 0).any())
-    approached = bool(((post > 0) & (post <= cfg.approach_pts)).any())
+    # Retest only after stretching past the approach band (same idea as LST HOLD)
+    peak_needed = cfg.approach_pts + 0.5
+    approached = False
+    approach_offset = None
+    if peak >= peak_needed:
+        post_peak = post[peak_i:]
+        hit = np.where((post_peak > 0) & (post_peak <= cfg.approach_pts))[0]
+        if len(hit):
+            approached = True
+            approach_offset = int(peak_i + hit[0])
 
     if breached:
         arm = "breach_back"
-        # stamp = first breach
         bi = int(np.where(post <= 0)[0][0])
         accept_ts = int(ts[lo + i0 + bi])
-    elif (not approached) and pull_frac <= cfg.max_pullback_frac:
-        arm = "left_behind"
-        accept_ts = t1
     elif approached and not breached:
         arm = "retest_hold"
-        ai = int(np.where((post > 0) & (post <= cfg.approach_pts))[0][0])
-        accept_ts = int(ts[lo + i0 + ai])
+        accept_ts = int(ts[lo + i0 + int(approach_offset)])
+    elif (not approached) and pull_frac <= cfg.max_pullback_frac and float(post.min()) > 0:
+        arm = "left_behind"
+        accept_ts = t1
     else:
         arm = "other"
         accept_ts = t1

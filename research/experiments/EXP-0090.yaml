@@ -57,4 +57,4 @@ kill:
   stage1_lift_300s_pts: 2.0
 
 placebo_seed: 90
-run: false
+run: true  # 2026-10-30: Stage 0 underpowered — see results/EXP-0090/

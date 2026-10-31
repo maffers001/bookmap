@@ -164,6 +164,15 @@ specified in the EXP-0035 post-mortem. One attempt, pre-registered.
 
 ---
 
+## MBO lifecycle programme (2026-10-30) — closed standalones
+
+Phased dig (`docs/MBO_LIFECYCLE_PLAN.md`): EXP-0088 C4 absorption-on-MAT
+Stage 1 fail; Stage-0 counts showed defended≪floor; EXP-0089/0090 both
+Stage 0 underpowered. **No shippable MBO entry.** Sole carry-forward:
+EXP-0091 / H82 paired ES/NQ lifecycle as a MAT *feature* (count-earned
+n=52 δ+3.56) — runner deferred to **virgin months** only. Iceberg proxy
+n=0. Do not revive H2/H13/H36-style level fades via this layer.
+
 ## Suggested new work (beyond the dig backlog)
 
 ### A. Combined book (highest value, zero new signal risk)

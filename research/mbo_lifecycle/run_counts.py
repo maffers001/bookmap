@@ -69,7 +69,8 @@ def run(*, max_sessions: int | None = None, role: str = "NQ") -> dict:
     parts: list[pa.Table] = []
     hand: list[dict] = []
 
-    for sid in chrono:
+    for si, sid in enumerate(chrono):
+        print(f"  [{si+1}/{len(chrono)}] {sid} loading…", flush=True)
         pair = H.load_pair(pq_dir, sid)
         if pair is None:
             continue
@@ -82,6 +83,7 @@ def run(*, max_sessions: int | None = None, role: str = "NQ") -> dict:
         if role == "ES" and (pair.es is None or pair.es.num_rows == 0):
             print(f"  {sid}: no ES trades", flush=True)
             continue
+        print(f"  {sid}: mbo={mbo.num_rows} trades={trades.num_rows} running…", flush=True)
         ev = run_lifecycle(mbo, trades, cfg=lcfg, data_start_ns=lo - 5 * NS_MIN)
         if ev.num_rows == 0:
             print(f"  {sid}: 0 events", flush=True)

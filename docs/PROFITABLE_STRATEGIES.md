@@ -104,7 +104,9 @@ Closed or ≤ placebo under current constructions — see `EDGE_RANKING.md`
 Tier 4 and `HYPOTHESES.md`. Do not quietly revive without a **new**
 construction + preregistration. Notable recent closes: DOP thread
 (H69–H72 / EXP-0078–0081), dual LVN event studies (H7/H7b), most MAT overlays,
-Tier A correlated gates (A1–A4).
+Tier A correlated gates (A1–A4), MBO lifecycle standalones (H80/H81 /
+EXP-0089/0090 Stage 0 underpowered; H79 C4 Stage 1 fail). Carry-forward
+only: EXP-0091 paired-lifecycle MAT feature on **virgin months**.
 
 ---
 

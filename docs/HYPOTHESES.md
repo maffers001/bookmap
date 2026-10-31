@@ -1079,6 +1079,52 @@ failed their kill bars on this sample. Thread closed with H43–H45 /
 H76; see `results/MAT_BOOK_SYNTHESIS/summary.md`. No Java / live-gate
 change; no stacking; no further C4 absorption retunes here.
 
+## H80 — Defended-retest of dominant resting MBO order
+
+After a causally-large dominant resting order is contacted, a retest of
+its price holds when the level is re-defended (stack rebuilt / net adds
+on approach) and fails when the order completed (stack gone). Fade
+defended retests; completed is the twin; fragmented + ±40 pt placebo
+are controls. ES-paired defence is a reported split only. Distinct from
+H2/H36 (unconditional level fade) and H34 StackConsume (IRT levels).
+See `docs/MBO_LIFECYCLE_PLAN.md`.
+
+**Test:** EXP-0089 (`research/experiments/EXP-0089.yaml`).
+**Result (EXP-0089): reject / park — Stage 0 underpowered (defended=0,
+completed=1 on DIG4∩MBO; no retune).** See `results/EXP-0089/`. Lifecycle
+counts also showed defended=12 ≪ 30 on 25 sessions — standalone Q1 parked;
+keep `mbo_lifecycle` as feature-on-trigger only.
+
+## H81 — Consumed-level acceptance (left_behind / breach fade)
+
+A tracked resting level classified `consumed` by aggression, with price
+leaving it behind (no pullback / no reclaim) at +5 s, continues; a
+breach back through the level is a fade (P&C). Tape-only twin mandatory;
+LST Momentum overlap reported. Shape informed by EXP-0088 C4 close
+(breakthrough separated @60s but failed @300s lift). See
+`docs/MBO_LIFECYCLE_PLAN.md`.
+
+**Test:** EXP-0090 (`research/experiments/EXP-0090.yaml`).
+**Result (EXP-0090): reject / park — Stage 0 underpowered (left_behind=6
+≪ 30; breach_back=54 was the modal arm; no retune).** See
+`results/EXP-0090/`. Consumed contacts exist but almost never leave the
+level cleanly behind — family closed with H80.
+
+## H82 — Paired ES/NQ MBO lifecycle as MAT feature
+
+Count-first Phase 4 (`results/MBO_PAIRED_ICEBERG/`): MAT triggers with a
+same-side ES lifecycle event within ±2 s of an NQ lifecycle event
+(n=52, δ @60s paired−unpaired **+3.56**) clear the earn bar (n≥50,
+|δ|≥0.2). Iceberg proxy did not (n=0). Claim: paired lifecycle *behaviour*
+(not mere size presence) improves frozen MAT. Sync by side and time, not
+mapped price. DIG4 count peek is semi-contaminated — P&L only on virgin
+months. Distinct from H44 (large-print both-burst, rejected) and H45
+(BBO agreement empty).
+
+**Test:** EXP-0091 (`research/experiments/EXP-0091.yaml`).
+**Result:** registered 2026-10-30 — runner deferred until virgin months;
+do not dig P&L on the count-peek sample.
+
 ---
 
 ## Unregistered candidates (no H-number yet)

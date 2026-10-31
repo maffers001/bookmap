@@ -1,0 +1,55 @@
+name: EXP-0091
+hypothesis: H82
+title: Paired ES/NQ MBO lifecycle state as MAT feature (count-earned)
+description: >
+  Phase 4 count-first result (results/MBO_PAIRED_ICEBERG/): on 15 DIG4∩MBO
+  sessions, MAT triggers with a same-side ES lifecycle event within ±2 s
+  of an NQ lifecycle event had n=52 and δ @60s paired−unpaired = +3.56
+  (≥0.2 bar). Iceberg proxy earned nothing (n=0). This YAML freezes the
+  claim before any P&L dig: keep-gate on frozen MAT when a paired
+  lifecycle state is present at the stamp (side-and-time sync, not
+  price-mapped). Mandatory nulls: unpaired NQ lifecycle at stamp;
+  random-keep placebo; shifted-ES (+60 s) placebo. Discovery = DIG4∩MBO
+  remaining after the 15-session count peek is SEMI-contaminated —
+  Stage 1 may use the 15 for power only; Stage 2 P&L requires virgin
+  months OR a pre-registered holdout that excludes the 15. Do not retune
+  sync_ms / state filters on the count sample.
+
+detector: paired_lifecycle_mat
+plan_doc: docs/MBO_LIFECYCLE_PLAN.md
+window: "UK 14:30-17:00"
+exclude_sessions: ["200626", "220626", "300326", "smoke_synthetic"]
+is_definition: DIG4_23d
+count_peek_sessions: 15  # semi-contaminated for thresholds — sync_ms frozen at 2000
+
+lifecycle:
+  sync_ms: 2000
+  same_state: false  # any same-side ES lifecycle within sync
+  track_min_size: 20
+
+primary: paired_keep
+twin: unpaired_nq_lifecycle
+arms: [base, paired_keep, unpaired, no_lifecycle]
+
+frozen_mat:
+  es_stamp: causal
+  gate: trend_with + vwap_side
+  brackets: "vol k=1 floor=6 cap=30 symmetric"
+  commission_pts_rt: 0.25
+  slip_sensitivity_ticks: [0.0, 1.0, 2.0]
+
+horizons_ms: [10000, 60000, 300000]
+point_targets_nq: [5, 10, 20]
+
+stages:
+  stage0: "truncation; park if paired MAT trades < 50 on discovery excluding count-peek contamination plan"
+  stage1: "paired - unpaired >= +1.0pt @60s; beats shifted-ES placebo"
+  stage2: "virgin-month OOS only (count peek contaminated DIG4); net>0, avg>=base+1.0, random-keep p90"
+
+kill:
+  min_paired_trades: 50
+  min_avg_lift_pts: 1.0
+  stage1_lift_60s_pts: 1.0
+
+placebo_seed: 91
+run: false  # preregistered from Phase 4 counts; runner not built until virgin months available

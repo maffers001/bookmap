@@ -43,6 +43,9 @@ class LifecycleConfig:
     large_lookback_min: int = 30
     large_warmup_min: int = 5
     large_min_prints: int = 50
+    # Absolute floor: ignore sends below this when building the order map
+    # (keeps ~10M-row MBO sessions tractable; causal p99 still applied later).
+    track_min_size: float = 20.0
     dominance_min: float = 0.50
     fragmented_max: float = 0.25
     post_sec: tuple[float, ...] = (2.0, 5.0)
@@ -569,6 +572,9 @@ def run_lifecycle(
                 i += 1
                 continue
             if op == "send":
+                if sz < cfg.track_min_size:
+                    i += 1
+                    continue
                 seeded = ts <= start
                 tr.on_mbo_add(ts, oid, is_bid, px, sz, seeded=seeded)
                 live[oid] = (is_bid, px, sz)
@@ -576,14 +582,16 @@ def run_lifecycle(
                 prev = live.get(oid)
                 if prev is not None:
                     tr.on_mbo_cancel(ts, oid, prev[1], prev[2], prev[0])
-                tr.on_mbo_add(ts, oid, is_bid, px, sz, seeded=False)
-                live[oid] = (is_bid, px, sz)
+                    live.pop(oid, None)
+                if sz >= cfg.track_min_size:
+                    tr.on_mbo_add(ts, oid, is_bid, px, sz, seeded=False)
+                    live[oid] = (is_bid, px, sz)
             elif op == "cancel":
                 prev = live.get(oid)
                 if prev is not None:
                     tr.on_mbo_cancel(ts, oid, prev[1], prev[2], prev[0])
                     del live[oid]
-                elif px > 0 and sz > 0:
+                elif px > 0 and sz >= cfg.track_min_size:
                     tr.on_mbo_cancel(ts, oid, px, sz, is_bid)
             i += 1
         else:
