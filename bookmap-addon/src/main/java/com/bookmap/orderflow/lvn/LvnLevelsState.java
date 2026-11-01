@@ -149,6 +149,11 @@ public final class LvnLevelsState {
         public final boolean showLvn;
         public final boolean showHvn;
         public final boolean showDop;
+        public final boolean marketProfileEnabled;
+        public final boolean showVpoc;
+        public final boolean showVah;
+        public final boolean showVal;
+        public final double valueAreaPct;
         public final Path esSeedPath;
         public final Path nqSeedPath;
         public final String statusDetail;
@@ -163,6 +168,8 @@ public final class LvnLevelsState {
         Snapshot(MarketLevels es, MarketLevels nq,
                  MarketKnobs esKnobs, MarketKnobs nqKnobs,
                  boolean showLvn, boolean showHvn, boolean showDop,
+                 boolean marketProfileEnabled,
+                 boolean showVpoc, boolean showVah, boolean showVal, double valueAreaPct,
                  Path esSeedPath, Path nqSeedPath,
                  String statusDetail, String lastEvent, String alertFooter,
                  LocalDate sessionDate,
@@ -174,6 +181,11 @@ public final class LvnLevelsState {
             this.showLvn = showLvn;
             this.showHvn = showHvn;
             this.showDop = showDop;
+            this.marketProfileEnabled = marketProfileEnabled;
+            this.showVpoc = showVpoc;
+            this.showVah = showVah;
+            this.showVal = showVal;
+            this.valueAreaPct = valueAreaPct;
             this.esSeedPath = esSeedPath;
             this.nqSeedPath = nqSeedPath;
             this.statusDetail = statusDetail;
@@ -188,6 +200,13 @@ public final class LvnLevelsState {
     private static final AtomicBoolean SHOW_LVN = new AtomicBoolean(true);
     private static final AtomicBoolean SHOW_HVN = new AtomicBoolean(true);
     private static final AtomicBoolean SHOW_DOP = new AtomicBoolean(true);
+    /** Master switch for developing VPOC/VAH/VAL lines (accumulation still runs from DOP open). */
+    private static final AtomicBoolean MARKET_PROFILE_ENABLED = new AtomicBoolean(false);
+    private static final AtomicBoolean SHOW_VPOC = new AtomicBoolean(true);
+    private static final AtomicBoolean SHOW_VAH = new AtomicBoolean(true);
+    private static final AtomicBoolean SHOW_VAL = new AtomicBoolean(true);
+    /** Developing session value-area percent (70 = classic VA). */
+    private static volatile double valueAreaPct = 70.0;
 
     private static final MarketKnobs ES_KNOBS = MarketKnobs.defaultsFor("ES");
     private static final MarketKnobs NQ_KNOBS = MarketKnobs.defaultsFor("NQ");
@@ -314,10 +333,9 @@ public final class LvnLevelsState {
     }
 
     /**
-     * Once per process: bind any existing {@code vap_seed_ES} / {@code vap_seed_NQ}
-     * under {@link #DEFAULT_SEED_ROOT}, then kick an automatic session seed rebuild
-     * (same as the console button). Missing seeds show on the banner until rebuild
-     * finishes.
+     * Once per process: bind existing seeds under {@link #DEFAULT_SEED_ROOT}.
+     * Runs seed I/O on a daemon thread so Bookmap chart-attach stays responsive.
+     * Auto-rebuilds only when a seed is missing or the banner reports stale/unusable.
      */
     public static void ensureDefaultSeedsLoaded() {
         if (!AUTO_SEED_TRIED.compareAndSet(false, true)) {
@@ -326,12 +344,35 @@ public final class LvnLevelsState {
             fire();
             return;
         }
-        tryAutoBind("ES");
-        tryAutoBind("NQ");
-        refreshSeedBanner();
-        statusDetail = refreshStatus();
-        fire();
-        requestSessionSeedRebuild("attach");
+        Thread t = new Thread(() -> {
+            try {
+                tryAutoBind("ES");
+                tryAutoBind("NQ");
+                refreshSeedBanner();
+                statusDetail = refreshStatus();
+                fire();
+                if (seedNeedsRebuild()) {
+                    requestSessionSeedRebuild("attach");
+                } else {
+                    Log.info("LVN Levels attach: existing seeds OK — skip auto rebuild");
+                }
+            } catch (Throwable ex) {
+                Log.info("LVN Levels auto-seed failed: " + ex.getMessage());
+                lastEvent = "Auto-seed failed: " + ex.getMessage();
+                fire();
+            }
+        }, "LvnSeedAutoLoad");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** True when ES/NQ seed is missing or the red banner has a coverage/load issue. */
+    private static boolean seedNeedsRebuild() {
+        if (esSeedPath == null || nqSeedPath == null) {
+            return true;
+        }
+        String banner = seedBanner;
+        return banner != null && !banner.isBlank();
     }
 
     /**
@@ -711,6 +752,35 @@ public final class LvnLevelsState {
         return SHOW_DOP.get();
     }
 
+    public static boolean marketProfileEnabled() {
+        return MARKET_PROFILE_ENABLED.get();
+    }
+
+    public static boolean showVpoc() {
+        return SHOW_VPOC.get();
+    }
+
+    public static boolean showVah() {
+        return SHOW_VAH.get();
+    }
+
+    public static boolean showVal() {
+        return SHOW_VAL.get();
+    }
+
+    public static double valueAreaPct() {
+        return valueAreaPct;
+    }
+
+    /** Fraction in (0,1] for {@link com.bookmap.orderflow.core.MarketProfileTracker}. */
+    public static double valueAreaFrac() {
+        double pct = valueAreaPct;
+        if (pct > 1.0) {
+            return Math.min(1.0, Math.max(0.01, pct / 100.0));
+        }
+        return Math.min(1.0, Math.max(0.01, pct));
+    }
+
     public static void setShowLvn(boolean on, String via) {
         SHOW_LVN.set(on);
         lastEvent = "Show LVN " + (on ? "ON" : "OFF") + " (" + via + ")";
@@ -726,6 +796,40 @@ public final class LvnLevelsState {
     public static void setShowDop(boolean on, String via) {
         SHOW_DOP.set(on);
         lastEvent = "Show DOP " + (on ? "ON" : "OFF") + " (" + via + ")";
+        fire();
+    }
+
+    public static void setMarketProfileEnabled(boolean on, String via) {
+        MARKET_PROFILE_ENABLED.set(on);
+        lastEvent = "Market Profile " + (on ? "ON" : "OFF") + " (" + via + ")";
+        fire();
+    }
+
+    public static void setShowVpoc(boolean on, String via) {
+        SHOW_VPOC.set(on);
+        lastEvent = "Show VPOC " + (on ? "ON" : "OFF") + " (" + via + ")";
+        fire();
+    }
+
+    public static void setShowVah(boolean on, String via) {
+        SHOW_VAH.set(on);
+        lastEvent = "Show VAH " + (on ? "ON" : "OFF") + " (" + via + ")";
+        fire();
+    }
+
+    public static void setShowVal(boolean on, String via) {
+        SHOW_VAL.set(on);
+        lastEvent = "Show VAL " + (on ? "ON" : "OFF") + " (" + via + ")";
+        fire();
+    }
+
+    public static synchronized void setValueAreaPct(double pct, String via) {
+        double v = Double.isFinite(pct) ? pct : 70.0;
+        if (v <= 1.0) {
+            v = v * 100.0;
+        }
+        valueAreaPct = Math.min(99.0, Math.max(1.0, v));
+        lastEvent = String.format(Locale.US, "Value area=%.0f%% (%s)", valueAreaPct, via);
         fire();
     }
 
@@ -854,6 +958,8 @@ public final class LvnLevelsState {
         return new Snapshot(
                 esLevels, nqLevels, ES_KNOBS.copy(), NQ_KNOBS.copy(),
                 SHOW_LVN.get(), SHOW_HVN.get(), SHOW_DOP.get(),
+                MARKET_PROFILE_ENABLED.get(),
+                SHOW_VPOC.get(), SHOW_VAH.get(), SHOW_VAL.get(), valueAreaPct,
                 esSeedPath, nqSeedPath, statusDetail, lastEvent, alertFooter, sessionDate(),
                 APPROACH_ALERT.config(), seedBanner);
     }

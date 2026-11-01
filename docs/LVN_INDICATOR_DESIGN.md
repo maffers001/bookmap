@@ -1,7 +1,8 @@
-# LVN Levels Indicator — design
+# Levels Indicator — design
 
-Display-only Bookmap module **LVN Levels** with IRT-style profile knobs.
-Auto-trade consumes the same shared state; it does not own chart LVN lines.
+Display-only Bookmap module **Levels** (formerly LVN Levels + Market Profile)
+with IRT-style seed knobs and developing session VPOC/VAH/VAL.
+Auto-trade consumes the same shared LVN state; it does not own chart lines.
 
 See also [IRT_LVN_PROFILE.md](IRT_LVN_PROFILE.md) for detector / tick-VAP
 decisions.
@@ -11,7 +12,9 @@ decisions.
 - Tick-built VAP for **ES and NQ** (no ES 1‑min bar-smear in production).
 - Reconfigurable **Time per Profile** and **Sensitivity** (like IRT).
 - Configurable **Join with Bookmap** handoff so attach time can vary.
-- Plot **LVNs**, **HVNs**, and **DOP** (NY open print).
+- Plot **LVNs**, **HVNs**, and **DOP** (UK open print).
+- Developing session **Market Profile**: **VPOC**, **VAH**, **VAL** from DOP open
+  (same clock as DOP; Daily Open is the DOP line — not duplicated).
 - Replay and live share one VAP + detect engine (seed file + optional live trades).
 
 ## Defaults
@@ -30,9 +33,11 @@ decisions.
 ```text
 Python morning/replay seed  →  vap_seed_{ES|NQ}/ (meta + daily + minutes)
                                       ↓
-Bookmap LvnLevelsModule  →  LvnLiveVap  →  LvnNodeDetector  →  LvnLevelsState
+Bookmap Levels (LvnLevelsModule)
+   → LvnLiveVap → LvnNodeDetector → LvnLevelsState   (LVN/HVN)
+   → MarketProfileTracker                             (VPOC/VAH/VAL)
                                       ↑
-                         Bookmap trades (ts ≥ join)
+                         Bookmap trades (ts ≥ join / DOP open)
 LvnConfluenceAutoTrade  ←── LvnLevelsState (LVN set for confluence)
 ```
 
@@ -78,7 +83,7 @@ separately.
 
 | Piece | Role |
 |---|---|
-| `LvnLevelsModule` | Display-only; knobs; seed load; plot lines; mid → alert |
+| `LvnLevelsModule` (**Levels**) | Display-only; seed LVN/HVN/DOP + developing VPOC/VAH/VAL; mid → alert |
 | `LvnLevelsState` | Process-wide levels, knobs, seed bind, alert config |
 | `LvnApproachAlert` | Approach/pullback band / single+correlated router |
 | `LvnNodeDetector` | Valleys / peaks |
@@ -90,7 +95,7 @@ separately.
 
 1. Refresh IRT tick export if needed (so `build_vap_seed` has data).
 2. Open Bookmap **before** Join when possible.
-3. Attach **LVN Levels** on ES/NQ — existing seeds bind immediately, then
+3. Attach **Levels** on ES/NQ — existing seeds bind immediately, then
    `build_vap_seed` for the UK session day + Join UK (default 14:30) runs
    **automatically** and reloads. Console status shows progress; the button
    re-runs the same job. Manual **Load ES/NQ seed…** still overrides.

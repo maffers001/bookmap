@@ -18,9 +18,8 @@ Custom Bookmap Layer 1 add-ons for NQ scalping with ES confirmation:
 | **HV Extreme Move AutoTrade** | HV tip ? clean Move pts leg ? tip markers; optional market + TP/SL brackets |
 | **Trapped Retest** | HV peak ? weak lower-vol retest ? fire on break beyond 2nd swing |
 | **Stop Run** | Inferred stop-run fingerprint beyond swing/session/overnight levels (EXP-0041 / H32); visual markers only â no auto-trade |
-| **LVN Levels** | Display-only LVN/HVN/DOP from tick VAP seed; IRT-style window/sensitivity/join knobs; see `docs/LVN_INDICATOR_DESIGN.md` |
+| **Levels** | Display-only LVN/HVN/DOP from tick VAP seed **plus** developing VPOC/VAH/VAL from DOP open; see \docs/LVN_INDICATOR_DESIGN.md\ |
 | **LVN Confluence AutoTrade (ES)** | ES open-cluster â© LVN first-touch fade; consumes shared levels; console for trading; default SL8/TP24; trading OFF until enabled |
-| **Market Profile** | Developing VAL / VAH / VPOC from UK session open (default 14:30); 70% value area; chart lines + price tags |
 
 ## Prerequisites
 
@@ -244,7 +243,7 @@ Logs: `CFADE CONFIRM#â¦`, `CFADE PROBE â¦` (partial NQ-still / ES-agains
 
 **Not implemented (ops rules in the spec):** no auto-flatten at 17:00 and no cross-session "3 losing sessions" stop â handle manually.
 
-### LVN Levels (display)
+### Levels (display)
 
 Tick-built volume profile nodes (LVN / HVN) + DOP. Design:
 [`docs/LVN_INDICATOR_DESIGN.md`](../docs/LVN_INDICATOR_DESIGN.md).
@@ -259,7 +258,7 @@ Writes `data/irt/vap_seed_ES/` and `vap_seed_NQ/` (`meta.json`, `daily.csv`,
 `minutes.csv`). `--through` is the **Join with Bookmap** UK time (rebuild if
 you leave IRT later).
 
-**In Bookmap:** attach **LVN Levels** on ES and/or NQ → console **Load ES/NQ
+**In Bookmap:** attach **Levels** on ES and/or NQ → console **Load ES/NQ
 seed…** → set Window / Sens / Join / DOP open → **Apply**. Live prints after
 Join append to the VAP; nodes refresh on the timer (default 5 min) or Apply.
 
@@ -347,28 +346,16 @@ trading.
 **Safety:** trading defaults OFF. Do not enable on a live account until
 replay ARM/FILL match the reference and sim brackets/EOS behave.
 
-### Market Profile
-Developing session volume profile from UK **14:30** (configurable). Attach on ES or NQ.
+### Levels — Market Profile lines
+Developing session VPOC / VAH / VAL are part of **Levels** (not a separate strategy). They accumulate from **DOP open** (same UK clock as the DOP line). Daily open = **DOP**.
 
-| Panel | Meaning |
+| Chart line | Meaning |
 |---|---|
-| **MP Open** | Daily open  first trade at/after UK session open (blue) |
-| **MP VPOC** | Highest-volume price since open (yellow) |
-| **MP VAH** | Value area high  top of contiguous band covering Value area % (magenta) |
-| **MP VAL** | Value area low (magenta) |
-| **MP Total vol** | Session volume since open (bottom pane) |
+| **DOP** | Session open print (dark blue) |
+| **VPOC** | Highest-volume price since open (gold) |
+| **VAH / VAL** | Contiguous value area covering **VA %** (magenta; default 70) |
 
-**Logic:** trade volume by tick from session open; VPOC = max-volume tick (VWAP / lower-tick tie-break); VA expands from VPOC toward the richer adjacent side until ? **Value area %** (default 70). Day rolls at UK midnight; collection restarts at the next open.
-
-| Param | Default | Meaning |
-|---|---|---|
-| Session open UK min-of-day | **870** | 14:30 UK |
-| Value area % | **70** | Contiguous volume fraction around VPOC |
-| Show all lines | true | Master toggle for Open / VPOC / VAH / VAL |
-| Show Daily Open / VPOC / VAH / VAL | true | Per-line toggles (also need Show all lines) |
-| Verbose log | false | `MP status` every 30 s |
-
-Logs: `MP init`, `MP day reset`, `MP session open`, optional `MP status`.
+Console toggles: Show VPOC / VAH / VAL, VA %. Logic: \MarketProfileTracker\ in \core/\.
 
 ### Pitch and Catch
 Warns when a **high-volume** rotation peak/trough is followed by a **low-volume** move of **Catch pts** (default 20) without reclaiming the extreme.
@@ -467,8 +454,7 @@ bookmap-addon/
     pitch/        Pitch and Catch
     hvmove/       HV Extreme Move
     retest/       Trapped Retest
-    profile/      Market Profile (developing VAL/VAH/VPOC)
-    lvn/          LVN Levels (seed VAP + LVN/HVN/DOP display)
+    lvn/          Levels (seed VAP + LVN/HVN/DOP + developing VPOC/VAH/VAL)
     core/         + OpenClusterDetector + LvnLevelFile + MarketProfileTracker
 ```
 

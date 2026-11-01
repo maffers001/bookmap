@@ -19,6 +19,7 @@ import java.util.Set;
 import com.bookmap.orderflow.core.InstrumentClassifier;
 import com.bookmap.orderflow.core.LvnLiveVap;
 import com.bookmap.orderflow.core.LvnStackFile;
+import com.bookmap.orderflow.core.MarketProfileTracker;
 import com.bookmap.orderflow.core.PriceTicks;
 
 import velox.api.layer1.annotations.Layer1ApiVersion;
@@ -41,16 +42,17 @@ import velox.api.layer1.simplified.TimeListener;
 import velox.api.layer1.simplified.TradeDataListener;
 
 /**
- * Display-only LVN / HVN / DOP levels from a tick VAP seed + live Bookmap prints.
+ * Display-only <b>Levels</b>: LVN / HVN / DOP from a tick VAP seed plus developing
+ * session Market Profile (VPOC / VAH / VAL) from live Bookmap prints.
  *
- * <p>IRT-style knobs (window days, sensitivity, join time) live on
- * {@link LvnLevelsPanel} / {@link LvnLevelsState}. No orders.
+ * <p>Knobs live on {@link LvnLevelsPanel} / {@link LvnLevelsState}. No orders.
  *
  * <p>Node detection is deferred until {@link #onRealtimeStart()} so historical
- * "Loading events" is not blocked by VAP rebuilds.
+ * "Loading events" is not blocked by VAP rebuilds. Profile accumulates from DOP
+ * open (same UK clock as the DOP line).
  */
 @Layer1SimpleAttachable
-@Layer1StrategyName("LVN Levels")
+@Layer1StrategyName("Levels")
 @Layer1ApiVersion(Layer1ApiVersionValue.VERSION2)
 public class LvnLevelsModule implements
         CustomModule,
@@ -65,8 +67,12 @@ public class LvnLevelsModule implements
     private static final Color COL_LVN = new Color(0, 255, 255);
     /** Lime green HVNs. */
     private static final Color COL_HVN = new Color(50, 255, 50);
-    /** Dark blue DOP. */
+    /** Dark blue DOP (session open). */
     private static final Color COL_DOP = new Color(20, 60, 180);
+    /** Gold VPOC. */
+    private static final Color COL_VPOC = new Color(255, 210, 40);
+    /** Magenta VAH / VAL. */
+    private static final Color COL_VA = new Color(255, 110, 200);
 
     private double pips = 0.25;
     private String instrumentRole = "OTHER";
@@ -87,6 +93,16 @@ public class LvnLevelsModule implements
     private final LevelSlot[] hvnBelowSlot = new LevelSlot[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
     private Indicator dopMarker;
     private final LevelSlot dopSlot = new LevelSlot();
+    private Indicator vpocMarker;
+    private Indicator vahMarker;
+    private Indicator valMarker;
+    private final LevelSlot vpocSlot = new LevelSlot();
+    private final LevelSlot vahSlot = new LevelSlot();
+    private final LevelSlot valSlot = new LevelSlot();
+
+    /** Developing session volume profile (VPOC / VA) from DOP open. */
+    private MarketProfileTracker profileTracker;
+    private boolean profileSessionOpen;
 
     /**
      * One Bookmap indicator lane bound to a fixed chart price until that price
@@ -156,22 +172,36 @@ public class LvnLevelsModule implements
         dopSlot.boundPts = dopSlot.plottedPts = dopSlot.iconPts = Double.NaN;
         dopSlot.breaking = false;
 
+        vpocMarker = api.registerIndicator("VPOC", GraphType.PRIMARY, Double.NaN, true, true);
+        vahMarker = api.registerIndicator("VAH", GraphType.PRIMARY, Double.NaN, true, true);
+        valMarker = api.registerIndicator("VAL", GraphType.PRIMARY, Double.NaN, true, true);
+        styleLevelLine(vpocMarker, COL_VPOC, 52);
+        styleLevelLine(vahMarker, COL_VA, 48);
+        styleLevelLine(valMarker, COL_VA, 48);
+        // Do not addPoint here — Bookmap rejects indicator points before feed time exists.
+        resetSlotState(vpocSlot);
+        resetSlotState(vahSlot);
+        resetSlotState(valSlot);
+
+        profileTracker = new MarketProfileTracker(pips, LvnLevelsState.valueAreaFrac());
+        profileSessionOpen = false;
+
         if (isEs() || isNq()) {
             LvnLevelsState.registerAttach(instrumentRole);
             LvnLevelsState.registerApplyHook(applyHook);
         }
-        LvnLevelsState.ensureDefaultSeedsLoaded();
+        // Panel + seed I/O off this thread — Bookmap attach must stay snappy.
         LvnLevelsPanel.showPanel();
 
         Log.info(String.format(Locale.US,
-                "LVN Levels init alias=%s role=%s pips=%.4f (nodes after realtime)",
+                "Levels init alias=%s role=%s pips=%.4f (LVN nodes after realtime; MP from DOP open)",
                 alias, instrumentRole, pips));
     }
 
     @Override
     public void onRealtimeStart() {
         realtimeStarted = true;
-        Log.info("LVN Levels realtime start role=" + instrumentRole
+        Log.info("Levels realtime start role=" + instrumentRole
                 + " pendingRebuild=" + pendingRebuild);
         // Detect on the next interval tick — never during Loading events.
         pendingRebuild = true;
@@ -188,13 +218,14 @@ public class LvnLevelsModule implements
         }
         if (realtimeStarted) {
             Log.info(String.format(Locale.US,
-                    "LVN Levels catchup (rewind) role=%s from=%d to=%d",
+                    "Levels catchup (rewind) role=%s from=%d to=%d",
                     instrumentRole, nowNs, t));
         }
         realtimeStarted = false;
         pendingRebuild = true;
         dopCaptured = false;
         clearSlot(dopSlot, dopMarker);
+        resetProfile();
         LvnLiveVap vap = LvnLevelsState.vapFor(instrumentRole);
         if (vap != null) {
             vap.clearLive();
@@ -219,10 +250,12 @@ public class LvnLevelsModule implements
             dopCaptured = false;
             clearSlot(dopSlot, dopMarker);
             LvnLevelsState.clearDop(instrumentRole);
+            resetProfile();
             pendingRebuild = true;
             thresholdsDirty = true;
         }
         LvnLevelsState.setSessionDate(day);
+        maybeOpenProfile();
     }
 
     @Override
@@ -264,6 +297,10 @@ public class LvnLevelsModule implements
         if (!dopCaptured) {
             maybeCaptureDop(chartPts);
         }
+        maybeOpenProfile();
+        if (profileTracker != null && profileSessionOpen) {
+            profileTracker.onTrade(tick, size);
+        }
         LvnLiveVap vap = LvnLevelsState.vapFor(instrumentRole);
         if (vap != null && vap.hasSeed()) {
             vap.onTradeNs(tick, size, nowNs);
@@ -297,7 +334,7 @@ public class LvnLevelsModule implements
         pendingRebuild = true;
         thresholdsDirty = true;
         if (!realtimeStarted) {
-            Log.info("LVN Levels rebuild queued until realtime role=" + instrumentRole);
+            Log.info("Levels rebuild queued until realtime role=" + instrumentRole);
         }
     }
 
@@ -329,7 +366,7 @@ public class LvnLevelsModule implements
         pendingRebuild = false;
         if (lv != null) {
             Log.info(String.format(Locale.US,
-                    "LVN Levels rebuilt %s mid=%.2f LVN above=%s below=%s HVN above=%s below=%s allLvn=%d",
+                    "Levels rebuilt %s mid=%.2f LVN above=%s below=%s HVN above=%s below=%s allLvn=%d",
                     instrumentRole, lv.mid,
                     fmtPrices(lv.lvnAbove), fmtPrices(lv.lvnBelow),
                     fmtPrices(lv.hvnAbove), fmtPrices(lv.hvnBelow),
@@ -347,9 +384,46 @@ public class LvnLevelsModule implements
         if (nowNs >= dopOpenNs) {
             dopCaptured = true;
             LvnLevelsState.setDop(instrumentRole, chartPts);
-            Log.info(String.format(Locale.US, "LVN Levels DOP %s=%.2f feedNs=%d",
+            maybeOpenProfile();
+            Log.info(String.format(Locale.US, "Levels DOP %s=%.2f feedNs=%d",
                     instrumentRole, chartPts, nowNs));
         }
+    }
+
+    private void resetProfile() {
+        profileSessionOpen = false;
+        if (profileTracker != null) {
+            profileTracker.reset();
+        }
+        // Hide only once feed time is live; otherwise just clear slot state.
+        if (nowNs > 0) {
+            clearSlot(vpocSlot, vpocMarker);
+            clearSlot(vahSlot, vahMarker);
+            clearSlot(valSlot, valMarker);
+        } else {
+            resetSlotState(vpocSlot);
+            resetSlotState(vahSlot);
+            resetSlotState(valSlot);
+        }
+    }
+
+    /** Start developing MP at/after DOP open (same UK clock as DOP). */
+    private void maybeOpenProfile() {
+        if (profileTracker == null || profileSessionOpen || nowNs <= 0) {
+            return;
+        }
+        if (thresholdsDirty) {
+            refreshThresholds();
+        }
+        if (dopOpenNs == Long.MAX_VALUE || nowNs < dopOpenNs) {
+            return;
+        }
+        profileTracker.setVaFrac(LvnLevelsState.valueAreaFrac());
+        profileTracker.markSessionOpen(nowNs);
+        profileSessionOpen = true;
+        Log.info(String.format(Locale.US,
+                "Levels MP session open role=%s vaPct=%.0f",
+                instrumentRole, LvnLevelsState.valueAreaPct()));
     }
 
     private void refreshThresholds() {
@@ -390,10 +464,50 @@ public class LvnLevelsModule implements
         double dop = LvnLevelsState.dopFor(instrumentRole);
         if (showDop && pastOpen && Double.isFinite(dop) && dop > 0) {
             dopSlot.boundPts = dop;
-            plotSlot(dopMarker, dopSlot, COL_DOP);
+            plotSlot(dopMarker, dopSlot, COL_DOP, true);
         } else {
             clearSlot(dopSlot, dopMarker);
         }
+
+        plotProfileLevels();
+    }
+
+    private void plotProfileLevels() {
+        if (profileTracker == null) {
+            return;
+        }
+        profileTracker.setVaFrac(LvnLevelsState.valueAreaFrac());
+        MarketProfileTracker.Levels mp = profileTracker.levels();
+        boolean ready = LvnLevelsState.marketProfileEnabled()
+                && profileSessionOpen
+                && mp.ready();
+        plotMpSlot(vpocMarker, vpocSlot, ready && LvnLevelsState.showVpoc(), mp.vpocPts, COL_VPOC);
+        plotMpSlot(vahMarker, vahSlot, ready && LvnLevelsState.showVah(), mp.vahPts, COL_VA);
+        plotMpSlot(valMarker, valSlot, ready && LvnLevelsState.showVal(), mp.valPts, COL_VA);
+    }
+
+    /**
+     * Developing MP levels must stay continuous: every interval emits the current
+     * price with no NaN “break” (that LVN trick leaves gaps when VAH/VAL/VPOC moves).
+     * Plain line only — no price icons.
+     */
+    private void plotMpSlot(Indicator ind, LevelSlot slot, boolean show, double pts, Color color) {
+        if (ind == null) {
+            return;
+        }
+        if (!show || !Double.isFinite(pts) || !(pts > 0) || nowNs <= 0) {
+            if (nowNs > 0) {
+                ind.addPoint(Double.NaN);
+            }
+            resetSlotState(slot);
+            return;
+        }
+        double axis = toPrimaryAxis(pts);
+        ind.addPoint(axis);
+        slot.boundPts = pts;
+        slot.plottedPts = pts;
+        slot.iconPts = Double.NaN;
+        slot.breaking = false;
     }
 
     /**
@@ -452,7 +566,7 @@ public class LvnLevelsModule implements
         for (int i = 0; i < n; i++) {
             LevelSlot s = slots[i];
             if (Double.isFinite(s.boundPts)) {
-                plotSlot(inds[i], s, color);
+                plotSlot(inds[i], s, color, true);
             } else {
                 hideLine(inds[i]);
             }
@@ -482,19 +596,28 @@ public class LvnLevelsModule implements
         return -1;
     }
 
-    private static void clearSlot(LevelSlot s, Indicator ind) {
-        hideLine(ind);
+    private static void resetSlotState(LevelSlot s) {
+        if (s == null) {
+            return;
+        }
         s.boundPts = Double.NaN;
         s.plottedPts = Double.NaN;
         s.iconPts = Double.NaN;
         s.breaking = false;
     }
 
+    private static void clearSlot(LevelSlot s, Indicator ind) {
+        hideLine(ind);
+        resetSlotState(s);
+    }
+
     /**
      * Emit one sample for a bound slot. If the bound price changed on this lane,
      * spend one interval on NaN before drawing the new level.
+     *
+     * @param withIcon if true, draw a price tag (LVN/HVN/DOP); MP lines stay plain
      */
-    private void plotSlot(Indicator ind, LevelSlot s, Color color) {
+    private void plotSlot(Indicator ind, LevelSlot s, Color color, boolean withIcon) {
         if (ind == null || s == null || !Double.isFinite(s.boundPts) || !(s.boundPts > 0)) {
             hideLine(ind);
             return;
@@ -506,9 +629,11 @@ public class LvnLevelsModule implements
             double axis = toPrimaryAxis(chartPts);
             ind.addPoint(axis);
             s.plottedPts = chartPts;
-            BufferedImage icon = renderPriceIcon(formatPriceLabel(chartPts), color);
-            ind.addIcon(axis, icon, 4, icon.getHeight() / 2);
-            s.iconPts = chartPts;
+            if (withIcon) {
+                BufferedImage icon = renderPriceIcon(formatPriceLabel(chartPts), color);
+                ind.addIcon(axis, icon, 4, icon.getHeight() / 2);
+                s.iconPts = chartPts;
+            }
             return;
         }
         if (Double.isFinite(s.plottedPts) && Math.abs(s.plottedPts - chartPts) > 1e-6) {
@@ -522,7 +647,7 @@ public class LvnLevelsModule implements
         double axis = toPrimaryAxis(chartPts);
         ind.addPoint(axis);
         s.plottedPts = chartPts;
-        if (Double.isNaN(s.iconPts) || Math.abs(s.iconPts - chartPts) > 1e-6) {
+        if (withIcon && (Double.isNaN(s.iconPts) || Math.abs(s.iconPts - chartPts) > 1e-6)) {
             BufferedImage icon = renderPriceIcon(formatPriceLabel(chartPts), color);
             ind.addIcon(axis, icon, 4, icon.getHeight() / 2);
             s.iconPts = chartPts;
@@ -535,7 +660,7 @@ public class LvnLevelsModule implements
             LvnLevelsState.unregisterApplyHook(applyHook);
             LvnLevelsState.unregisterAttach(instrumentRole);
         }
-        Log.info("LVN Levels stop alias=" + alias + " role=" + instrumentRole);
+        Log.info("Levels stop alias=" + alias + " role=" + instrumentRole);
     }
 
     private boolean isEs() {

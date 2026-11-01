@@ -24,6 +24,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.JToggleButton;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
@@ -32,8 +33,8 @@ import javax.swing.border.TitledBorder;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
 /**
- * Always-on-top console for LVN Levels: load seed, IRT-style knobs, show toggles.
- * One process-wide panel shared by ES and NQ attaches.
+ * Always-on-top console for Levels: LVN/HVN/DOP seed knobs + developing MP
+ * (VPOC/VAH/VAL) toggles. One process-wide panel shared by ES and NQ attaches.
  */
 public final class LvnLevelsPanel {
 
@@ -68,6 +69,11 @@ public final class LvnLevelsPanel {
     private final JCheckBox showLvn = new JCheckBox("Show LVNs", true);
     private final JCheckBox showHvn = new JCheckBox("Show HVNs", true);
     private final JCheckBox showDop = new JCheckBox("Show DOP", true);
+    private final JToggleButton marketProfileBtn = new JToggleButton("Market Profile: OFF");
+    private final JCheckBox showVpoc = new JCheckBox("Show VPOC", true);
+    private final JCheckBox showVah = new JCheckBox("Show VAH", true);
+    private final JCheckBox showVal = new JCheckBox("Show VAL", true);
+    private final JSpinner valueAreaPct = new JSpinner(new SpinnerNumberModel(70.0, 1.0, 99.0, 1.0));
 
     private final JCheckBox alertEnabled = new JCheckBox("Approach alert", false);
     private final JComboBox<String> alertMode = new JComboBox<>(new String[] {
@@ -90,7 +96,7 @@ public final class LvnLevelsPanel {
     private JButton rebuildSeedBtn;
 
     private LvnLevelsPanel() {
-        frame = new JFrame("LVN Levels");
+        frame = new JFrame("Levels");
         frame.setAlwaysOnTop(true);
         frame.setDefaultCloseOperation(WindowConstants.HIDE_ON_CLOSE);
 
@@ -144,11 +150,48 @@ public final class LvnLevelsPanel {
                 LvnLevelsState.setShowDop(showDop.isSelected(), "panel");
             }
         });
+        marketProfileBtn.setToolTipText(
+                "Show developing VPOC / VAH / VAL from DOP open. Profile still accumulates while OFF.");
+        marketProfileBtn.addActionListener(e -> {
+            if (!syncing) {
+                boolean on = marketProfileBtn.isSelected();
+                LvnLevelsState.setMarketProfileEnabled(on, "panel");
+                syncMarketProfileButton(on);
+            }
+        });
+        showVpoc.addActionListener(e -> {
+            if (!syncing) {
+                LvnLevelsState.setShowVpoc(showVpoc.isSelected(), "panel");
+            }
+        });
+        showVah.addActionListener(e -> {
+            if (!syncing) {
+                LvnLevelsState.setShowVah(showVah.isSelected(), "panel");
+            }
+        });
+        showVal.addActionListener(e -> {
+            if (!syncing) {
+                LvnLevelsState.setShowVal(showVal.isSelected(), "panel");
+            }
+        });
+        valueAreaPct.addChangeListener(e -> {
+            if (!syncing) {
+                LvnLevelsState.setValueAreaPct(
+                        ((Number) valueAreaPct.getValue()).doubleValue(), "panel");
+            }
+        });
+        top.add(marketProfileBtn);
+        top.add(showVpoc);
+        top.add(showVah);
+        top.add(showVal);
+        top.add(new JLabel("VA %"));
+        top.add(valueAreaPct);
+        syncMarketProfileControls(false);
 
-        JPanel esBox = marketBox("ES (attach LVN Levels on ES chart)",
+        JPanel esBox = marketBox("ES (attach Levels on ES chart)",
                 esWindow, esSens, esJoin, esDopOpen,
                 esLvnUp, esLvnDn, esHvnUp, esHvnDn, esRefresh);
-        JPanel nqBox = marketBox("NQ (attach LVN Levels on NQ chart — same console)",
+        JPanel nqBox = marketBox("NQ (attach Levels on NQ chart — same console)",
                 nqWindow, nqSens, nqJoin, nqDopOpen,
                 nqLvnUp, nqLvnDn, nqHvnUp, nqHvnDn, nqRefresh);
         JPanel alertBox = alertBox();
@@ -178,9 +221,8 @@ public final class LvnLevelsPanel {
                 "Last approach alert reason. Correlated example: ES cross DOP, NQ approach LVN");
 
         JLabel hint = new JLabel(
-                "Colors: LVN cyan | HVN lime | DOP dark blue.  Join UK = seed handoff HH:mm.  "
-                        + "Correlated = same-direction S/R: one market enters Approach, the other is "
-                        + "within Prox on the same side, both still within Prox and not through the level.");
+                "Colors: LVN cyan | HVN lime | DOP dark blue | VPOC gold | VAH/VAL magenta.  "
+                        + "MP develops from DOP open.  Correlated = same-direction S/R (Approach + Prox).");
         hint.setAlignmentX(0f);
 
         root.add(seedBannerLabel);
@@ -418,6 +460,18 @@ public final class LvnLevelsPanel {
         }));
     }
 
+    private void syncMarketProfileButton(boolean on) {
+        marketProfileBtn.setSelected(on);
+        marketProfileBtn.setText(on ? "Market Profile: ON" : "Market Profile: OFF");
+    }
+
+    private void syncMarketProfileControls(boolean on) {
+        showVpoc.setEnabled(on);
+        showVah.setEnabled(on);
+        showVal.setEnabled(on);
+        valueAreaPct.setEnabled(on);
+    }
+
     private void applyAlert() {
         LvnApproachAlert.Config c = new LvnApproachAlert.Config();
         c.enabled = alertEnabled.isSelected();
@@ -480,6 +534,12 @@ public final class LvnLevelsPanel {
                 showLvn.setSelected(snap.showLvn);
                 showHvn.setSelected(snap.showHvn);
                 showDop.setSelected(snap.showDop);
+                syncMarketProfileButton(snap.marketProfileEnabled);
+                showVpoc.setSelected(snap.showVpoc);
+                showVah.setSelected(snap.showVah);
+                showVal.setSelected(snap.showVal);
+                valueAreaPct.setValue(snap.valueAreaPct);
+                syncMarketProfileControls(snap.marketProfileEnabled);
                 if (snap.alert != null) {
                     alertEnabled.setSelected(snap.alert.enabled);
                     alertMode.setSelectedItem(modeToUi(snap.alert.mode));
@@ -552,6 +612,7 @@ public final class LvnLevelsPanel {
     }
 
     public static void showPanel() {
+        // Seed bind/rebuild is async; do not run it on Bookmap's attach thread.
         LvnLevelsState.ensureDefaultSeedsLoaded();
         SwingUtilities.invokeLater(() -> {
             if (instance == null) {
