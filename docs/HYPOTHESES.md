@@ -1125,6 +1125,97 @@ months. Distinct from H44 (large-print both-burst, rejected) and H45
 **Result:** registered 2026-10-30 — runner deferred until virgin months;
 do not dig P&L on the count-peek sample.
 
+## H83 — Raw MAT keep-gate when NQ near as-of LVN
+
+Ungated (raw) MAT stamps fire only when NQ's last print is within ±5 pts
+of the nearest as-of IRT LVN2/LVN3 (causal). Distance-only location
+filter — distinct from H38 (LVN approach → fade → MAT confirm, rejected).
+Far twin = dist > 5. Frozen trend+VWAP under the same keep-gate is
+descriptive only.
+
+**Test:** EXP-0092 (`research/experiments/EXP-0092.yaml`).
+**Result (EXP-0092): reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune).** See `results/EXP-0092/`.
+
+## H84 — Raw MAT keep-gate when ES near as-of LVN
+
+Same as H83 but ES last print within ±2 pts of as-of ES IRT LVN2/LVN3.
+Independent of H83; no band sweep. Distinct from H38 and from
+cross-instrument NQ-fade∩ES-near gates on LVN fade books.
+
+**Test:** EXP-0093 (`research/experiments/EXP-0093.yaml`).
+**Result (EXP-0093): reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune).** See `results/EXP-0093/`.
+
+## H85 — Raw MAT keep-gate when NQ near HVN (toward vs away)
+
+Ungated MAT stamps kept only when NQ is within ±5 pts of the nearest
+as-of IRT HVN1/2/3. **Toward** = MAT side points at that HVN (long ∧
+HVN above; short ∧ HVN below); **away** = opposite. Primary = toward;
+twin = away. Distinct from H83 (LVN vicinity) and H14 (leave-value).
+
+**Test:** EXP-0094 (`research/experiments/EXP-0094.yaml`).
+**Result (EXP-0094): reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune).** See `results/EXP-0094/`. Corrected retest 2026-10-31: first run omitted the rollover basis shift on HVN1/2/3 (only LVN/close were shifted), so toward/away fired only post-Sep-roll (147 signals); after the fix toward = 849 and Stage 1 `lift_60` fails (+0.91 < +1.0). The first run's Stage 1 pass / Stage 2 fail is superseded.
+
+## H86 — Raw MAT keep-gate when ES near HVN (toward vs away)
+
+Same as H85 with ES ±2 pts of as-of ES HVN1/2/3. Independent of H85.
+
+**Test:** EXP-0095 (`research/experiments/EXP-0095.yaml`).
+**Result (EXP-0095): reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune).** See `results/EXP-0095/`. Corrected HVN basis-shift retest 2026-10-31 (toward = 1,779 vs 334 pre-fix) still fails Stage 1 (`lift_300` fails).
+
+---
+
+## H87 — Raw MAT HVN magnet + dVPOC clearance dig (NQ)
+
+Ungated MAT kept when NQ within ±5 of nearest as-of HVN1/2/3, MAT toward
+that HVN, and |px − as-of dVPOC| ≥ poc_min. Dig poc_min ∈ {10, 15, 20}.
+Primary = toward_poc15; twin = toward_near (no POC filter). Neighbours
+descriptive only. Distinct from rejected H85.
+
+**Test:** EXP-0096 (
+esearch/experiments/EXP-0096.yaml).
+**Result (EXP-0096): reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune; neighbours not promoted).** See `results/EXP-0096/`.
+
+## H88 — Raw MAT HVN magnet + dVPOC clearance dig (ES)
+
+Same as H87 with ES ±2 and ES dVPOC. Independent of H87.
+
+**Test:** EXP-0097 (
+esearch/experiments/EXP-0097.yaml).
+**Result (EXP-0097): reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune; neighbours not promoted).** See `results/EXP-0097/`.
+
+---
+
+## H89 — Raw MAT HVN approach-path dig (NQ)
+
+Ungated MAT kept when NQ within ±5 of nearest as-of HVN1/2/3, MAT toward
+that HVN, and |px−HVN| decreased over lookback by ≥1.0 pt (path into HVN).
+Dig lookback ∈ {30s, 60s, 120s}. Primary = toward_ap60; twin = toward_near.
+Neighbours descriptive only. Orthogonal to rejected H85/H87.
+
+**Test:** EXP-0098 (
+esearch/experiments/EXP-0098.yaml).
+**Result (EXP-0098): reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune; neighbours not promoted).** See `results/EXP-0098/`.
+
+## H90 — Raw MAT HVN approach-path dig (ES)
+
+Same as H89 with ES ±2 and min approach 0.5 pt. Independent of H89.
+
+**Test:** EXP-0099 (
+esearch/experiments/EXP-0099.yaml).
+**Result (EXP-0099): reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune; neighbours not promoted).** See `results/EXP-0099/`.
+
+---
+
+## H91 — Raw MAT keep when both ES+NQ above/below dVPOC+DOP
+
+Long only if NQ and ES last prints are both ≥ as-of dVPOC and ≥ as-of DOP;
+short only if both ≤ both levels. Dig host gates {none, vwap, trend=1,
+vwap+trend}. Primary = align × none; twin = ungated base.
+
+**Test:** EXP-0100 (
+esearch/experiments/EXP-0100.yaml).
+**Result (EXP-0100): reject / park — Stage 1 event-study fail (no promote; host dig descriptive only).** See `results/EXP-0100/`.
+
 ---
 
 ## Unregistered candidates (no H-number yet)

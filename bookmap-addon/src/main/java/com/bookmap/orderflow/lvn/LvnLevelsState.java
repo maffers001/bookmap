@@ -1,5 +1,9 @@
 package com.bookmap.orderflow.lvn;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -25,12 +29,39 @@ import velox.api.layer1.common.Log;
  */
 public final class LvnLevelsState {
 
+    /**
+     * Default IRT seed parent dir ({@code vap_seed_ES} / {@code vap_seed_NQ}).
+     * Override with env {@code LVN_SEED_ROOT}.
+     */
+    public static final Path DEFAULT_SEED_ROOT = defaultSeedRoot();
+    /** Default Join / seed --through (UK HH:mm). */
+    public static final String DEFAULT_JOIN_UK_HM = "14:30";
+    public static final String DEFAULT_DOP_OPEN_UK_HM = "14:30";
+
+    private static Path defaultSeedRoot() {
+        String env = System.getenv("LVN_SEED_ROOT");
+        if (env != null && !env.isBlank()) {
+            return Path.of(env.trim());
+        }
+        return Path.of("C:/Work/Mat/bookmap/data/irt");
+    }
+
+    /** Repo root containing {@code research.irt_lvn} (parent of {@code data/irt}). */
+    public static Path repoRoot() {
+        Path irt = DEFAULT_SEED_ROOT;
+        Path data = irt.getParent();
+        if (data != null && data.getParent() != null) {
+            return data.getParent();
+        }
+        return Path.of("C:/Work/Mat/bookmap");
+    }
+
     public static final class MarketKnobs {
         public int windowDays;
         public int sensitivity;
         /** UK HH:MM join / seed through. */
-        public String joinUkHm = "13:55";
-        public String dopOpenUkHm = "14:30";
+        public String joinUkHm = DEFAULT_JOIN_UK_HM;
+        public String dopOpenUkHm = DEFAULT_DOP_OPEN_UK_HM;
         public int lvnAbove = 3;
         public int lvnBelow = 3;
         public int hvnAbove = 3;
@@ -122,15 +153,20 @@ public final class LvnLevelsState {
         public final Path nqSeedPath;
         public final String statusDetail;
         public final String lastEvent;
+        /** Last approach-alert reason for the console footer (empty until first fire). */
+        public final String alertFooter;
         public final LocalDate sessionDate;
         public final LvnApproachAlert.Config alert;
+        /** Non-blank when a seed is missing, failed to load, or does not cover the session day. */
+        public final String seedBanner;
 
         Snapshot(MarketLevels es, MarketLevels nq,
                  MarketKnobs esKnobs, MarketKnobs nqKnobs,
                  boolean showLvn, boolean showHvn, boolean showDop,
                  Path esSeedPath, Path nqSeedPath,
-                 String statusDetail, String lastEvent, LocalDate sessionDate,
-                 LvnApproachAlert.Config alert) {
+                 String statusDetail, String lastEvent, String alertFooter,
+                 LocalDate sessionDate,
+                 LvnApproachAlert.Config alert, String seedBanner) {
             this.es = es;
             this.nq = nq;
             this.esKnobs = esKnobs;
@@ -142,8 +178,10 @@ public final class LvnLevelsState {
             this.nqSeedPath = nqSeedPath;
             this.statusDetail = statusDetail;
             this.lastEvent = lastEvent;
+            this.alertFooter = alertFooter == null ? "" : alertFooter;
             this.sessionDate = sessionDate;
             this.alert = alert;
+            this.seedBanner = seedBanner == null ? "" : seedBanner;
         }
     }
 
@@ -159,13 +197,20 @@ public final class LvnLevelsState {
 
     private static volatile Path esSeedPath;
     private static volatile Path nqSeedPath;
+    private static volatile LocalDateTime esSeedThrough;
+    private static volatile LocalDateTime nqSeedThrough;
+    private static volatile String esSeedIssue = "";
+    private static volatile String nqSeedIssue = "";
+    private static volatile String seedBanner = "";
     private static volatile MarketLevels esLevels;
     private static volatile MarketLevels nqLevels;
     private static volatile double esDop = Double.NaN;
     private static volatile double nqDop = Double.NaN;
     private static volatile LocalDate sessionDateUk;
-    private static volatile String statusDetail = "Load VAP seed (ES / NQ)";
+    private static volatile String statusDetail = "Auto-loading VAP seeds (ES / NQ)…";
     private static volatile String lastEvent = "";
+    /** Human reason for the last approach alert — console footer only. */
+    private static volatile String alertFooter = "";
     private static volatile LvnStackFile.Stack esStack;
     private static volatile LvnStackFile.Stack nqStack;
 
@@ -173,10 +218,19 @@ public final class LvnLevelsState {
     private static final List<Consumer<Snapshot>> LISTENERS = new CopyOnWriteArrayList<>();
     private static final List<Runnable> APPLY_HOOKS = new CopyOnWriteArrayList<>();
     private static final LvnApproachAlert APPROACH_ALERT = new LvnApproachAlert();
+    private static final AtomicBoolean AUTO_SEED_TRIED = new AtomicBoolean(false);
+    private static final AtomicBoolean SEED_REBUILD_BUSY = new AtomicBoolean(false);
+    /** Another rebuild was requested while one was running — run again when free. */
+    private static final AtomicBoolean SEED_REBUILD_AGAIN = new AtomicBoolean(false);
+    /** Last session day for which {@link #rebuildSeedsForSession} completed successfully. */
+    private static volatile LocalDate completedSeedRebuildDay;
 
     static {
         APPROACH_ALERT.setListener(ev -> {
             lastEvent = ev.message;
+            if (ev.reason != null && !ev.reason.isEmpty()) {
+                alertFooter = ev.reason;
+            }
             fire();
         });
     }
@@ -232,8 +286,10 @@ public final class LvnLevelsState {
         MarketKnobs dest = "NQ".equalsIgnoreCase(market) ? NQ_KNOBS : ES_KNOBS;
         dest.windowDays = Math.max(1, Math.min(400, in.windowDays));
         dest.sensitivity = Math.max(1, Math.min(500, in.sensitivity));
-        dest.joinUkHm = in.joinUkHm == null || in.joinUkHm.isBlank() ? "13:55" : in.joinUkHm.trim();
-        dest.dopOpenUkHm = in.dopOpenUkHm == null || in.dopOpenUkHm.isBlank() ? "14:30" : in.dopOpenUkHm.trim();
+        dest.joinUkHm = in.joinUkHm == null || in.joinUkHm.isBlank()
+                ? DEFAULT_JOIN_UK_HM : in.joinUkHm.trim();
+        dest.dopOpenUkHm = in.dopOpenUkHm == null || in.dopOpenUkHm.isBlank()
+                ? DEFAULT_DOP_OPEN_UK_HM : in.dopOpenUkHm.trim();
         int max = LvnStackFile.MAX_DISPLAY_EACH_SIDE;
         dest.lvnAbove = clamp(in.lvnAbove, 0, max);
         dest.lvnBelow = clamp(in.lvnBelow, 0, max);
@@ -257,6 +313,243 @@ public final class LvnLevelsState {
         runApplyHooks();
     }
 
+    /**
+     * Once per process: bind any existing {@code vap_seed_ES} / {@code vap_seed_NQ}
+     * under {@link #DEFAULT_SEED_ROOT}, then kick an automatic session seed rebuild
+     * (same as the console button). Missing seeds show on the banner until rebuild
+     * finishes.
+     */
+    public static void ensureDefaultSeedsLoaded() {
+        if (!AUTO_SEED_TRIED.compareAndSet(false, true)) {
+            refreshSeedBanner();
+            statusDetail = refreshStatus();
+            fire();
+            return;
+        }
+        tryAutoBind("ES");
+        tryAutoBind("NQ");
+        refreshSeedBanner();
+        statusDetail = refreshStatus();
+        fire();
+        requestSessionSeedRebuild("attach");
+    }
+
+    /**
+     * Rebuild ES+NQ VAP seeds for {@link #sessionDate()} through the ES Join UK time.
+     * No-ops if a successful rebuild already completed for that day (unless a rebuild
+     * is already running — then a follow-up is queued). Safe from EDT / feed threads.
+     */
+    public static void requestSessionSeedRebuild(String via) {
+        LocalDate day = sessionDate();
+        if (day.equals(completedSeedRebuildDay) && !SEED_REBUILD_BUSY.get()) {
+            Log.info("LVN Levels seed rebuild skip day=" + day + " via=" + via
+                    + " (already rebuilt)");
+            return;
+        }
+        String through = ES_KNOBS.joinUkHm;
+        if (through == null || through.isBlank()) {
+            through = DEFAULT_JOIN_UK_HM;
+        }
+        Log.info("LVN Levels seed rebuild request day=" + day + " through=" + through
+                + " via=" + via);
+        rebuildSeedsForSession(through, null);
+    }
+
+    private static void tryAutoBind(String market) {
+        if (seedPathFor(market) != null) {
+            return;
+        }
+        Path dir = DEFAULT_SEED_ROOT.resolve("vap_seed_" + market);
+        if (!Files.isDirectory(dir) || !Files.isRegularFile(dir.resolve("meta.json"))) {
+            setSeedIssue(market, "cannot load seed — missing " + dir
+                    + " (build with build_vap_seed or use Load " + market + " seed…)");
+            Log.info("LVN Levels auto-seed missing " + market + " path=" + dir);
+            return;
+        }
+        setSeedIssue(market, "");
+        bindSeed(market, dir, "auto");
+    }
+
+    public static boolean seedRebuildBusy() {
+        return SEED_REBUILD_BUSY.get();
+    }
+
+    /**
+     * Run {@code build_vap_seed} for the current UK session day + Join time, then
+     * reload ES/NQ seeds. Safe to call from the EDT — work runs on a daemon thread.
+     *
+     * @param throughUkHm Join / seed cut HH:mm (blank → {@link #DEFAULT_JOIN_UK_HM})
+     * @param onUi optional UI callback (success/failure message), invoked on EDT by caller if needed
+     */
+    public static void rebuildSeedsForSession(String throughUkHm, Consumer<String> onUi) {
+        if (!SEED_REBUILD_BUSY.compareAndSet(false, true)) {
+            SEED_REBUILD_AGAIN.set(true);
+            if (onUi != null) {
+                onUi.accept("Seed rebuild already running — queued another pass");
+            }
+            return;
+        }
+        String through = throughUkHm == null || throughUkHm.isBlank()
+                ? DEFAULT_JOIN_UK_HM : throughUkHm.trim();
+        LocalDate day = sessionDate();
+        lastEvent = "Rebuilding seeds for " + day + " through " + through + "…";
+        fire();
+        Thread t = new Thread(() -> {
+            String msg;
+            try {
+                msg = runBuildVapSeed(day, through);
+                Path esDir = DEFAULT_SEED_ROOT.resolve("vap_seed_ES");
+                Path nqDir = DEFAULT_SEED_ROOT.resolve("vap_seed_NQ");
+                bindSeedLoaded("ES", esDir, "rebuild");
+                bindSeedLoaded("NQ", nqDir, "rebuild");
+                completedSeedRebuildDay = day;
+                lastEvent = "Seeds rebuilt for " + day + " through " + through;
+                Log.info("LVN Levels " + lastEvent + " | " + msg);
+                if (onUi != null) {
+                    onUi.accept(lastEvent);
+                }
+            } catch (Exception ex) {
+                msg = "Seed rebuild failed: " + shorten(ex.getMessage(), 240);
+                Log.info("LVN Levels seed rebuild failed: " + ex.getMessage());
+                lastEvent = msg;
+                setSeedIssue("ES", msg);
+                setSeedIssue("NQ", msg);
+                refreshSeedBanner();
+                fire();
+                if (onUi != null) {
+                    onUi.accept(msg);
+                }
+            } finally {
+                boolean again = SEED_REBUILD_AGAIN.compareAndSet(true, false);
+                SEED_REBUILD_BUSY.set(false);
+                fire();
+                if (again) {
+                    // Session day may have arrived (replay) while the first pass ran.
+                    String againThrough = ES_KNOBS.joinUkHm;
+                    if (againThrough == null || againThrough.isBlank()) {
+                        againThrough = DEFAULT_JOIN_UK_HM;
+                    }
+                    rebuildSeedsForSession(againThrough, onUi);
+                }
+            }
+        }, "LvnSeedRebuild");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static String runBuildVapSeed(LocalDate day, String throughHm) throws Exception {
+        Path repo = repoRoot();
+        Path venvPy = repo.resolve(".venv").resolve("Scripts").resolve("python.exe");
+        String py = Files.isRegularFile(venvPy) ? venvPy.toString() : "python";
+        List<String> cmd = new ArrayList<>();
+        cmd.add(py);
+        cmd.add("-m");
+        cmd.add("research.irt_lvn.build_vap_seed");
+        cmd.add("--market");
+        cmd.add("both");
+        cmd.add("--day");
+        cmd.add(day.toString());
+        cmd.add("--through");
+        cmd.add(throughHm);
+        cmd.add("--out");
+        cmd.add(DEFAULT_SEED_ROOT.toAbsolutePath().toString());
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.directory(repo.toFile());
+        pb.redirectErrorStream(true);
+        // Avoid Windows cp1252 crashing on non-ASCII print from Python.
+        pb.environment().put("PYTHONIOENCODING", "utf-8");
+        pb.environment().put("PYTHONUTF8", "1");
+        Log.info("LVN Levels seed rebuild: " + String.join(" ", cmd) + " cwd=" + repo);
+        Process proc = pb.start();
+        StringBuilder out = new StringBuilder();
+        try (BufferedReader br = new BufferedReader(
+                new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                out.append(line).append('\n');
+                Log.info("build_vap_seed: " + line);
+            }
+        }
+        int code = proc.waitFor();
+        if (code != 0) {
+            throw new IllegalStateException("build_vap_seed exit " + code
+                    + " — " + shorten(out.toString(), 400));
+        }
+        return out.toString().trim();
+    }
+
+    private static String shorten(String s, int max) {
+        if (s == null) {
+            return "";
+        }
+        String t = s.trim().replace('\n', ' ');
+        return t.length() <= max ? t : t.substring(0, max) + "…";
+    }
+
+    private static Path seedPathFor(String market) {
+        return "NQ".equalsIgnoreCase(market) ? nqSeedPath : esSeedPath;
+    }
+
+    private static void setSeedIssue(String market, String issue) {
+        String msg = issue == null ? "" : issue;
+        if ("NQ".equalsIgnoreCase(market)) {
+            nqSeedIssue = msg;
+        } else {
+            esSeedIssue = msg;
+        }
+    }
+
+    private static void setSeedThrough(String market, LocalDateTime through) {
+        if ("NQ".equalsIgnoreCase(market)) {
+            nqSeedThrough = through;
+        } else {
+            esSeedThrough = through;
+        }
+    }
+
+    /** Recompute banner from load issues + session vs seed-through coverage. */
+    private static void refreshSeedBanner() {
+        List<String> parts = new ArrayList<>(4);
+        appendSeedBannerPart(parts, "ES", esSeedPath, esSeedThrough, esSeedIssue, esLevels);
+        appendSeedBannerPart(parts, "NQ", nqSeedPath, nqSeedThrough, nqSeedIssue, nqLevels);
+        seedBanner = String.join("   |   ", parts);
+    }
+
+    private static void appendSeedBannerPart(
+            List<String> parts,
+            String mkt,
+            Path path,
+            LocalDateTime through,
+            String issue,
+            MarketLevels lv) {
+        if (issue != null && !issue.isEmpty()) {
+            parts.add(mkt + ": " + issue);
+            return;
+        }
+        if (path == null) {
+            // Still loading or not attempted — no banner noise.
+            return;
+        }
+        // Only judge coverage after the feed has set a UK session day (replay/live).
+        LocalDate session = sessionDateUk;
+        if (session != null && through != null && session.isAfter(through.toLocalDate())) {
+            parts.add(mkt + ": seed through " + through.toLocalDate()
+                    + " does not cover session " + session
+                    + " — rebuild seed --day " + session);
+            return;
+        }
+        if (lv != null && lv.warning != null && !lv.warning.isEmpty()) {
+            String w = lv.warning;
+            boolean notable = w.contains("STALE")
+                    || w.toLowerCase(Locale.ROOT).contains("stale")
+                    || w.contains("no minute seed")
+                    || w.contains("full daily");
+            if (notable) {
+                parts.add(mkt + ": " + w);
+            }
+        }
+    }
+
     /** Parse the seed file off the calling (EDT) thread, then bind. */
     public static void bindSeed(String market, Path path, String via) {
         Thread t = new Thread(() -> bindSeedLoaded(market, path, via), "LvnSeedLoad-" + market);
@@ -265,15 +558,18 @@ public final class LvnLevelsState {
     }
 
     private static synchronized void bindSeedLoaded(String market, Path path, String via) {
+        String mkt = market == null ? "" : market.trim().toUpperCase(Locale.ROOT);
         try {
             LvnVapSeedFile.Seed seed = LvnVapSeedFile.load(path);
-            String mkt = market == null ? "" : market.trim().toUpperCase(Locale.ROOT);
             if (seed.meta.market != null && !seed.meta.market.isBlank()
                     && !seed.meta.market.equalsIgnoreCase(mkt)) {
                 lastEvent = "Seed rejected: file is " + seed.meta.market
                         + " seed, not " + mkt + " (" + seed.root.getFileName() + ")";
+                setSeedIssue(mkt, "wrong market in seed (" + seed.meta.market
+                        + ") — expected " + mkt);
                 Log.info("LVN Levels " + lastEvent);
                 statusDetail = refreshStatus();
+                refreshSeedBanner();
                 fire();
                 return;
             }
@@ -292,17 +588,22 @@ public final class LvnLevelsState {
             } else {
                 esSeedPath = seed.root;
             }
+            setSeedThrough(mkt, seed.meta.throughUk);
+            setSeedIssue(mkt, "");
             // Do NOT detect nodes here — Bookmap "Loading events" shares this thread.
             lastEvent = market + " seed loaded " + seed.root.getFileName()
                     + " through=" + knobs.joinUkHm + " (nodes on realtime/Apply)";
             Log.info("LVN Levels seed bound " + market + " via=" + via
                     + " root=" + seed.root + " through=" + seed.meta.throughUk);
             statusDetail = refreshStatus();
+            refreshSeedBanner();
             fire();
             runApplyHooks();
         } catch (Exception e) {
             Log.info("LVN Levels seed bind failed: " + e.getMessage());
             lastEvent = "Seed load failed: " + e.getMessage();
+            setSeedIssue(mkt.isEmpty() ? "ES" : mkt, "cannot load seed — " + e.getMessage());
+            refreshSeedBanner();
             fire();
         }
     }
@@ -436,11 +737,11 @@ public final class LvnLevelsState {
         APPROACH_ALERT.applyConfig(in);
         LvnApproachAlert.Config c = APPROACH_ALERT.config();
         lastEvent = String.format(Locale.US,
-                "Alert %s mode=%s ES approach=%.1f pullback=%.1f | NQ approach=%.1f pullback=%.1f cool=%ds corrWin=%ds LVN=%s DOP=%s sound=%s (%s)",
+                "Alert %s mode=%s ES approach=%.1f pullback=%.1f prox=%.1f | NQ approach=%.1f pullback=%.1f prox=%.1f cool=%ds LVN=%s DOP=%s sound=%s (%s)",
                 c.enabled ? "ON" : "OFF", c.mode,
-                c.esApproachPts, c.esPullbackPts, c.nqApproachPts, c.nqPullbackPts,
-                c.cooldownSec, c.corrWindowSec,
-                c.watchLvn, c.watchDop, c.sound, via);
+                c.esApproachPts, c.esPullbackPts, c.esCorrProxPts,
+                c.nqApproachPts, c.nqPullbackPts, c.nqCorrProxPts,
+                c.cooldownSec, c.watchLvn, c.watchDop, c.sound, via);
         fire();
     }
 
@@ -471,6 +772,7 @@ public final class LvnLevelsState {
             ES_VAP.clearLive();
             NQ_VAP.clearLive();
             APPROACH_ALERT.resetSession();
+            alertFooter = "";
         }
         if (ES_VAP.hasSeed()) {
             ES_VAP.setJoinThrough(LocalDateTime.of(day, LvnLiveVap.parseUkHm(ES_KNOBS.joinUkHm)));
@@ -480,7 +782,10 @@ public final class LvnLevelsState {
         }
         lastEvent = "Session date " + day;
         statusDetail = refreshStatus();
+        refreshSeedBanner();
         fire();
+        // Rebuild for the feed's UK day (replay may differ from wall-clock used at attach).
+        requestSessionSeedRebuild(prev == null ? "session" : "session-roll");
     }
 
     /**
@@ -540,6 +845,7 @@ public final class LvnLevelsState {
         statusDetail = refreshStatus();
         lastEvent = String.format(Locale.US, "%s nodes LVN=%d HVN↑%d↓%d window=%dd S=%d",
                 market, allLvns.size(), hvnAbove.size(), hvnBelow.size(), windowUsed, sens);
+        refreshSeedBanner();
         fire();
         return lv;
     }
@@ -548,8 +854,12 @@ public final class LvnLevelsState {
         return new Snapshot(
                 esLevels, nqLevels, ES_KNOBS.copy(), NQ_KNOBS.copy(),
                 SHOW_LVN.get(), SHOW_HVN.get(), SHOW_DOP.get(),
-                esSeedPath, nqSeedPath, statusDetail, lastEvent, sessionDate(),
-                APPROACH_ALERT.config());
+                esSeedPath, nqSeedPath, statusDetail, lastEvent, alertFooter, sessionDate(),
+                APPROACH_ALERT.config(), seedBanner);
+    }
+
+    public static String seedBanner() {
+        return seedBanner == null ? "" : seedBanner;
     }
 
     private static String refreshStatus() {

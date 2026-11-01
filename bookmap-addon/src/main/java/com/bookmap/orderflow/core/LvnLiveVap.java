@@ -215,6 +215,20 @@ public final class LvnLiveVap {
         int want = Math.max(1, windowDays);
         LocalDate startDay = endDay.minusDays(want - 1L);
 
+        // Through-day (or any day with minute seed) uses minutes + live, not full daily.
+        // Replaying an earlier session with a newer seed often has that day in daily.csv
+        // but no minutes — include the daily map so we do not drop the whole session.
+        boolean endDayHasMinutes = false;
+        if (seed != null) {
+            for (LvnVapSeedFile.MinuteBucket mb : seed.minutes) {
+                if (mb.minute.toLocalDate().equals(endDay)) {
+                    endDayHasMinutes = true;
+                    break;
+                }
+            }
+        }
+        boolean useEndDayDaily = seed != null && !endDayHasMinutes && seed.daily.containsKey(endDay);
+
         int availableDays = 0;
         if (seed != null) {
             for (Map.Entry<LocalDate, Map<Integer, Double>> e : seed.daily.entrySet()) {
@@ -222,16 +236,15 @@ public final class LvnLiveVap {
                 if (d.isBefore(startDay) || d.isAfter(endDay)) {
                     continue;
                 }
-                // Whole days strictly before end day, or before through if end is through day
-                if (d.equals(endDay) && joinThrough != null
-                        && end.toLocalTime().equals(joinThrough.toLocalTime())
-                        && liveTradeCount == 0) {
-                    // end day covered by seed minutes instead
-                    continue;
-                }
                 if (d.equals(endDay)) {
-                    // End day volume comes from seed minutes + live, not full daily
-                    continue;
+                    if (endDayHasMinutes) {
+                        // End day volume comes from seed minutes + live, not full daily
+                        continue;
+                    }
+                    if (!useEndDayDaily) {
+                        continue;
+                    }
+                    // fall through: include complete daily for session day
                 }
                 availableDays++;
                 addMap(vap, e.getValue());
@@ -245,16 +258,23 @@ public final class LvnLiveVap {
             }
         }
 
-        // Live minutes (+ open bucket)
-        List<LiveMinute> allLive = new ArrayList<>(liveMinutes);
-        if (currentMinute != null && !currentMap.isEmpty()) {
-            allLive.add(new LiveMinute(currentMinute, currentMap));
-        }
-        for (LiveMinute lm : allLive) {
-            if (lm.minute.isBefore(startDay.atStartOfDay()) || lm.minute.isAfter(end)) {
-                continue;
+        // Live minutes (+ open bucket). Skip when session day was taken from full
+        // daily (would double-count a completed day already in the seed).
+        if (!useEndDayDaily) {
+            List<LiveMinute> allLive = new ArrayList<>(liveMinutes);
+            if (currentMinute != null && !currentMap.isEmpty()) {
+                allLive.add(new LiveMinute(currentMinute, currentMap));
             }
-            addMap(vap, lm.vol);
+            for (LiveMinute lm : allLive) {
+                if (lm.minute.isBefore(startDay.atStartOfDay()) || lm.minute.isAfter(end)) {
+                    continue;
+                }
+                addMap(vap, lm.vol);
+            }
+        } else {
+            warning = "session " + endDay
+                    + " using full daily (no minute seed) — mid-session as-of is EOD-shaped; "
+                    + "rebuild seed --day " + endDay + " for true developing profile";
         }
 
         if (seed != null) {
@@ -271,7 +291,10 @@ public final class LvnLiveVap {
                 }
             }
             if (earliest != null && earliest.isAfter(startDay)) {
-                warning = "seed short: available from " + earliest + " (wanted " + startDay + ")";
+                if (!warning.isEmpty()) {
+                    warning += " | ";
+                }
+                warning += "seed short: available from " + earliest + " (wanted " + startDay + ")";
                 // clamp reported window
                 long have = java.time.temporal.ChronoUnit.DAYS.between(earliest, endDay) + 1;
                 want = (int) Math.min(want, Math.max(1, have));
@@ -327,7 +350,7 @@ public final class LvnLiveVap {
     /** UK minutes-of-day helper. */
     public static LocalTime parseUkHm(String hm) {
         if (hm == null || hm.isBlank()) {
-            return LocalTime.of(13, 55);
+            return LocalTime.of(14, 30);
         }
         String[] p = hm.trim().split(":");
         int h = Integer.parseInt(p[0]);

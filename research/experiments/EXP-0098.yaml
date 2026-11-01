@@ -1,0 +1,55 @@
+name: EXP-0098
+hypothesis: H89
+title: Raw MAT HVN approach-path dig (NQ)
+description: >
+  Ungated MAT kept when NQ is within ±5 of nearest as-of IRT HVN1/2/3,
+  MAT side points toward that HVN, and |px−HVN| decreased over a lookback
+  window by ≥1.0 pt (price path trending into the HVN). Dig lookback ∈
+  {30s, 60s, 120s}. Primary = toward_ap60; twin = toward_near (no path).
+  Neighbours descriptive only. Orthogonal to rejected H85/H87 (side /
+  POC only, no path).
+
+detector: mat_hvn_approach_nq  # runner: research/mat_context/exp_0098_mat_hvn_approach.py --market nq
+window: "UK 14:30-17:00"
+exclude_sessions: ["200626", "220626", "300326", "smoke_synthetic"]
+is_definition: DIG4_23d
+
+vicinity:
+  market: NQ
+  band_pts: 5.0
+  levels: [HVN1, HVN2, HVN3]
+  lookbacks_sec: [30, 60, 120]
+  min_approach_pts: 1.0
+  host: ungated
+
+arms: [base, toward_near, toward_ap30, toward_ap60, toward_ap120, away_ap60, null]
+primary: toward_ap60
+twin: toward_near
+
+raw_mat:
+  es_stamp: causal
+  gate: none
+  brackets: "vol k=1 floor=6 cap=30 symmetric"
+  commission_pts_rt: 0.25
+  slip_sensitivity_ticks: [0.0, 1.0, 2.0]
+  flat_only: true
+  signal_cooldown_sec: 5.0
+
+horizons_ms: [10000, 60000, 300000]
+point_targets_nq: [5, 10, 20]
+
+stages:
+  stage0: "truncation; park if toward_ap60 signals < 50 or resim trades < 20"
+  stage1: "toward_ap60 - toward_near >= +1.0pt @60s and >= +2.0pt @300s, beats null @60s"
+  stage2: "OOS net > 0, avg >= ungated base + 1.0, avg > twin, avg > random-keep p90, n_OOS >= 50"
+
+kill:
+  min_primary_signals: 50
+  min_resim_trades: 20
+  min_oos_trades_promote: 50
+  min_avg_lift_pts: 1.0
+  stage1_lift_60s_pts: 1.0
+  stage1_lift_300s_pts: 2.0
+
+placebo_seed: 98
+run: false

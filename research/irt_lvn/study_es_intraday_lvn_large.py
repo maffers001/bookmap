@@ -42,13 +42,32 @@ def _hhmm_ns(y: int, m: int, d: int, hhmm: str) -> int:
 
 
 def _shift_bars(bars, shift: float):
+    """Basis-shift every IRT price level (IRT -> Bookmap contract basis).
+
+    Quarterly rollover leaves a constant, tight (MAD ~0-2 pt) offset between
+    the IRT continuous/front export and the Bookmap tape (e.g. NQ +590 pts
+    in May-Jun 2026, +297.5 in Jul-mid-Sep, 0 after the Sep roll; ES +130 /
+    +67.75 / 0). `_session_irt` estimates that offset from IRT close vs
+    Bookmap last prints and must apply it to *all* price columns -- LVN,
+    DOP, dVPOC, close and HVN1/2/3. The previous version omitted HVN1/2/3,
+    which left HVNs on the un-shifted basis and made HVN-vicinity tests
+    fire only after the September roll (when the offset is ~0).
+    Zero is the missing-level sentinel and is preserved.
+    """
     if shift == 0.0:
         return bars
-    bars.lvn2 = bars.lvn2 + shift
-    bars.lvn3 = bars.lvn3 + shift
-    bars.dop = np.where(bars.dop != 0, bars.dop + shift, bars.dop)
-    bars.dvpoc = np.where(bars.dvpoc != 0, bars.dvpoc + shift, bars.dvpoc)
-    bars.close = np.where(bars.close != 0, bars.close + shift, bars.close)
+
+    def sh(a: np.ndarray) -> np.ndarray:
+        return np.where(a != 0, a + shift, a)
+
+    bars.lvn2 = sh(bars.lvn2)
+    bars.lvn3 = sh(bars.lvn3)
+    bars.hvn1 = sh(bars.hvn1)
+    bars.hvn2 = sh(bars.hvn2)
+    bars.hvn3 = sh(bars.hvn3)
+    bars.dop = sh(bars.dop)
+    bars.dvpoc = sh(bars.dvpoc)
+    bars.close = sh(bars.close)
     return bars
 
 

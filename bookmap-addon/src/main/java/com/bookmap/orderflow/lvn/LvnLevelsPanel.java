@@ -1,6 +1,6 @@
 package com.bookmap.orderflow.lvn;
 
-import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
@@ -40,13 +40,15 @@ public final class LvnLevelsPanel {
     private static LvnLevelsPanel instance;
 
     private final JFrame frame;
+    private final JLabel seedBannerLabel = new JLabel(" ");
     private final JTextArea statusArea = new JTextArea(3, 60);
     private final JLabel eventLabel = new JLabel(" ");
+    private final JLabel alertFooterLabel = new JLabel("Alert: (none yet)");
 
     private final JSpinner esWindow = new JSpinner(new SpinnerNumberModel(90, 1, 400, 1));
     private final JSpinner esSens = new JSpinner(new SpinnerNumberModel(15, 1, 500, 1));
-    private final JTextField esJoin = new JTextField("13:55", 6);
-    private final JTextField esDopOpen = new JTextField("14:30", 6);
+    private final JTextField esJoin = new JTextField(LvnLevelsState.DEFAULT_JOIN_UK_HM, 6);
+    private final JTextField esDopOpen = new JTextField(LvnLevelsState.DEFAULT_DOP_OPEN_UK_HM, 6);
     private final JSpinner esLvnUp = new JSpinner(new SpinnerNumberModel(3, 0, 6, 1));
     private final JSpinner esLvnDn = new JSpinner(new SpinnerNumberModel(3, 0, 6, 1));
     private final JSpinner esHvnUp = new JSpinner(new SpinnerNumberModel(3, 0, 6, 1));
@@ -55,8 +57,8 @@ public final class LvnLevelsPanel {
 
     private final JSpinner nqWindow = new JSpinner(new SpinnerNumberModel(30, 1, 400, 1));
     private final JSpinner nqSens = new JSpinner(new SpinnerNumberModel(100, 1, 500, 1));
-    private final JTextField nqJoin = new JTextField("13:55", 6);
-    private final JTextField nqDopOpen = new JTextField("14:30", 6);
+    private final JTextField nqJoin = new JTextField(LvnLevelsState.DEFAULT_JOIN_UK_HM, 6);
+    private final JTextField nqDopOpen = new JTextField(LvnLevelsState.DEFAULT_DOP_OPEN_UK_HM, 6);
     private final JSpinner nqLvnUp = new JSpinner(new SpinnerNumberModel(3, 0, 6, 1));
     private final JSpinner nqLvnDn = new JSpinner(new SpinnerNumberModel(3, 0, 6, 1));
     private final JSpinner nqHvnUp = new JSpinner(new SpinnerNumberModel(3, 0, 6, 1));
@@ -76,14 +78,16 @@ public final class LvnLevelsPanel {
     private final JSpinner alertNqApproach = new JSpinner(new SpinnerNumberModel(20.0, 0.25, 500.0, 1.0));
     private final JSpinner alertNqPullback = new JSpinner(new SpinnerNumberModel(10.0, 0.0, 500.0, 1.0));
     private final JSpinner alertCooldown = new JSpinner(new SpinnerNumberModel(60, 0, 3600, 5));
-    private final JSpinner alertCorrWin = new JSpinner(new SpinnerNumberModel(30, 1, 600, 1));
+    private final JSpinner alertEsProx = new JSpinner(new SpinnerNumberModel(5.0, 0.25, 200.0, 0.25));
+    private final JSpinner alertNqProx = new JSpinner(new SpinnerNumberModel(20.0, 0.25, 500.0, 1.0));
     private final JCheckBox alertWatchLvn = new JCheckBox("LVN", true);
     private final JCheckBox alertWatchDop = new JCheckBox("DOP", true);
     private final JCheckBox alertSound = new JCheckBox("Sound", true);
 
-    private File lastDir = new File("C:\\Work\\Mat\\bookmap\\data\\irt");
+    private File lastDir = LvnLevelsState.DEFAULT_SEED_ROOT.toFile();
     private final Consumer<LvnLevelsState.Snapshot> listener = this::refreshUi;
     private boolean syncing;
+    private JButton rebuildSeedBtn;
 
     private LvnLevelsPanel() {
         frame = new JFrame("LVN Levels");
@@ -94,19 +98,33 @@ public final class LvnLevelsPanel {
         root.setLayout(new BoxLayout(root, BoxLayout.Y_AXIS));
         root.setBorder(new EmptyBorder(8, 10, 8, 10));
 
+        seedBannerLabel.setOpaque(true);
+        seedBannerLabel.setBackground(new Color(160, 32, 32));
+        seedBannerLabel.setForeground(Color.WHITE);
+        seedBannerLabel.setFont(seedBannerLabel.getFont().deriveFont(Font.BOLD, 12f));
+        seedBannerLabel.setBorder(new EmptyBorder(8, 10, 8, 10));
+        seedBannerLabel.setAlignmentX(0f);
+        seedBannerLabel.setVisible(false);
+
         JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
         JButton loadEs = new JButton("Load ES seed...");
         JButton loadNq = new JButton("Load NQ seed...");
         JButton applyEs = new JButton("Apply ES");
         JButton applyNq = new JButton("Apply NQ");
+        rebuildSeedBtn = new JButton("Rebuild seed for session");
+        rebuildSeedBtn.setToolTipText(
+                "Also runs automatically when the add-on is added. "
+                        + "Re-run build_vap_seed for the UK session day using Join UK time, then reload ES+NQ");
         loadEs.addActionListener(e -> chooseSeed("ES"));
         loadNq.addActionListener(e -> chooseSeed("NQ"));
         applyEs.addActionListener(e -> apply("ES"));
         applyNq.addActionListener(e -> apply("NQ"));
+        rebuildSeedBtn.addActionListener(e -> rebuildSeedsForSession());
         top.add(loadEs);
         top.add(loadNq);
         top.add(applyEs);
         top.add(applyNq);
+        top.add(rebuildSeedBtn);
         top.add(showLvn);
         top.add(showHvn);
         top.add(showDop);
@@ -139,7 +157,8 @@ public final class LvnLevelsPanel {
         statusArea.setLineWrap(true);
         statusArea.setWrapStyleWord(true);
         statusArea.setFont(statusArea.getFont().deriveFont(Font.PLAIN, 12f));
-        statusArea.setText("Load VAP seed (ES / NQ). Attach the indicator on each chart you want lines on.");
+        statusArea.setText("Auto-loading vap_seed_ES / vap_seed_NQ from "
+                + LvnLevelsState.DEFAULT_SEED_ROOT + ". Attach on each chart for lines.");
         JScrollPane statusScroll = new JScrollPane(statusArea);
         statusScroll.setPreferredSize(new Dimension(820, 72));
         statusScroll.setAlignmentX(0f);
@@ -147,11 +166,25 @@ public final class LvnLevelsPanel {
         eventLabel.setFont(eventLabel.getFont().deriveFont(Font.ITALIC, 11f));
         eventLabel.setAlignmentX(0f);
 
+        alertFooterLabel.setOpaque(true);
+        alertFooterLabel.setBackground(new Color(32, 32, 32));
+        alertFooterLabel.setForeground(new Color(255, 220, 80));
+        alertFooterLabel.setFont(alertFooterLabel.getFont().deriveFont(Font.BOLD, 14f));
+        alertFooterLabel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(90, 90, 90)),
+                new EmptyBorder(8, 6, 6, 6)));
+        alertFooterLabel.setAlignmentX(0f);
+        alertFooterLabel.setToolTipText(
+                "Last approach alert reason. Correlated example: ES cross DOP, NQ approach LVN");
+
         JLabel hint = new JLabel(
                 "Colors: LVN cyan | HVN lime | DOP dark blue.  Join UK = seed handoff HH:mm.  "
-                        + "Alert: enter Approach band from outside with no ≥Pullback pts away from the level.");
+                        + "Correlated = same-direction S/R: one market enters Approach, the other is "
+                        + "within Prox on the same side, both still within Prox and not through the level.");
         hint.setAlignmentX(0f);
 
+        root.add(seedBannerLabel);
+        root.add(Box.createVerticalStrut(6));
         root.add(top);
         root.add(Box.createVerticalStrut(6));
         root.add(esBox);
@@ -165,6 +198,8 @@ public final class LvnLevelsPanel {
         root.add(statusScroll);
         root.add(Box.createVerticalStrut(2));
         root.add(eventLabel);
+        root.add(Box.createVerticalStrut(4));
+        root.add(alertFooterLabel);
 
         frame.setContentPane(root);
         frame.setMinimumSize(new Dimension(860, 520));
@@ -184,6 +219,21 @@ public final class LvnLevelsPanel {
         GridBagConstraints c = new GridBagConstraints();
         c.insets = new Insets(3, 6, 3, 6);
         c.anchor = GridBagConstraints.WEST;
+
+        alertEnabled.addActionListener(e -> {
+            if (!syncing) {
+                applyAlert();
+            }
+        });
+        java.awt.event.ItemListener liveApply = e -> {
+            if (!syncing && alertEnabled.isSelected()) {
+                applyAlert();
+            }
+        };
+        alertMode.addItemListener(liveApply);
+        alertWatchLvn.addItemListener(liveApply);
+        alertWatchDop.addItemListener(liveApply);
+        alertSound.addItemListener(liveApply);
 
         int col = 0;
         c.gridy = 0;
@@ -209,6 +259,8 @@ public final class LvnLevelsPanel {
         alertEsPullback.setToolTipText("ES: invalidate if mid moves this many pts away from the level during approach (0 = off)");
         alertNqApproach.setToolTipText("NQ: must enter from outside this many chart pts of the level");
         alertNqPullback.setToolTipText("NQ: invalidate if mid moves this many pts away from the level during approach (0 = off)");
+        alertEsProx.setToolTipText("Correlated: when NQ crosses, ES mid must be within this many pts of an ES LVN/DOP");
+        alertNqProx.setToolTipText("Correlated: when ES crosses, NQ mid must be within this many pts of an NQ LVN/DOP");
 
         col = 0;
         c.gridy = 1;
@@ -220,6 +272,10 @@ public final class LvnLevelsPanel {
         box.add(new JLabel("ES Pullback"), c);
         c.gridx = col++;
         box.add(alertEsPullback, c);
+        c.gridx = col++;
+        box.add(new JLabel("ES Prox"), c);
+        c.gridx = col++;
+        box.add(alertEsProx, c);
         c.gridx = col++;
         box.add(new JLabel("Cooldown s"), c);
         c.gridx = col++;
@@ -236,10 +292,9 @@ public final class LvnLevelsPanel {
         c.gridx = col++;
         box.add(alertNqPullback, c);
         c.gridx = col++;
-        box.add(new JLabel("Corr window s"), c);
+        box.add(new JLabel("NQ Prox"), c);
         c.gridx = col++;
-        alertCorrWin.setToolTipText("Max seconds between ES and NQ tags for a correlated alert");
-        box.add(alertCorrWin, c);
+        box.add(alertNqProx, c);
         return box;
     }
 
@@ -341,6 +396,28 @@ public final class LvnLevelsPanel {
         LvnLevelsState.applyKnobs(market, k, "panel");
     }
 
+    private void rebuildSeedsForSession() {
+        // Prefer ES Join; keep NQ in sync so both markets share the seed cut.
+        String through = esJoin.getText();
+        if (through == null || through.isBlank()) {
+            through = LvnLevelsState.DEFAULT_JOIN_UK_HM;
+        }
+        nqJoin.setText(through.trim());
+        apply("ES");
+        apply("NQ");
+        if (rebuildSeedBtn != null) {
+            rebuildSeedBtn.setEnabled(false);
+            rebuildSeedBtn.setText("Rebuilding seed…");
+        }
+        LvnLevelsState.rebuildSeedsForSession(through.trim(), msg -> SwingUtilities.invokeLater(() -> {
+            if (rebuildSeedBtn != null) {
+                rebuildSeedBtn.setEnabled(!LvnLevelsState.seedRebuildBusy());
+                rebuildSeedBtn.setText("Rebuild seed for session");
+            }
+            eventLabel.setText(msg == null ? "" : msg);
+        }));
+    }
+
     private void applyAlert() {
         LvnApproachAlert.Config c = new LvnApproachAlert.Config();
         c.enabled = alertEnabled.isSelected();
@@ -350,7 +427,8 @@ public final class LvnLevelsPanel {
         c.nqApproachPts = ((Number) alertNqApproach.getValue()).doubleValue();
         c.nqPullbackPts = ((Number) alertNqPullback.getValue()).doubleValue();
         c.cooldownSec = (Integer) alertCooldown.getValue();
-        c.corrWindowSec = (Integer) alertCorrWin.getValue();
+        c.esCorrProxPts = ((Number) alertEsProx.getValue()).doubleValue();
+        c.nqCorrProxPts = ((Number) alertNqProx.getValue()).doubleValue();
         c.watchLvn = alertWatchLvn.isSelected();
         c.watchDop = alertWatchDop.isSelected();
         c.sound = alertSound.isSelected();
@@ -410,17 +488,47 @@ public final class LvnLevelsPanel {
                     alertNqApproach.setValue(snap.alert.nqApproachPts);
                     alertNqPullback.setValue(snap.alert.nqPullbackPts);
                     alertCooldown.setValue(snap.alert.cooldownSec);
-                    alertCorrWin.setValue(snap.alert.corrWindowSec);
+                    alertEsProx.setValue(snap.alert.esCorrProxPts);
+                    alertNqProx.setValue(snap.alert.nqCorrProxPts);
                     alertWatchLvn.setSelected(snap.alert.watchLvn);
                     alertWatchDop.setSelected(snap.alert.watchDop);
                     alertSound.setSelected(snap.alert.sound);
                 }
                 statusArea.setText(snap.statusDetail == null ? "" : snap.statusDetail);
                 eventLabel.setText(snap.lastEvent == null ? "" : snap.lastEvent);
+                if (snap.alertFooter == null || snap.alertFooter.isEmpty()) {
+                    alertFooterLabel.setText("Alert: (none yet)");
+                    alertFooterLabel.setForeground(new Color(160, 160, 160));
+                } else {
+                    alertFooterLabel.setText("Alert: " + snap.alertFooter);
+                    alertFooterLabel.setForeground(new Color(255, 220, 80));
+                }
+                applySeedBanner(snap.seedBanner);
+                if (rebuildSeedBtn != null) {
+                    boolean busy = LvnLevelsState.seedRebuildBusy();
+                    rebuildSeedBtn.setEnabled(!busy);
+                    if (busy) {
+                        rebuildSeedBtn.setText("Rebuilding seed…");
+                    } else if (!"Rebuild seed for session".equals(rebuildSeedBtn.getText())) {
+                        rebuildSeedBtn.setText("Rebuild seed for session");
+                    }
+                }
             } finally {
                 syncing = false;
             }
         });
+    }
+
+    private void applySeedBanner(String banner) {
+        if (banner == null || banner.isBlank()) {
+            seedBannerLabel.setVisible(false);
+            seedBannerLabel.setText(" ");
+            return;
+        }
+        seedBannerLabel.setText("<html><body style='width:860px'>"
+                + banner.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                + "</body></html>");
+        seedBannerLabel.setVisible(true);
     }
 
     private static void applyKnobsToUi(
@@ -432,8 +540,10 @@ public final class LvnLevelsPanel {
         }
         window.setValue(k.windowDays);
         sens.setValue(k.sensitivity);
-        join.setText(k.joinUkHm == null || k.joinUkHm.isBlank() ? "13:55" : k.joinUkHm);
-        dop.setText(k.dopOpenUkHm == null || k.dopOpenUkHm.isBlank() ? "14:30" : k.dopOpenUkHm);
+        join.setText(k.joinUkHm == null || k.joinUkHm.isBlank()
+                ? LvnLevelsState.DEFAULT_JOIN_UK_HM : k.joinUkHm);
+        dop.setText(k.dopOpenUkHm == null || k.dopOpenUkHm.isBlank()
+                ? LvnLevelsState.DEFAULT_DOP_OPEN_UK_HM : k.dopOpenUkHm);
         lvnUp.setValue(k.lvnAbove);
         lvnDn.setValue(k.lvnBelow);
         hvnUp.setValue(k.hvnAbove);
@@ -442,6 +552,7 @@ public final class LvnLevelsPanel {
     }
 
     public static void showPanel() {
+        LvnLevelsState.ensureDefaultSeedsLoaded();
         SwingUtilities.invokeLater(() -> {
             if (instance == null) {
                 instance = new LvnLevelsPanel();

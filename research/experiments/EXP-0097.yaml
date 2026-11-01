@@ -1,0 +1,52 @@
+name: EXP-0097
+hypothesis: H88
+title: Raw MAT HVN magnet + dVPOC clearance dig (ES)
+description: >
+  Same as EXP-0096 / H87 but ES last print within ±2 of as-of ES HVN1/2/3
+  and |px − as-of ES dVPOC| ≥ poc_min. Dig 10/15/20; primary toward_poc15;
+  twin toward_near. Independent of H87.
+
+detector: mat_hvn_magnet_es  # runner: research/mat_context/exp_0096_mat_hvn_magnet.py --market es
+window: "UK 14:30-17:00"
+exclude_sessions: ["200626", "220626", "300326", "smoke_synthetic"]
+is_definition: DIG4_23d
+
+vicinity:
+  market: ES
+  band_pts: 2.0
+  levels: [HVN1, HVN2, HVN3]
+  poc: dVPOC
+  poc_mins: [10, 15, 20]
+  host: ungated
+
+arms: [base, toward_near, toward_poc10, toward_poc15, toward_poc20, away_poc15, null]
+primary: toward_poc15
+twin: toward_near
+
+raw_mat:
+  es_stamp: causal
+  gate: none
+  brackets: "vol k=1 floor=6 cap=30 symmetric"
+  commission_pts_rt: 0.25
+  slip_sensitivity_ticks: [0.0, 1.0, 2.0]
+  flat_only: true
+  signal_cooldown_sec: 5.0
+
+horizons_ms: [10000, 60000, 300000]
+point_targets_nq: [5, 10, 20]
+
+stages:
+  stage0: "truncation; park if toward_poc15 signals < 50 or resim trades < 20"
+  stage1: "toward_poc15 - toward_near >= +1.0pt @60s and >= +2.0pt @300s, beats null @60s"
+  stage2: "OOS net > 0, avg >= ungated base + 1.0, avg > twin, avg > random-keep p90, n_OOS >= 50"
+
+kill:
+  min_primary_signals: 50
+  min_resim_trades: 20
+  min_oos_trades_promote: 50
+  min_avg_lift_pts: 1.0
+  stage1_lift_60s_pts: 1.0
+  stage1_lift_300s_pts: 2.0
+
+placebo_seed: 97
+run: false

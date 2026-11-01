@@ -1,0 +1,51 @@
+name: EXP-0095
+hypothesis: H86
+title: Raw MAT keep-gate when ES near HVN — toward vs away
+description: >
+  Same as EXP-0094 / H85 but ES last print within ±2 pts of as-of ES
+  IRT HVN1/2/3; toward = MAT side points at that nearest ES HVN.
+  Primary = toward; twin = away. Independent of H85; reuses shared
+  annotate cache. No band sweep.
+
+detector: mat_hvn_vicinity_es  # runner: research/mat_context/exp_0094_mat_hvn_vicinity.py --market es
+window: "UK 14:30-17:00"
+exclude_sessions: ["200626", "220626", "300326", "smoke_synthetic"]
+is_definition: DIG4_23d
+
+vicinity:
+  market: ES
+  band_pts: 2.0
+  levels: [HVN1, HVN2, HVN3]
+  host: ungated
+
+arms: [base, toward, away, near]
+primary: toward
+twin: away
+
+raw_mat:
+  es_stamp: causal
+  gate: none
+  brackets: "vol k=1 floor=6 cap=30 symmetric"
+  commission_pts_rt: 0.25
+  slip_sensitivity_ticks: [0.0, 1.0, 2.0]
+  flat_only: true
+  signal_cooldown_sec: 5.0
+
+horizons_ms: [10000, 60000, 300000]
+point_targets_nq: [5, 10, 20]
+
+stages:
+  stage0: "truncation; park if toward signals < 50 or resim trades < 20"
+  stage1: "toward - away >= +1.0pt @60s and >= +2.0pt @300s, beats null @60s"
+  stage2: "OOS net > 0, avg >= ungated base + 1.0, avg > away twin, avg > random-keep p90, n_OOS >= 50"
+
+kill:
+  min_primary_signals: 50
+  min_resim_trades: 20
+  min_oos_trades_promote: 50
+  min_avg_lift_pts: 1.0
+  stage1_lift_60s_pts: 1.0
+  stage1_lift_300s_pts: 2.0
+
+placebo_seed: 95
+run: false

@@ -106,8 +106,138 @@
 | EXP-0089 | H80 Defended-retest dominant MBO order | ran — **reject / park** | DIG4∩MBO | Stage 0 underpowered (defended=0, completed=1); see notes |
 | EXP-0090 | H81 Consumed-level acceptance | ran — **reject / park** | DIG4∩MBO | Stage 0 underpowered (left_behind=6 < 30); see notes |
 | EXP-0091 | H82 Paired ES/NQ lifecycle MAT feature | registered — runner deferred | DIG4∩MBO count peek 15d | earned by Phase 4 counts (n=52 δ+3.56); virgin months only |
+| EXP-0092 | H83 Raw MAT ∩ NQ near LVN (±5) | ran — **reject / park** | clean sessions + IRT | reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune); see notes |
+| EXP-0093 | H84 Raw MAT ∩ ES near LVN (±2) | ran — **reject / park** | clean sessions + IRT | reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune); see notes |
+| EXP-0094 | H85 Raw MAT ∩ NQ near HVN toward/away | ran — **reject / park** | clean sessions + IRT | corrected retest: reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune); see notes |
+| EXP-0095 | H86 Raw MAT ∩ ES near HVN toward/away | ran — **reject / park** | clean sessions + IRT | reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune); see notes |
+| EXP-0096 | H87 HVN magnet + dVPOC clearance dig (NQ) | ran — **reject / park** | clean sessions + IRT | reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune; neighbours not promoted); see notes |
+| EXP-0097 | H88 HVN magnet + dVPOC clearance dig (ES) | ran — **reject / park** | clean sessions + IRT | reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune; neighbours not promoted); see notes |
+| EXP-0098 | H89 HVN approach-path dig (NQ) | ran — **reject / park** | clean sessions + IRT | reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune; neighbours not promoted); see notes |
+| EXP-0099 | H90 HVN approach-path dig (ES) | ran — **reject / park** | clean sessions + IRT | reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune; neighbours not promoted); see notes |
+| EXP-0100 | H91 both-mkt above/below dVPOC+DOP (host dig) | ran — **reject / park** | clean sessions + IRT | reject / park — Stage 1 event-study fail (no promote; host dig descriptive only); see notes |
 
 ## Run notes
+
+
+
+
+### 2026-11-01 — EXP-0100 both-mkt dVPOC+DOP align registered (H91)
+
+- Frozen: EXP-0100.yaml / H91. Long iff NQ∧ES ≥ dVPOC and ≥ DOP; short iff
+  both ≤ both. Inclusive; missing level → drop. Uses rollover-fixed _session_irt.
+- Host dig: none / vwap / trend=1 / vwap+trend (frozen). Primary = align×none;
+  twin = ungated base. Neighbours cannot promote if primary fails Stage 1.
+- Runner: python -m research.mat_context.exp_0100_mat_vpoc_dop_align.
+
+### 2026-11-01 — EXP-0100 both-mkt dVPOC+DOP align (H91)
+
+- Verdict: **reject / park — Stage 1 event-study fail (no promote; host dig descriptive only)**
+- Results: `results/EXP-0100/`.
+- Runner: `python -m research.mat_context.exp_0100_mat_vpoc_dop_align`.
+
+### 2026-11-01 — EXP-0098/0099 HVN approach-path dig registered (H89–H90)
+
+- Frozen: EXP-0098.yaml / H89 (NQ ±5, lookback dig 30/60/120s, min approach 1.0 pt),
+  EXP-0099.yaml / H90 (ES ±2, min 0.5 pt). Primary = toward_ap60; twin = toward_near.
+- Geometry: near HVN ∧ MAT toward ∧ |px−HVN| decreased over lookback.
+- Runner: python -m research.mat_context.exp_0098_mat_hvn_approach --market nq|es.
+- Neighbours cannot promote if primary fails Stage 1.
+
+### 2026-11-01 — EXP-0099 HVN approach-path dig ES (H90)
+
+- Verdict: **reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune; neighbours not promoted)**
+- Results: `results/EXP-0099/`.
+- Runner: `python -m research.mat_context.exp_0098_mat_hvn_approach --market es`.
+
+### 2026-11-01 — EXP-0098 HVN approach-path dig NQ (H89)
+
+- Verdict: **reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune; neighbours not promoted)**
+- Results: `results/EXP-0098/`.
+- Runner: `python -m research.mat_context.exp_0098_mat_hvn_approach --market nq`.
+
+### 2026-11-01 — EXP-0096/0097 HVN magnet + dVPOC clearance dig registered (H87–H88)
+
+- Frozen: EXP-0096.yaml / H87 (NQ ±5, dig poc_min 10/15/20), EXP-0097.yaml /
+  H88 (ES ±2). Primary = toward_poc15; twin = toward_near (H85/H86 cell).
+- Geometry: near HVN ∧ toward ∧ |px − as-of dVPOC| ≥ poc_min. Uses
+  rollover-fixed _session_irt (HVN+dVPOC shifted).
+- Runner: python -m research.mat_context.exp_0096_mat_hvn_magnet --market nq|es.
+- Neighbours cannot promote if primary fails Stage 1.
+
+### 2026-11-01 — EXP-0097 HVN magnet + dVPOC dig ES (H88)
+
+- Verdict: **reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune; neighbours not promoted)**
+- Results: `results/EXP-0097/`.
+- Runner: `python -m research.mat_context.exp_0096_mat_hvn_magnet --market es`.
+
+### 2026-11-01 — EXP-0096 HVN magnet + dVPOC dig NQ (H87)
+
+- Verdict: **reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune; neighbours not promoted)**
+- Results: `results/EXP-0096/`.
+- Runner: `python -m research.mat_context.exp_0096_mat_hvn_magnet --market nq`.
+
+### 2026-10-31 — EXP-0094/0095 corrected retest: HVN rollover basis shift (H85–H86)
+
+- **Bug:** `_session_irt`'s `_shift_bars` applied the per-session contract
+  basis shift (IRT close − Bookmap last, MAD ≈ 0–2 pts) to LVN/DOP/dVPOC/
+  close but **not HVN1/2/3**. Basis steps at quarterly rolls: NQ +590
+  (Apr 13–Jun), +297.5 (Jun–mid-Sep), 0 (post-Sep roll); ES +180/+130.25/
+  +67.75 → 0. Pre-fix HVNs sat 100s of pts away, so toward/away fired
+  only Sep–Oct. First EXP-0094/0095 verdicts are **superseded**.
+- **Fix:** `_shift_bars` in `study_es_intraday_lvn_large.py` (and the
+  duplicate in `study_open_cluster_lvn_confluence.py`) now shifts every
+  price column incl. HVN1/2/3, preserving 0 = missing. Regression test:
+  `test_basis_shift_moves_hvn` in `test_mat_hvn_vicinity.py`. Runner
+  cache bumped to `hvn-basis-shift-v2` (stale cache ignored).
+- **Still missing:** NQ IRT `@NQ#_ALL.csv` starts 2026-04-13 — March
+  (19 sessions) + early April remain NaN (no HVN), not zeros.
+- **Corrected results:** EXP-0094 NQ toward 147 → **849** (fires every
+  month Apr–Oct), Stage 1 FAIL (`lift_60` +0.91 < +1.0; `lift_300` pass).
+  EXP-0095 ES toward 334 → **1,779**, Stage 1 FAIL (`lift_300`).
+  Both reject / park, no retune. See `results/EXP-0094/`, `results/EXP-0095/`.
+
+### 2026-10-31 — EXP-0094/0095 MAT × HVN vicinity registered (H85–H86)
+
+- Frozen: `EXP-0094.yaml` / H85 (NQ ±5 HVN1/2/3, toward vs away),
+  `EXP-0095.yaml` / H86 (ES ±2). Raw ungated MAT host.
+- Toward = MAT side points at nearest in-band HVN. Runner:
+  `python -m research.mat_context.exp_0094_mat_hvn_vicinity --market nq|es`.
+- No band sweep; independent of rejected H83/H84 LVN vicinity.
+
+### 2026-10-31 — EXP-0095 raw MAT ∩ ES near HVN toward/away (H86)
+
+- Verdict: **reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune)**
+- Results: `results/EXP-0095/`.
+- Runner: `python -m research.mat_context.exp_0094_mat_hvn_vicinity --market es`.
+
+### 2026-10-31 — EXP-0094 raw MAT ∩ NQ near HVN toward/away (H85)
+
+- Verdict (superseded by corrected retest above): **reject / park — Stage 2 P&L fail (no retune)**
+- Corrected verdict: **reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune)**
+- Results: `results/EXP-0094/`.
+- Runner: `python -m research.mat_context.exp_0094_mat_hvn_vicinity --market nq`.
+
+### 2026-10-31 — EXP-0092/0093 MAT × LVN vicinity registered (H83–H84)
+
+- Frozen designs: `research/experiments/EXP-0092.yaml` / H83 (NQ ±5 of
+  as-of LVN2/LVN3), `EXP-0093.yaml` / H84 (ES ±2). Raw (ungated) MAT
+  host; distance-only keep-gate — not H38 fade geometry.
+- Shared feature: `research/features/mat_lvn_vicinity.py`. Runner:
+  `python -m research.mat_context.exp_0092_mat_lvn_vicinity --market nq|es`.
+- Stages 0–2 independent kill bars; frozen trend+VWAP twin descriptive
+  only. No band sweep / neighbour promotion.
+
+### 2026-10-31 — EXP-0093 raw MAT ∩ ES near LVN (H84)
+
+- Verdict: **reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune)**
+- Results: `results/EXP-0093/`.
+- Runner: `python -m research.mat_context.exp_0092_mat_lvn_vicinity --market es`.
+
+### 2026-10-31 — EXP-0092 raw MAT ∩ NQ near LVN (H83)
+
+- Verdict: **reject / park — Stage 1 event-study fail (no Stage 2 P&L, no retune)**
+- Results: `results/EXP-0092/`.
+- Runner: `python -m research.mat_context.exp_0092_mat_lvn_vicinity --market nq`.
 
 ### 2026-10-27 — EXP-0078 Daily Open (DOP) break registered (H69)
 
@@ -1261,3 +1391,10 @@ Same mistake pattern as the first EXP-0036 fade close: treating continuation hit
 - Verdict: **reject / park — Stage 0 underpowered (counts are the result; no retune)**
 - Results: `results/EXP-0090/`.
 - Runner: `python -m research.mbo_lifecycle.exp_0090_consumed_acceptance`.
+
+### 2026-11-01 — LVN Levels vs IRT on 2026-10-07 (7813.25)
+
+- Bookmap tick LVN **7813.25** vs IRT chart “~7816”; export nearest-3 is **7815.25** (never 7813.23/7816).
+- Cause: ES tick vs IRT bar-smear (~2 pt); not a missed mid-session refresh.
+- Also fixed replay with newer seed dropping session `daily` when no minutes (`LvnLiveVap` / v13 JAR).
+- Write-up: `results/LVN_OCT7_7813_DISCREPANCY/summary.md`.

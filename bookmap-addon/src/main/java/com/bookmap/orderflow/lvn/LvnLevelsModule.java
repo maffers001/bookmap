@@ -11,8 +11,10 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 import com.bookmap.orderflow.core.InstrumentClassifier;
 import com.bookmap.orderflow.core.LvnLiveVap;
@@ -78,12 +80,25 @@ public class LvnLevelsModule implements
     private final Indicator[] lvnBelow = new Indicator[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
     private final Indicator[] hvnAbove = new Indicator[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
     private final Indicator[] hvnBelow = new Indicator[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
-    private final double[] lvnAboveIcon = new double[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
-    private final double[] lvnBelowIcon = new double[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
-    private final double[] hvnAboveIcon = new double[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
-    private final double[] hvnBelowIcon = new double[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
+    /** Price-stable slot state — avoids verticals when nearest-N ranking reshuffles. */
+    private final LevelSlot[] lvnAboveSlot = new LevelSlot[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
+    private final LevelSlot[] lvnBelowSlot = new LevelSlot[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
+    private final LevelSlot[] hvnAboveSlot = new LevelSlot[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
+    private final LevelSlot[] hvnBelowSlot = new LevelSlot[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
     private Indicator dopMarker;
-    private double dopIconPx = Double.NaN;
+    private final LevelSlot dopSlot = new LevelSlot();
+
+    /**
+     * One Bookmap indicator lane bound to a fixed chart price until that price
+     * leaves the display set. On a price change for the same lane, emit NaN for
+     * one interval before the new value so Bookmap does not draw a vertical.
+     */
+    private static final class LevelSlot {
+        double boundPts = Double.NaN;
+        double plottedPts = Double.NaN;
+        double iconPts = Double.NaN;
+        boolean breaking;
+    }
 
     private long lastRebuildFeedNs;
     private long lastRebuildWallNs;
@@ -131,16 +146,21 @@ public class LvnLevelsModule implements
             styleLevelLine(lvnBelow[i], COL_LVN, 50);
             styleLevelLine(hvnAbove[i], COL_HVN, 40);
             styleLevelLine(hvnBelow[i], COL_HVN, 40);
-            lvnAboveIcon[i] = lvnBelowIcon[i] = hvnAboveIcon[i] = hvnBelowIcon[i] = Double.NaN;
+            lvnAboveSlot[i] = new LevelSlot();
+            lvnBelowSlot[i] = new LevelSlot();
+            hvnAboveSlot[i] = new LevelSlot();
+            hvnBelowSlot[i] = new LevelSlot();
         }
         dopMarker = api.registerIndicator("DOP", GraphType.PRIMARY, Double.NaN, true, true);
-        styleLevelLine(dopMarker, COL_DOP, 55);
-        dopIconPx = Double.NaN;
+        styleLevelLine(dopMarker, COL_DOP, 55, 6); // 2× LVN/HVN width
+        dopSlot.boundPts = dopSlot.plottedPts = dopSlot.iconPts = Double.NaN;
+        dopSlot.breaking = false;
 
         if (isEs() || isNq()) {
             LvnLevelsState.registerAttach(instrumentRole);
             LvnLevelsState.registerApplyHook(applyHook);
         }
+        LvnLevelsState.ensureDefaultSeedsLoaded();
         LvnLevelsPanel.showPanel();
 
         Log.info(String.format(Locale.US,
@@ -174,7 +194,7 @@ public class LvnLevelsModule implements
         realtimeStarted = false;
         pendingRebuild = true;
         dopCaptured = false;
-        dopIconPx = Double.NaN;
+        clearSlot(dopSlot, dopMarker);
         LvnLiveVap vap = LvnLevelsState.vapFor(instrumentRole);
         if (vap != null) {
             vap.clearLive();
@@ -197,7 +217,8 @@ public class LvnLevelsModule implements
         if (lastUkDate == null || !day.equals(lastUkDate)) {
             lastUkDate = day;
             dopCaptured = false;
-            dopIconPx = Double.NaN;
+            clearSlot(dopSlot, dopMarker);
+            LvnLevelsState.clearDop(instrumentRole);
             pendingRebuild = true;
             thresholdsDirty = true;
         }
@@ -237,14 +258,19 @@ public class LvnLevelsModule implements
         double chartPts = tick * pips;
         lastMidPts = chartPts;
 
-        // Accumulate during catchup too (cheap) so realtime rebuild sees post-join volume.
+        // Capture DOP on the first print at/after open even during catchup so the
+        // price is the true open — but plotting stays gated until open (see plotLevels).
         // Never run node detection here.
-        if (realtimeStarted && !dopCaptured) {
+        if (!dopCaptured) {
             maybeCaptureDop(chartPts);
         }
         LvnLiveVap vap = LvnLevelsState.vapFor(instrumentRole);
         if (vap != null && vap.hasSeed()) {
             vap.onTradeNs(tick, size, nowNs);
+        }
+        // Alert on trade path too — 250ms interval alone can miss a fast touch.
+        if (realtimeStarted && nowNs > 0) {
+            LvnLevelsState.onMidUpdate(instrumentRole, lastMidPts, nowNs);
         }
     }
 
@@ -344,40 +370,162 @@ public class LvnLevelsModule implements
         boolean showHvn = LvnLevelsState.showHvn();
         boolean showDop = LvnLevelsState.showDop();
 
-        // Styles are set once in initialize — restyling every interval churns Bookmap.
-        for (int i = 0; i < LvnStackFile.MAX_DISPLAY_EACH_SIDE; i++) {
-            if (showLvn && lv != null && i < knobs.lvnAbove && i < lv.lvnAbove.size()) {
-                lvnAboveIcon[i] = plotLevel(lvnAbove[i], lvnAboveIcon[i], lv.lvnAbove.get(i), COL_LVN);
-            } else {
-                hideLine(lvnAbove[i]);
-                lvnAboveIcon[i] = Double.NaN;
-            }
-            if (showLvn && lv != null && i < knobs.lvnBelow && i < lv.lvnBelow.size()) {
-                lvnBelowIcon[i] = plotLevel(lvnBelow[i], lvnBelowIcon[i], lv.lvnBelow.get(i), COL_LVN);
-            } else {
-                hideLine(lvnBelow[i]);
-                lvnBelowIcon[i] = Double.NaN;
-            }
-            if (showHvn && lv != null && i < knobs.hvnAbove && i < lv.hvnAbove.size()) {
-                hvnAboveIcon[i] = plotLevel(hvnAbove[i], hvnAboveIcon[i], lv.hvnAbove.get(i), COL_HVN);
-            } else {
-                hideLine(hvnAbove[i]);
-                hvnAboveIcon[i] = Double.NaN;
-            }
-            if (showHvn && lv != null && i < knobs.hvnBelow && i < lv.hvnBelow.size()) {
-                hvnBelowIcon[i] = plotLevel(hvnBelow[i], hvnBelowIcon[i], lv.hvnBelow.get(i), COL_HVN);
-            } else {
-                hideLine(hvnBelow[i]);
-                hvnBelowIcon[i] = Double.NaN;
+        plotStableGroup(lvnAbove, lvnAboveSlot, showLvn && lv != null ? lv.lvnAbove : null,
+                knobs.lvnAbove, COL_LVN);
+        plotStableGroup(lvnBelow, lvnBelowSlot, showLvn && lv != null ? lv.lvnBelow : null,
+                knobs.lvnBelow, COL_LVN);
+        plotStableGroup(hvnAbove, hvnAboveSlot, showHvn && lv != null ? lv.hvnAbove : null,
+                knobs.hvnAbove, COL_HVN);
+        plotStableGroup(hvnBelow, hvnBelowSlot, showHvn && lv != null ? lv.hvnBelow : null,
+                knobs.hvnBelow, COL_HVN);
+
+        // Do not draw the DOP line until today's open has printed.
+        if (thresholdsDirty) {
+            refreshThresholds();
+        }
+        boolean pastOpen = dopCaptured
+                && lastUkDate != null
+                && dopOpenNs != Long.MAX_VALUE
+                && nowNs >= dopOpenNs;
+        double dop = LvnLevelsState.dopFor(instrumentRole);
+        if (showDop && pastOpen && Double.isFinite(dop) && dop > 0) {
+            dopSlot.boundPts = dop;
+            plotSlot(dopMarker, dopSlot, COL_DOP);
+        } else {
+            clearSlot(dopSlot, dopMarker);
+        }
+    }
+
+    /**
+     * Bind each displayed price to a stable indicator lane so ranking reshuffles
+     * do not drag one series from price A to B (vertical connector).
+     */
+    private void plotStableGroup(
+            Indicator[] inds,
+            LevelSlot[] slots,
+            List<Double> prices,
+            int maxShow,
+            Color color) {
+        int n = inds.length;
+        Set<Long> desiredKeys = new HashSet<>(8);
+        if (prices != null && maxShow > 0) {
+            int lim = Math.min(maxShow, prices.size());
+            for (int i = 0; i < lim; i++) {
+                Double px = prices.get(i);
+                if (px != null && px > 0 && Double.isFinite(px)) {
+                    desiredKeys.add(priceKey(px));
+                }
             }
         }
 
-        double dop = LvnLevelsState.dopFor(instrumentRole);
-        if (showDop && Double.isFinite(dop) && dop > 0) {
-            dopIconPx = plotLevel(dopMarker, dopIconPx, dop, COL_DOP);
-        } else {
-            hideLine(dopMarker);
-            dopIconPx = Double.NaN;
+        // Release lanes whose price left the set.
+        for (int i = 0; i < n; i++) {
+            LevelSlot s = slots[i];
+            if (Double.isFinite(s.boundPts) && !desiredKeys.contains(priceKey(s.boundPts))) {
+                clearSlot(s, inds[i]);
+            }
+        }
+
+        // Bind new prices to free lanes.
+        if (prices != null && maxShow > 0) {
+            int lim = Math.min(maxShow, prices.size());
+            for (int i = 0; i < lim; i++) {
+                Double px = prices.get(i);
+                if (px == null || !(px > 0) || !Double.isFinite(px)) {
+                    continue;
+                }
+                if (findSlotForPrice(slots, px) >= 0) {
+                    continue;
+                }
+                int free = findFreeSlot(slots);
+                if (free < 0) {
+                    break;
+                }
+                LevelSlot s = slots[free];
+                s.boundPts = px;
+                s.plottedPts = Double.NaN;
+                s.iconPts = Double.NaN;
+                s.breaking = false;
+            }
+        }
+
+        for (int i = 0; i < n; i++) {
+            LevelSlot s = slots[i];
+            if (Double.isFinite(s.boundPts)) {
+                plotSlot(inds[i], s, color);
+            } else {
+                hideLine(inds[i]);
+            }
+        }
+    }
+
+    private static long priceKey(double pts) {
+        return Math.round(pts * 4.0); // 0.25 grid
+    }
+
+    private static int findSlotForPrice(LevelSlot[] slots, double pts) {
+        long key = priceKey(pts);
+        for (int i = 0; i < slots.length; i++) {
+            if (Double.isFinite(slots[i].boundPts) && priceKey(slots[i].boundPts) == key) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int findFreeSlot(LevelSlot[] slots) {
+        for (int i = 0; i < slots.length; i++) {
+            if (!Double.isFinite(slots[i].boundPts)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static void clearSlot(LevelSlot s, Indicator ind) {
+        hideLine(ind);
+        s.boundPts = Double.NaN;
+        s.plottedPts = Double.NaN;
+        s.iconPts = Double.NaN;
+        s.breaking = false;
+    }
+
+    /**
+     * Emit one sample for a bound slot. If the bound price changed on this lane,
+     * spend one interval on NaN before drawing the new level.
+     */
+    private void plotSlot(Indicator ind, LevelSlot s, Color color) {
+        if (ind == null || s == null || !Double.isFinite(s.boundPts) || !(s.boundPts > 0)) {
+            hideLine(ind);
+            return;
+        }
+        double chartPts = s.boundPts;
+        if (s.breaking) {
+            // Previous interval already emitted NaN — start the new horizontal.
+            s.breaking = false;
+            double axis = toPrimaryAxis(chartPts);
+            ind.addPoint(axis);
+            s.plottedPts = chartPts;
+            BufferedImage icon = renderPriceIcon(formatPriceLabel(chartPts), color);
+            ind.addIcon(axis, icon, 4, icon.getHeight() / 2);
+            s.iconPts = chartPts;
+            return;
+        }
+        if (Double.isFinite(s.plottedPts) && Math.abs(s.plottedPts - chartPts) > 1e-6) {
+            // Same lane, new price — break for one interval (no vertical connector).
+            ind.addPoint(Double.NaN);
+            s.plottedPts = Double.NaN;
+            s.iconPts = Double.NaN;
+            s.breaking = true;
+            return;
+        }
+        double axis = toPrimaryAxis(chartPts);
+        ind.addPoint(axis);
+        s.plottedPts = chartPts;
+        if (Double.isNaN(s.iconPts) || Math.abs(s.iconPts - chartPts) > 1e-6) {
+            BufferedImage icon = renderPriceIcon(formatPriceLabel(chartPts), color);
+            ind.addIcon(axis, icon, 4, icon.getHeight() / 2);
+            s.iconPts = chartPts;
         }
     }
 
@@ -441,11 +589,15 @@ public class LvnLevelsModule implements
     }
 
     private static void styleLevelLine(Indicator ind, Color color, int priority) {
+        styleLevelLine(ind, color, priority, 3);
+    }
+
+    private static void styleLevelLine(Indicator ind, Color color, int priority, int width) {
         if (ind == null) {
             return;
         }
         ind.setColor(color);
-        ind.setWidth(3);
+        ind.setWidth(width);
         ind.setRenderPriority(priority);
     }
 
@@ -453,29 +605,6 @@ public class LvnLevelsModule implements
         if (ind != null) {
             ind.addPoint(Double.NaN);
         }
-    }
-
-    private double plotLevel(Indicator ind, double iconPx, double chartPts, Color color) {
-        if (ind == null) {
-            return iconPx;
-        }
-        if (!(chartPts > 0)) {
-            ind.addPoint(Double.NaN);
-            return Double.NaN;
-        }
-        double axis = toPrimaryAxis(chartPts);
-        // Break the series before a price jump so Bookmap does not draw a
-        // vertical connector between the old and new level.
-        if (Double.isFinite(iconPx) && Math.abs(iconPx - chartPts) > 1e-6) {
-            ind.addPoint(Double.NaN);
-        }
-        ind.addPoint(axis);
-        if (Double.isNaN(iconPx) || Math.abs(iconPx - chartPts) > 1e-6) {
-            BufferedImage icon = renderPriceIcon(formatPriceLabel(chartPts), color);
-            ind.addIcon(axis, icon, 4, icon.getHeight() / 2);
-            return chartPts;
-        }
-        return iconPx;
     }
 
     private static String formatPriceLabel(double chartPts) {

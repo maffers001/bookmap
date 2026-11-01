@@ -7,9 +7,9 @@ Seed layout (consumed by ``LvnVapSeedFile``):
       daily.csv     # day,row_tick,vol  (whole days before through day)
       minutes.csv   # minute,row_tick,vol  (through day up to --through)
 
-Example (morning live, join 13:55 UK)::
+Example (morning live, join 14:30 UK)::
 
-    .venv\\Scripts\\python.exe -m research.irt_lvn.build_vap_seed --market both --through 13:55
+    .venv\\Scripts\\python.exe -m research.irt_lvn.build_vap_seed --market both --through 14:30
 
 Replay (cut at end of a study day)::
 
@@ -154,7 +154,7 @@ def build_one(
     (out_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     print(
         f"{market}: wrote {out_dir} daily={len(daily_rows)} minutes={len(minute_rows)} "
-        f"through={meta['through_uk']} lookback≈{window}d",
+        f"through={meta['through_uk']} lookback~{window}d",
         flush=True,
     )
     return out_dir
@@ -165,8 +165,8 @@ def main() -> None:
     ap.add_argument("--market", choices=["ES", "NQ", "both"], default="both")
     ap.add_argument(
         "--through",
-        default="13:55",
-        help="UK HH:MM seed cut / Join with Bookmap (default 13:55)",
+        default="14:30",
+        help="UK HH:MM seed cut / Join with Bookmap (default 14:30)",
     )
     ap.add_argument(
         "--day",

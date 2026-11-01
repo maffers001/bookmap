@@ -20,7 +20,7 @@ decisions.
 |---|---|---|
 | Time per Profile (days) | 90 | 30 |
 | Sensitivity (price rows / ticks) | 15 | 100 |
-| Join with Bookmap (UK) | 13:55 | 13:55 |
+| Join with Bookmap (UK) | 14:30 | 14:30 |
 | DOP session open (UK) | 14:30 | 14:30 |
 | LVNs / HVNs above & below | 3 / 3 | 3 / 3 |
 | Node refresh (live) | 5 min | 5 min |
@@ -47,22 +47,26 @@ LvnConfluenceAutoTrade  ←── LvnLevelsState (LVN set for confluence)
 ### DOP
 
 Not a profile node. First trade at/after DOP open (default 14:30 UK) each
-session → frozen `DOP` line until day roll.
+session → frozen `DOP` line until day roll. The line is not drawn until that
+open print has happened (pre-open stays blank).
 
 ### Approach alert
 
 Console knobs (Apply alert): enable, mode (**Correlated** / Either / Single ES /
-Single NQ), per-market **Approach** and **Pullback** (chart pts), cooldown,
-corr window, watch LVN / DOP, sound.
+Single NQ), per-market **Approach**, **Pullback**, and **Prox** (chart pts),
+cooldown, watch LVN / DOP, sound.
 
 Rule: mid must come from **outside** the Approach band of a displayed LVN or
 DOP, enter within Approach pts, and not move ≥ Pullback pts **away from the
 level** during that approach. Fires on clean band entry → Bookmap log +
-optional beep + console event line. Correlated mode waits for the other market
-to tag within the window (needs Levels attached on both charts).
+loud chirp + console footer. **Correlated** (synchronised S/R): one market
+clean-enters, the other is within **Prox** of a watched level on the **same
+approach side** (both from-below or both from-above), both mids still within
+their Prox, and neither has already traded through its level. Approach side
+is armed while outside so a wick through does not flip the rotation label.
 
-Defaults: ES Approach=5 Pullback=3, NQ Approach=20 Pullback=10, cooldown 60s,
-corr window 30s, mode Correlated, sound on.
+Defaults: ES Approach=5 Pullback=3 Prox=5, NQ Approach=20 Pullback=10 Prox=20,
+cooldown 60s, mode Correlated, sound on.
 
 ### Detector
 
@@ -84,18 +88,36 @@ separately.
 
 ## Ops (morning live)
 
-1. Refresh IRT tick export if needed.
-2. Build seed:  
-   `python -m research.irt_lvn.build_vap_seed --market both --through 13:55`
-3. Open Bookmap **before** Join (or rebuild seed if late).
-4. Attach **LVN Levels** on ES/NQ → Load seed → Apply knobs.
-5. Optionally attach AutoTrade (trading OFF until armed).
+1. Refresh IRT tick export if needed (so `build_vap_seed` has data).
+2. Open Bookmap **before** Join when possible.
+3. Attach **LVN Levels** on ES/NQ — existing seeds bind immediately, then
+   `build_vap_seed` for the UK session day + Join UK (default 14:30) runs
+   **automatically** and reloads. Console status shows progress; the button
+   re-runs the same job. Manual **Load ES/NQ seed…** still overrides.
+   A red banner appears if a seed is missing/unloadable, lacks a minute slice
+   for the session day, or rebuild fails.
+4. Optionally attach AutoTrade (trading OFF until armed).
 
 ## Replay
 
-Build the seed **for the replay day** (`--day YYYY-MM-DD`), load it in
-Levels, run replay. A seed built for an earlier day leaves the days between
-seed-through and the replay session out of the profile — the console warns
-`STALE SEED ends … · session …`. Changing Sensitivity / window re-detects
-without a new stack CSV. Optional fixed `LVN_STACK_*.csv` remains a
-confluence fast-path only.
+Attach Levels and start replay — seed rebuild uses the feed’s UK day (a
+wall-clock rebuild at attach is followed by a second pass if the replay day
+differs). A stale seed that does not cover the session still shows on the
+red banner until rebuild completes.
+
+If the seed’s `through_uk` is **after** the replay day, that day exists as a
+complete map in `daily.csv` but has **no** `minutes.csv` slice. Levels then
+include that full daily (and skip live for the day to avoid double-count) so
+nodes are EOD-shaped; the banner notes `using full daily (no minute seed)`.
+For a true developing mid-session profile, rebuild with `--day` = session.
+
+Changing Sensitivity / window re-detects without a new stack CSV. Optional
+fixed `LVN_STACK_*.csv` remains a confluence fast-path only.
+
+### ES vs IRT node parity (2026-10-07 check)
+
+On 2026-10-07 Bookmap tick VAP keeps a stable LVN at **7813.25**. IRT
+`ESZ6_ALL.csv` nearest-3 picks **7815.25** once price works lower (~13:28
+IRT stamp). That ~2 pt gap is the known ES **tick vs IRT 1‑min bar-smear**
+histogram difference (`IRT_LVN_PROFILE.md`), not a missed refresh. Production
+stays tick for both markets.

@@ -46,14 +46,25 @@ def _tape(pq_dir: Path, sid: str, role: str, t0: int, t1: int):
 
 
 def _shift_bars(bars, shift: float):
-    """Apply constant basis shift to all price columns (IRT → Bookmap)."""
+    """Apply constant basis shift to all price columns (IRT → Bookmap).
+
+    Includes HVN1/2/3 (zero = missing sentinel, preserved) — see
+    `study_es_intraday_lvn_large._shift_bars` for the rollover rationale.
+    """
     if shift == 0.0:
         return bars
-    bars.lvn2 = bars.lvn2 + shift
-    bars.lvn3 = bars.lvn3 + shift
-    bars.dop = np.where(bars.dop != 0, bars.dop + shift, bars.dop)
-    bars.dvpoc = np.where(bars.dvpoc != 0, bars.dvpoc + shift, bars.dvpoc)
-    bars.close = np.where(bars.close != 0, bars.close + shift, bars.close)
+
+    def sh(a: np.ndarray) -> np.ndarray:
+        return np.where(a != 0, a + shift, a)
+
+    bars.lvn2 = sh(bars.lvn2)
+    bars.lvn3 = sh(bars.lvn3)
+    bars.hvn1 = sh(bars.hvn1)
+    bars.hvn2 = sh(bars.hvn2)
+    bars.hvn3 = sh(bars.hvn3)
+    bars.dop = sh(bars.dop)
+    bars.dvpoc = sh(bars.dvpoc)
+    bars.close = sh(bars.close)
     return bars
 
 

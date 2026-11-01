@@ -1,6 +1,5 @@
 package com.bookmap.orderflow.lvn;
 
-import java.awt.Toolkit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -10,6 +9,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+
+import javax.sound.sampled.AudioFormat;
+import javax.sound.sampled.AudioSystem;
+import javax.sound.sampled.SourceDataLine;
 
 import velox.api.layer1.common.Log;
 
@@ -21,8 +24,11 @@ import velox.api.layer1.common.Log;
  * level during that approach (distance increases by ≥ Pullback from the
  * closest point seen while outside). Fires on clean band entry.
  *
- * <p>Modes: single ES / single NQ / either / correlated (both markets tag
- * their own level within a time window).
+ * <p>Modes: single ES / single NQ / either / correlated. Correlated is for
+ * synchronised S/R: one market clean-enters, the other is within Prox of a
+ * watched level, <b>both share the same approach side</b> (both from-below or
+ * both from-above), both mids are still within their Prox of their levels,
+ * and neither has already traded through its level.
  */
 public final class LvnApproachAlert {
 
@@ -41,7 +47,10 @@ public final class LvnApproachAlert {
         public double esPullbackPts = 3.0;
         public double nqPullbackPts = 10.0;
         public int cooldownSec = 60;
-        public int corrWindowSec = 30;
+        /** Partner ES mid must be within this many pts of an ES LVN/DOP. */
+        public double esCorrProxPts = 5.0;
+        /** Partner NQ mid must be within this many pts of an NQ LVN/DOP. */
+        public double nqCorrProxPts = 20.0;
         public boolean watchLvn = true;
         public boolean watchDop = true;
         public boolean sound = true;
@@ -55,7 +64,8 @@ public final class LvnApproachAlert {
             c.esPullbackPts = esPullbackPts;
             c.nqPullbackPts = nqPullbackPts;
             c.cooldownSec = cooldownSec;
-            c.corrWindowSec = corrWindowSec;
+            c.esCorrProxPts = esCorrProxPts;
+            c.nqCorrProxPts = nqCorrProxPts;
             c.watchLvn = watchLvn;
             c.watchDop = watchDop;
             c.sound = sound;
@@ -87,12 +97,15 @@ public final class LvnApproachAlert {
         public final Tag primary;
         public final Tag partner; // non-null when correlated
         public final String message;
+        /** Short footer line, e.g. {@code ES cross DOP, NQ approach LVN}. */
+        public final String reason;
 
-        Event(boolean correlated, Tag primary, Tag partner, String message) {
+        Event(boolean correlated, Tag primary, Tag partner, String message, String reason) {
             this.correlated = correlated;
             this.primary = primary;
             this.partner = partner;
             this.message = message;
+            this.reason = reason == null ? "" : reason;
         }
     }
 
@@ -106,6 +119,12 @@ public final class LvnApproachAlert {
         boolean wasInside;
         boolean dirty;
         double minDistOutside = Double.POSITIVE_INFINITY;
+        /**
+         * Side while arming from outside: +1 from below (into resistance),
+         * −1 from above (into support). Kept through band entry so a wick
+         * through the level does not flip the rotation label.
+         */
+        int armedSide;
         long cooldownUntilNs;
 
         Probe(String market, String kind, double levelPx) {
@@ -117,8 +136,8 @@ public final class LvnApproachAlert {
 
     private Config cfg = new Config();
     private final Map<String, Probe> probes = new HashMap<>();
-    private Tag pendingEs;
-    private Tag pendingNq;
+    private double lastMidEs = Double.NaN;
+    private double lastMidNq = Double.NaN;
     private Consumer<Event> listener;
 
     public synchronized void setListener(Consumer<Event> listener) {
@@ -139,26 +158,25 @@ public final class LvnApproachAlert {
         next.esPullbackPts = Math.max(0.0, next.esPullbackPts);
         next.nqPullbackPts = Math.max(0.0, next.nqPullbackPts);
         next.cooldownSec = Math.max(0, Math.min(3600, next.cooldownSec));
-        next.corrWindowSec = Math.max(1, Math.min(600, next.corrWindowSec));
+        next.esCorrProxPts = Math.max(0.25, next.esCorrProxPts);
+        next.nqCorrProxPts = Math.max(0.25, next.nqCorrProxPts);
         if (next.mode == null) {
             next.mode = Mode.CORRELATED;
         }
+        boolean wasOn = this.cfg.enabled;
         this.cfg = next;
         if (!next.enabled) {
-            pendingEs = null;
-            pendingNq = null;
-            for (Probe p : probes.values()) {
-                p.seenOutside = false;
-                p.dirty = false;
-                p.minDistOutside = Double.POSITIVE_INFINITY;
-            }
+            probes.clear();
+        } else if (!wasOn) {
+            // Fresh arm: drop stale probe state so the next outside→inside can fire.
+            probes.clear();
         }
     }
 
     public synchronized void resetSession() {
         probes.clear();
-        pendingEs = null;
-        pendingNq = null;
+        lastMidEs = Double.NaN;
+        lastMidNq = Double.NaN;
     }
 
     /**
@@ -169,8 +187,12 @@ public final class LvnApproachAlert {
             return;
         }
         String mkt = "NQ".equalsIgnoreCase(market) ? "NQ" : "ES";
+        if ("NQ".equals(mkt)) {
+            lastMidNq = mid;
+        } else {
+            lastMidEs = mid;
+        }
         if (cfg.mode == Mode.ES && !"ES".equals(mkt)) {
-            // still track for correlated pending cleanup? no — skip entirely
             return;
         }
         if (cfg.mode == Mode.NQ && !"NQ".equals(mkt)) {
@@ -178,18 +200,16 @@ public final class LvnApproachAlert {
         }
 
         syncProbes(mkt);
-        expirePendings(nowNs);
 
         double approachPts = "NQ".equals(mkt) ? cfg.nqApproachPts : cfg.esApproachPts;
         double pullbackPts = "NQ".equals(mkt) ? cfg.nqPullbackPts : cfg.esPullbackPts;
-        long coolNs = cfg.cooldownSec * 1_000_000_000L;
 
         List<Tag> fired = new ArrayList<>(2);
         for (Probe p : probes.values()) {
             if (!p.market.equals(mkt)) {
                 continue;
             }
-            Tag t = updateProbe(p, mid, nowNs, approachPts, pullbackPts, coolNs);
+            Tag t = updateProbe(p, mid, nowNs, approachPts, pullbackPts);
             if (t != null) {
                 fired.add(t);
             }
@@ -202,7 +222,7 @@ public final class LvnApproachAlert {
     private void syncProbes(String market) {
         LvnLevelsState.MarketLevels lv = LvnLevelsState.levelsFor(market);
         Set<String> keep = new HashSet<>();
-        if (cfg.watchLvn && lv != null) {
+        if (lv != null && cfg.watchLvn) {
             addLevelProbes(market, "LVN", lv.lvnAbove, keep);
             addLevelProbes(market, "LVN", lv.lvnBelow, keep);
         }
@@ -242,7 +262,7 @@ public final class LvnApproachAlert {
         return market + "|" + kind + "|" + ticks;
     }
 
-    private Tag updateProbe(Probe p, double mid, long nowNs, double approachPts, double pullbackPts, long coolNs) {
+    private Tag updateProbe(Probe p, double mid, long nowNs, double approachPts, double pullbackPts) {
         if (nowNs < p.cooldownUntilNs) {
             return null;
         }
@@ -254,8 +274,10 @@ public final class LvnApproachAlert {
                 p.wasInside = false;
                 p.dirty = false;
                 p.minDistOutside = dist;
+                p.armedSide = mid < p.levelPx ? 1 : -1;
             } else if (dist + 1e-9 < p.minDistOutside) {
                 p.minDistOutside = dist;
+                p.armedSide = mid < p.levelPx ? 1 : -1;
             } else if (pullbackPts > 0 && dist - p.minDistOutside >= pullbackPts - 1e-9) {
                 // Pulled back away from the level by ≥ Pullback while approaching.
                 p.dirty = true;
@@ -274,28 +296,18 @@ public final class LvnApproachAlert {
             // Need to leave the band and re-approach cleanly.
             return null;
         }
+        if (p.armedSide == 0) {
+            p.armedSide = mid < p.levelPx ? 1 : -1;
+        }
 
-        int side = mid < p.levelPx ? 1 : -1;
-        Tag tag = new Tag(p.market, p.kind, p.levelPx, mid, side, nowNs);
-        p.cooldownUntilNs = nowNs + coolNs;
+        Tag tag = new Tag(p.market, p.kind, p.levelPx, mid, p.armedSide, nowNs);
+        // Consume this approach leg (must leave band before another attempt).
+        // Cooldown is applied only if the alert actually emits.
         p.seenOutside = false;
         p.wasInside = true;
         p.dirty = false;
         p.minDistOutside = Double.POSITIVE_INFINITY;
         return tag;
-    }
-
-    private void expirePendings(long nowNs) {
-        long winNs = cfg.corrWindowSec * 1_000_000_000L;
-        if (pendingEs != null && nowNs - pendingEs.tsNs > winNs) {
-            if (cfg.mode == Mode.CORRELATED) {
-                // expired unpaired — drop silently
-            }
-            pendingEs = null;
-        }
-        if (pendingNq != null && nowNs - pendingNq.tsNs > winNs) {
-            pendingNq = null;
-        }
     }
 
     private void routeTag(Tag tag, long nowNs) {
@@ -308,34 +320,127 @@ public final class LvnApproachAlert {
         }
 
         if (mode == Mode.CORRELATED) {
-            if ("ES".equals(tag.market)) {
-                pendingEs = tag;
-            } else {
-                pendingNq = tag;
+            // Live mid for the primary (tag.mid is the entry print).
+            double primaryMid = "NQ".equals(tag.market) ? lastMidNq : lastMidEs;
+            if (!Double.isFinite(primaryMid) || primaryMid <= 0) {
+                primaryMid = tag.midPx;
             }
-            if (pendingEs != null && pendingNq != null
-                    && Math.abs(pendingEs.tsNs - pendingNq.tsNs)
-                    <= cfg.corrWindowSec * 1_000_000_000L) {
-                emitCorr(pendingEs, pendingNq);
-                pendingEs = null;
-                pendingNq = null;
+            Tag primary = new Tag(tag.market, tag.kind, tag.levelPx, primaryMid,
+                    tag.approachSide, tag.tsNs);
+            double primaryProx = "NQ".equals(primary.market) ? cfg.nqCorrProxPts : cfg.esCorrProxPts;
+            if (!withinProx(primary, primaryProx) || isThroughLevel(primary)) {
+                // Already run away from / through the level — not sync S/R.
+                return;
             }
+
+            String other = "ES".equals(tag.market) ? "NQ" : "ES";
+            double otherMid = "NQ".equals(other) ? lastMidNq : lastMidEs;
+            double proxPts = "NQ".equals(other) ? cfg.nqCorrProxPts : cfg.esCorrProxPts;
+            Tag partner = nearestWatchedSameSide(other, otherMid, proxPts, primary.approachSide, nowNs);
+            if (partner == null || !withinProx(partner, proxPts) || isThroughLevel(partner)) {
+                return;
+            }
+            emitCorr(primary, partner);
+            applyCooldown(tag, nowNs);
             return;
         }
 
-        // Single / Either — fire immediately; also keep pending for a bonus corr log.
         emitSingle(tag);
-        if ("ES".equals(tag.market)) {
-            pendingEs = tag;
-        } else {
-            pendingNq = tag;
+        applyCooldown(tag, nowNs);
+    }
+
+    private static boolean withinProx(Tag t, double proxPts) {
+        return t != null && Math.abs(t.midPx - t.levelPx) <= proxPts + 1e-9;
+    }
+
+    /**
+     * True if mid has already broken through the level relative to the armed
+     * approach side (from-below → mid above level; from-above → mid below).
+     */
+    private static boolean isThroughLevel(Tag t) {
+        if (t == null) {
+            return true;
         }
-        if (pendingEs != null && pendingNq != null
-                && Math.abs(pendingEs.tsNs - pendingNq.tsNs)
-                <= cfg.corrWindowSec * 1_000_000_000L) {
-            emitCorr(pendingEs, pendingNq);
-            pendingEs = null;
-            pendingNq = null;
+        if (t.approachSide > 0) {
+            return t.midPx > t.levelPx + 1e-9;
+        }
+        return t.midPx < t.levelPx - 1e-9;
+    }
+
+    /**
+     * Closest watched LVN/DOP for {@code market} with |mid − level| ≤ maxPts
+     * and mid still on {@code requireSide} of that level.
+     */
+    private Tag nearestWatchedSameSide(
+            String market, double mid, double maxPts, int requireSide, long nowNs) {
+        if (!Double.isFinite(mid) || mid <= 0 || maxPts < 0 || requireSide == 0) {
+            return null;
+        }
+        String bestKind = null;
+        double bestPx = Double.NaN;
+        double bestDist = maxPts;
+        if (cfg.watchLvn) {
+            LvnLevelsState.MarketLevels lv = LvnLevelsState.levelsFor(market);
+            if (lv != null) {
+                if (lv.lvnAbove != null) {
+                    for (Double px : lv.lvnAbove) {
+                        if (px == null || !Double.isFinite(px) || px <= 0 || !sideMatch(mid, px, requireSide)) {
+                            continue;
+                        }
+                        double d = Math.abs(mid - px);
+                        if (d <= bestDist + 1e-9) {
+                            bestKind = "LVN";
+                            bestPx = px;
+                            bestDist = d;
+                        }
+                    }
+                }
+                if (lv.lvnBelow != null) {
+                    for (Double px : lv.lvnBelow) {
+                        if (px == null || !Double.isFinite(px) || px <= 0 || !sideMatch(mid, px, requireSide)) {
+                            continue;
+                        }
+                        double d = Math.abs(mid - px);
+                        if (d <= bestDist + 1e-9) {
+                            bestKind = "LVN";
+                            bestPx = px;
+                            bestDist = d;
+                        }
+                    }
+                }
+            }
+        }
+        if (cfg.watchDop) {
+            double dop = LvnLevelsState.dopFor(market);
+            if (Double.isFinite(dop) && dop > 0 && sideMatch(mid, dop, requireSide)) {
+                double d = Math.abs(mid - dop);
+                if (d <= bestDist + 1e-9) {
+                    bestKind = "DOP";
+                    bestPx = dop;
+                }
+            }
+        }
+        if (bestKind == null || !Double.isFinite(bestPx)) {
+            return null;
+        }
+        return new Tag(market, bestKind, bestPx, mid, requireSide, nowNs);
+    }
+
+    /** Mid still on the required side of level (or exactly at it). */
+    private static boolean sideMatch(double mid, double level, int requireSide) {
+        if (requireSide > 0) {
+            return mid <= level + 1e-9;
+        }
+        return mid >= level - 1e-9;
+    }
+
+    private void applyCooldown(Tag tag, long nowNs) {
+        if (tag == null || cfg.cooldownSec <= 0) {
+            return;
+        }
+        Probe p = probes.get(keyOf(tag.market, tag.kind, tag.levelPx));
+        if (p != null) {
+            p.cooldownUntilNs = nowNs + cfg.cooldownSec * 1_000_000_000L;
         }
     }
 
@@ -344,26 +449,28 @@ public final class LvnApproachAlert {
         String msg = String.format(Locale.US,
                 "APPROACH %s %s=%.2f mid=%.2f %s",
                 t.market, t.kind, t.levelPx, t.midPx, dir);
-        emit(new Event(false, t, null, msg));
+        String reason = t.market + " cross " + t.kind;
+        emit(new Event(false, t, null, msg, reason));
     }
 
-    private void emitCorr(Tag a, Tag b) {
-        Tag es = "ES".equals(a.market) ? a : b;
-        Tag nq = "NQ".equals(a.market) ? a : b;
+    private void emitCorr(Tag crossed, Tag partner) {
+        Tag es = "ES".equals(crossed.market) ? crossed : partner;
+        Tag nq = "NQ".equals(crossed.market) ? crossed : partner;
         String msg = String.format(Locale.US,
-                "APPROACH CORRELATED ES %s=%.2f mid=%.2f + NQ %s=%.2f mid=%.2f",
-                es.kind, es.levelPx, es.midPx, nq.kind, nq.levelPx, nq.midPx);
-        emit(new Event(true, es, nq, msg));
+                "APPROACH CORRELATED %s %s=%.2f mid=%.2f | partner %s %s=%.2f mid=%.2f (prox)",
+                crossed.market, crossed.kind, crossed.levelPx, crossed.midPx,
+                partner.market, partner.kind, partner.levelPx, partner.midPx);
+        String dir = crossed.approachSide > 0 ? "from-below" : "from-above";
+        String reason = crossed.market + " cross " + crossed.kind
+                + ", " + partner.market + " approach " + partner.kind
+                + " (" + dir + ")";
+        emit(new Event(true, es, nq, msg, reason));
     }
 
     private void emit(Event ev) {
         Log.info("LVN Levels " + ev.message);
         if (cfg.sound) {
-            try {
-                Toolkit.getDefaultToolkit().beep();
-            } catch (Throwable ignored) {
-                // headless / restricted
-            }
+            playAlertSound();
         }
         Consumer<Event> l = listener;
         if (l != null) {
@@ -372,6 +479,54 @@ public final class LvnApproachAlert {
             } catch (RuntimeException ex) {
                 Log.info("LVN Levels alert listener failed: " + ex.getMessage());
             }
+        }
+    }
+
+    /**
+     * Loud two-tone chirp (not the quiet OS beep). Runs off the feed thread.
+     */
+    private static void playAlertSound() {
+        Thread t = new Thread(() -> {
+            try {
+                // High / higher / high — ~0.9s total, hard to miss over market noise.
+                double[] freqs = {880.0, 1320.0, 880.0, 1320.0, 1760.0};
+                int[] ms = {140, 140, 140, 140, 220};
+                for (int i = 0; i < freqs.length; i++) {
+                    playTone(freqs[i], ms[i]);
+                    Thread.sleep(40L);
+                }
+            } catch (Throwable ignored) {
+                // no audio device / interrupted
+            }
+        }, "LvnApproachBeep");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static void playTone(double freqHz, int durationMs) throws Exception {
+        float sampleRate = 22050f;
+        int n = Math.max(1, (int) (sampleRate * durationMs / 1000.0));
+        byte[] buf = new byte[n];
+        double amp = 0.85;
+        for (int i = 0; i < n; i++) {
+            // Short attack/release so it doesn't click; full mid amplitude.
+            double env = 1.0;
+            int edge = Math.min(80, n / 8);
+            if (i < edge) {
+                env = i / (double) edge;
+            } else if (i > n - edge) {
+                env = (n - i) / (double) edge;
+            }
+            double sample = Math.sin(2.0 * Math.PI * freqHz * i / sampleRate) * amp * env;
+            buf[i] = (byte) Math.round(sample * 127.0);
+        }
+        AudioFormat fmt = new AudioFormat(sampleRate, 8, 1, true, false);
+        try (SourceDataLine line = AudioSystem.getSourceDataLine(fmt)) {
+            line.open(fmt);
+            line.start();
+            line.write(buf, 0, buf.length);
+            line.drain();
+            line.stop();
         }
     }
 }

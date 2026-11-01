@@ -1,0 +1,54 @@
+name: EXP-0100
+hypothesis: H91
+title: Raw MAT keep when both ES+NQ above/below dVPOC+DOP (host-gate dig)
+description: >
+  Ungated MAT kept only when both markets agree with the trade side relative
+  to as-of IRT developing VPOC (2nd dVPOC) and DOP: long iff NQ and ES last
+  prints are both ≥ dVPOC and ≥ DOP; short iff both ≤ both levels. Inclusive.
+  Missing any level → drop. Dig host gates ∈ {none, vwap, trend=1, vwap+trend}.
+  Primary = align × host none; twin = ungated base × none. Host neighbours
+  descriptive — no promote if primary fails.
+
+detector: mat_vpoc_dop_align  # runner: research/mat_context/exp_0100_mat_vpoc_dop_align.py
+window: "UK 14:30-17:00"
+exclude_sessions: ["200626", "220626", "300326", "smoke_synthetic"]
+is_definition: DIG4_23d
+
+align:
+  markets: [NQ, ES]
+  levels: [dVPOC, DOP]
+  inclusive: true
+  host_dig: [none, vwap, trend, frozen]
+
+arms: [base, align, anti, null]
+primary: align
+twin: base
+primary_host: none
+
+raw_mat:
+  es_stamp: causal
+  gate: none
+  brackets: "vol k=1 floor=6 cap=30 symmetric"
+  commission_pts_rt: 0.25
+  slip_sensitivity_ticks: [0.0, 1.0, 2.0]
+  flat_only: true
+  signal_cooldown_sec: 5.0
+
+horizons_ms: [10000, 60000, 300000]
+point_targets_nq: [5, 10, 20]
+
+stages:
+  stage0: "truncation; park if align signals < 50 or resim trades < 20"
+  stage1: "align - base >= +1.0pt @60s and >= +2.0pt @300s, beats null @60s"
+  stage2: "OOS net > 0, avg >= ungated base + 1.0, avg > twin, avg > random-keep p90, n_OOS >= 50 (primary host=none); dig table for vwap/trend/frozen"
+
+kill:
+  min_primary_signals: 50
+  min_resim_trades: 20
+  min_oos_trades_promote: 50
+  min_avg_lift_pts: 1.0
+  stage1_lift_60s_pts: 1.0
+  stage1_lift_300s_pts: 2.0
+
+placebo_seed: 100
+run: false

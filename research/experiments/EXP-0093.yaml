@@ -1,0 +1,53 @@
+name: EXP-0093
+hypothesis: H84
+title: Raw MAT keep-gate when ES is near as-of IRT LVN2/LVN3
+description: >
+  At an ungated (raw) MAT stamp (causal ES stamp; no trend/VWAP), keep the
+  signal only if ES's last print is within ±2 pts of the nearest as-of
+  IRT LVN2/LVN3 (causal bar ts <= stamp). Distance-only location filter —
+  not H38 fade geometry. Twin = far (dist > 2). Frozen trend+VWAP under
+  the same keep-gate is descriptive only. No band sweep. Independent of
+  EXP-0092 (NQ vicinity); reuses shared annotate cache.
+
+detector: mat_lvn_vicinity_es  # runner: research/mat_context/exp_0092_mat_lvn_vicinity.py --market es
+window: "UK 14:30-17:00"
+exclude_sessions: ["200626", "220626", "300326", "smoke_synthetic"]
+is_definition: DIG4_23d
+
+vicinity:
+  market: ES
+  band_pts: 2.0
+  levels: [LVN2, LVN3]
+  host: ungated
+
+arms: [base, near, far]
+primary: near
+twin: far
+
+raw_mat:
+  es_stamp: causal
+  gate: none
+  brackets: "vol k=1 floor=6 cap=30 symmetric"
+  commission_pts_rt: 0.25
+  slip_sensitivity_ticks: [0.0, 1.0, 2.0]
+  flat_only: true
+  signal_cooldown_sec: 5.0
+
+horizons_ms: [10000, 60000, 300000]
+point_targets_nq: [5, 10, 20]
+
+stages:
+  stage0: "truncation; park if near signals < 50 or resim trades < 20"
+  stage1: "near - far >= +1.0pt @60s and >= +2.0pt @300s, beats null @60s"
+  stage2: "OOS net > 0, avg >= ungated base + 1.0, avg > far twin, avg > random-keep p90, n_OOS >= 50"
+
+kill:
+  min_primary_signals: 50
+  min_resim_trades: 20
+  min_oos_trades_promote: 50
+  min_avg_lift_pts: 1.0
+  stage1_lift_60s_pts: 1.0
+  stage1_lift_300s_pts: 2.0
+
+placebo_seed: 93
+run: false
