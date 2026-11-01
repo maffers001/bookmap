@@ -35,6 +35,7 @@ import velox.api.layer1.simplified.CustomModule;
 import velox.api.layer1.simplified.DepthDataListener;
 import velox.api.layer1.simplified.HistoricalModeListener;
 import velox.api.layer1.simplified.Indicator;
+import velox.api.layer1.simplified.IndicatorModifiable;
 import velox.api.layer1.simplified.InitialState;
 import velox.api.layer1.simplified.IntervalListener;
 import velox.api.layer1.simplified.Intervals;
@@ -50,6 +51,9 @@ import velox.api.layer1.simplified.TradeDataListener;
  * <p>Node detection is deferred until {@link #onRealtimeStart()} so historical
  * "Loading events" is not blocked by VAP rebuilds. Profile accumulates from DOP
  * open (same UK clock as the DOP line).
+ *
+ * <p>DOP / VPOC / VAH / VAL use {@link IndicatorModifiable} so catchup/scrub can
+ * paint timestamped history from session open; LVN/HVN stay live-only lanes.
  */
 @Layer1SimpleAttachable
 @Layer1StrategyName("Levels")
@@ -91,11 +95,11 @@ public class LvnLevelsModule implements
     private final LevelSlot[] lvnBelowSlot = new LevelSlot[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
     private final LevelSlot[] hvnAboveSlot = new LevelSlot[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
     private final LevelSlot[] hvnBelowSlot = new LevelSlot[LvnStackFile.MAX_DISPLAY_EACH_SIDE];
-    private Indicator dopMarker;
+    private IndicatorModifiable dopMarker;
     private final LevelSlot dopSlot = new LevelSlot();
-    private Indicator vpocMarker;
-    private Indicator vahMarker;
-    private Indicator valMarker;
+    private IndicatorModifiable vpocMarker;
+    private IndicatorModifiable vahMarker;
+    private IndicatorModifiable valMarker;
     private final LevelSlot vpocSlot = new LevelSlot();
     private final LevelSlot vahSlot = new LevelSlot();
     private final LevelSlot valSlot = new LevelSlot();
@@ -103,6 +107,8 @@ public class LvnLevelsModule implements
     /** Developing session volume profile (VPOC / VA) from DOP open. */
     private MarketProfileTracker profileTracker;
     private boolean profileSessionOpen;
+    /** Throttle catchup painting to ~250ms of feed time. */
+    private long lastCatchupPlotNs;
 
     /**
      * One Bookmap indicator lane bound to a fixed chart price until that price
@@ -167,14 +173,14 @@ public class LvnLevelsModule implements
             hvnAboveSlot[i] = new LevelSlot();
             hvnBelowSlot[i] = new LevelSlot();
         }
-        dopMarker = api.registerIndicator("DOP", GraphType.PRIMARY, Double.NaN, true, true);
+        dopMarker = api.registerIndicatorModifiable("DOP", GraphType.PRIMARY, Double.NaN, true, true);
         styleLevelLine(dopMarker, COL_DOP, 55, 6); // 2× LVN/HVN width
         dopSlot.boundPts = dopSlot.plottedPts = dopSlot.iconPts = Double.NaN;
         dopSlot.breaking = false;
 
-        vpocMarker = api.registerIndicator("VPOC", GraphType.PRIMARY, Double.NaN, true, true);
-        vahMarker = api.registerIndicator("VAH", GraphType.PRIMARY, Double.NaN, true, true);
-        valMarker = api.registerIndicator("VAL", GraphType.PRIMARY, Double.NaN, true, true);
+        vpocMarker = api.registerIndicatorModifiable("VPOC", GraphType.PRIMARY, Double.NaN, true, true);
+        vahMarker = api.registerIndicatorModifiable("VAH", GraphType.PRIMARY, Double.NaN, true, true);
+        valMarker = api.registerIndicatorModifiable("VAL", GraphType.PRIMARY, Double.NaN, true, true);
         styleLevelLine(vpocMarker, COL_VPOC, 52);
         styleLevelLine(vahMarker, COL_VA, 48);
         styleLevelLine(valMarker, COL_VA, 48);
@@ -224,8 +230,13 @@ public class LvnLevelsModule implements
         realtimeStarted = false;
         pendingRebuild = true;
         dopCaptured = false;
-        clearSlot(dopSlot, dopMarker);
+        lastCatchupPlotNs = 0;
+        resetSlotState(dopSlot);
+        clearModifiableHistory(dopMarker);
         resetProfile();
+        clearModifiableHistory(vpocMarker);
+        clearModifiableHistory(vahMarker);
+        clearModifiableHistory(valMarker);
         LvnLiveVap vap = LvnLevelsState.vapFor(instrumentRole);
         if (vap != null) {
             vap.clearLive();
@@ -248,9 +259,14 @@ public class LvnLevelsModule implements
         if (lastUkDate == null || !day.equals(lastUkDate)) {
             lastUkDate = day;
             dopCaptured = false;
-            clearSlot(dopSlot, dopMarker);
+            lastCatchupPlotNs = 0;
+            resetSlotState(dopSlot);
+            clearModifiableHistory(dopMarker);
             LvnLevelsState.clearDop(instrumentRole);
             resetProfile();
+            clearModifiableHistory(vpocMarker);
+            clearModifiableHistory(vahMarker);
+            clearModifiableHistory(valMarker);
             pendingRebuild = true;
             thresholdsDirty = true;
         }
@@ -305,6 +321,8 @@ public class LvnLevelsModule implements
         if (vap != null && vap.hasSeed()) {
             vap.onTradeNs(tick, size, nowNs);
         }
+        // Paint DOP/MP through catchup so scrub history starts at session open.
+        maybePlotSessionLinesDuringCatchup();
         // Alert on trade path too — 250ms interval alone can miss a fast touch.
         if (realtimeStarted && nowNs > 0) {
             LvnLevelsState.onMidUpdate(instrumentRole, lastMidPts, nowNs);
@@ -318,8 +336,12 @@ public class LvnLevelsModule implements
 
     @Override
     public void onInterval() {
-        if (!(isEs() || isNq()) || !realtimeStarted) {
-            // Skip all work during Loading events / scrub catchup.
+        if (!(isEs() || isNq())) {
+            return;
+        }
+        if (!realtimeStarted) {
+            // No LVN node work during Loading/scrub — only session lines (cheap).
+            maybePlotSessionLinesDuringCatchup();
             return;
         }
         maybeRebuild(pendingRebuild);
@@ -327,6 +349,19 @@ public class LvnLevelsModule implements
         if (Double.isFinite(lastMidPts) && lastMidPts > 0 && nowNs > 0) {
             LvnLevelsState.onMidUpdate(instrumentRole, lastMidPts, nowNs);
         }
+    }
+
+    /** Timestamped DOP/MP paint while Bookmap re-feeds history (replay scrub). */
+    private void maybePlotSessionLinesDuringCatchup() {
+        if (realtimeStarted || nowNs <= 0) {
+            return;
+        }
+        if (lastCatchupPlotNs > 0 && nowNs - lastCatchupPlotNs < 250_000_000L) {
+            return;
+        }
+        lastCatchupPlotNs = nowNs;
+        plotDopLine();
+        plotProfileLevels();
     }
 
     /** Apply / seed-bind hook — queue only; the interval tick does the work off the EDT. */
@@ -395,15 +430,34 @@ public class LvnLevelsModule implements
         if (profileTracker != null) {
             profileTracker.reset();
         }
-        // Hide only once feed time is live; otherwise just clear slot state.
-        if (nowNs > 0) {
-            clearSlot(vpocSlot, vpocMarker);
-            clearSlot(vahSlot, vahMarker);
-            clearSlot(valSlot, valMarker);
+        resetSlotState(vpocSlot);
+        resetSlotState(vahSlot);
+        resetSlotState(valSlot);
+    }
+
+    private static void clearModifiableHistory(IndicatorModifiable ind) {
+        if (ind == null) {
+            return;
+        }
+        try {
+            ind.clear(Long.MIN_VALUE, Long.MAX_VALUE);
+        } catch (Throwable ignored) {
+            // older runtime / nothing to clear
+        }
+    }
+
+    /**
+     * Live {@code addPoint(value)}; during catchup {@code addPoint(ts, value)} so
+     * replay scrub draws history from session open instead of only from the scrub point.
+     */
+    private void emitPoint(IndicatorModifiable ind, double axisOrNan) {
+        if (ind == null || nowNs <= 0) {
+            return;
+        }
+        if (realtimeStarted) {
+            ind.addPoint(axisOrNan);
         } else {
-            resetSlotState(vpocSlot);
-            resetSlotState(vahSlot);
-            resetSlotState(valSlot);
+            ind.addPoint(nowNs, axisOrNan);
         }
     }
 
@@ -442,7 +496,6 @@ public class LvnLevelsModule implements
         LvnLevelsState.MarketKnobs knobs = LvnLevelsState.knobsFor(instrumentRole);
         boolean showLvn = LvnLevelsState.showLvn();
         boolean showHvn = LvnLevelsState.showHvn();
-        boolean showDop = LvnLevelsState.showDop();
 
         plotStableGroup(lvnAbove, lvnAboveSlot, showLvn && lv != null ? lv.lvnAbove : null,
                 knobs.lvnAbove, COL_LVN);
@@ -453,23 +506,34 @@ public class LvnLevelsModule implements
         plotStableGroup(hvnBelow, hvnBelowSlot, showHvn && lv != null ? lv.hvnBelow : null,
                 knobs.hvnBelow, COL_HVN);
 
-        // Do not draw the DOP line until today's open has printed.
+        plotDopLine();
+        plotProfileLevels();
+    }
+
+    private void plotDopLine() {
         if (thresholdsDirty) {
             refreshThresholds();
         }
+        boolean showDop = LvnLevelsState.showDop();
         boolean pastOpen = dopCaptured
                 && lastUkDate != null
                 && dopOpenNs != Long.MAX_VALUE
                 && nowNs >= dopOpenNs;
         double dop = LvnLevelsState.dopFor(instrumentRole);
-        if (showDop && pastOpen && Double.isFinite(dop) && dop > 0) {
+        if (showDop && pastOpen && Double.isFinite(dop) && dop > 0 && nowNs > 0) {
             dopSlot.boundPts = dop;
-            plotSlot(dopMarker, dopSlot, COL_DOP, true);
-        } else {
-            clearSlot(dopSlot, dopMarker);
+            emitPoint(dopMarker, toPrimaryAxis(dop));
+            dopSlot.plottedPts = dop;
+            if (realtimeStarted
+                    && (Double.isNaN(dopSlot.iconPts) || Math.abs(dopSlot.iconPts - dop) > 1e-6)) {
+                BufferedImage icon = renderPriceIcon(formatPriceLabel(dop), COL_DOP);
+                dopMarker.addIcon(toPrimaryAxis(dop), icon, 4, icon.getHeight() / 2);
+                dopSlot.iconPts = dop;
+            }
+        } else if (nowNs > 0) {
+            emitPoint(dopMarker, Double.NaN);
+            resetSlotState(dopSlot);
         }
-
-        plotProfileLevels();
     }
 
     private void plotProfileLevels() {
@@ -481,29 +545,27 @@ public class LvnLevelsModule implements
         boolean ready = LvnLevelsState.marketProfileEnabled()
                 && profileSessionOpen
                 && mp.ready();
-        plotMpSlot(vpocMarker, vpocSlot, ready && LvnLevelsState.showVpoc(), mp.vpocPts, COL_VPOC);
-        plotMpSlot(vahMarker, vahSlot, ready && LvnLevelsState.showVah(), mp.vahPts, COL_VA);
-        plotMpSlot(valMarker, valSlot, ready && LvnLevelsState.showVal(), mp.valPts, COL_VA);
+        plotMpSlot(vpocMarker, vpocSlot, ready && LvnLevelsState.showVpoc(), mp.vpocPts);
+        plotMpSlot(vahMarker, vahSlot, ready && LvnLevelsState.showVah(), mp.vahPts);
+        plotMpSlot(valMarker, valSlot, ready && LvnLevelsState.showVal(), mp.valPts);
     }
 
     /**
-     * Developing MP levels must stay continuous: every interval emits the current
-     * price with no NaN “break” (that LVN trick leaves gaps when VAH/VAL/VPOC moves).
-     * Plain line only — no price icons.
+     * Continuous developing MP line (no LVN NaN-break, no icons). Catchup uses
+     * timestamped points so scrubbed replay shows the line from session open.
      */
-    private void plotMpSlot(Indicator ind, LevelSlot slot, boolean show, double pts, Color color) {
+    private void plotMpSlot(IndicatorModifiable ind, LevelSlot slot, boolean show, double pts) {
         if (ind == null) {
             return;
         }
         if (!show || !Double.isFinite(pts) || !(pts > 0) || nowNs <= 0) {
             if (nowNs > 0) {
-                ind.addPoint(Double.NaN);
+                emitPoint(ind, Double.NaN);
             }
             resetSlotState(slot);
             return;
         }
-        double axis = toPrimaryAxis(pts);
-        ind.addPoint(axis);
+        emitPoint(ind, toPrimaryAxis(pts));
         slot.boundPts = pts;
         slot.plottedPts = pts;
         slot.iconPts = Double.NaN;
